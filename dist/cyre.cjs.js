@@ -1,5 +1,7 @@
 'use strict';
 
+Object.defineProperty(exports, '__esModule', { value: true });
+
 const middleware = {
     insert: (payload, dataDefinitions) => {
         const data = {};
@@ -21,7 +23,7 @@ const dataDefinitions = {
     id: (x) => {
         return (typeof x === 'string') ? x : 0
     },
-    type: (x) => {
+    action: (x) => {
         return (typeof x === 'string') ? x : 0
     },
     payload: (x) => {
@@ -53,6 +55,27 @@ const dataDefinitions = {
 
 // @ts-check
 
+/* 
+
+    Neural Line
+    Time based event manager
+    C.Y.R.E
+    Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
+    EVENT HANDLER 01 - 01 - 2019 
+
+
+
+    eg simple use
+    cyre.dispatch{id: uber, action: call, payload: 004485648634}
+    cyre.on('call', callTaxi)
+    const callTaxi =(number)=>{
+      console.log('calling taxi on ', number)  
+    }
+
+*/
+
+
+
 class Cyre {
   constructor (id, interval) {
     this.id = id;
@@ -71,23 +94,21 @@ class Cyre {
   }
 
   kick(fn) {
-    for (let type in this.events) {
-      return this.events[type].has(fn) ? { ok: true, data: this.events[type].delete(fn) } : {
+    for (let action in this.events) {
+      return this.events[action].has(fn) ? { ok: true, data: this.events[action].delete(fn) } : {
         ok: false,
         data: 'Nothing to kick'
       };
     }
   }
 
-
   list() {
-    for (let type in this.events) {
-      for (let fn of this.events[type]) {
+    for (let action in this.events) {
+      for (let fn of this.events[action]) {
         this._log(fn.name, 1);
       }
     }
   }
-
 
   clr() {
     return this.timeline.clear();
@@ -102,27 +123,27 @@ class Cyre {
     return this.timeline.has(id) ? this.timeline.delete(id) : false;
   }
 
-  _wait(type) {
+  _wait(action) {
     for (let id of this.waitingList) {
-      this.events[this.party[id].type] ? (this.waitingList.delete(id), this._initiate(id)) : console.log('@wait list nop');
+      this.events[this.party[id].action] ? (this.waitingList.delete(id), this._initiate(id)) : console.log('@wait list nop');
     }
   }
 
-  on(type, fn, group = []) {
+  on(action, fn, group = []) {
     return new Promise((success, reject) => {
       (typeof fn === 'function')
         ? success({
           ok: true,
-          data: this.events[type] ? this.events[type].add([fn]) : (this.events[type] = new Set([fn]), this._wait(type)),
+          data: this.events[action] ? this.events[action].add([fn]) : (this.events[action] = new Set([fn]), this._wait(action)),
 
         })
-        : reject({ ok: false, data: 'invalid function', msg: console.log(type, fn) });
+        : reject({ ok: false, data: 'invalid function', msg: console.log(action, fn) });
     })
   }
 
-  emit(type, data, response, group = 0) {
-    for (const fn of this.events[type]) {
-      fn(data, response); //add respise
+  emit(action, data, response, group = 0) {
+    for (const fn of this.events[action]) {
+      fn(data, response); //add response
     }
     // return response;
   }
@@ -169,7 +190,7 @@ class Cyre {
     return { ok: true, data: this.timeline.add(id) }
   }
 
-  _doneAction(id) {
+  _taskComplete(id) {
     return { ok: true, done: this.timeline.delete(id) }
   }
 
@@ -179,15 +200,15 @@ class Cyre {
   }
 
   _action(id) {
-    return this.emit(this.party[id].type, this.party[id].payload, this.party[id].repeat > 0 ? this._repeatAction(id) : this._doneAction(id), this.party[id].group)
+    return this.emit(this.party[id].action, this.party[id].payload, this.party[id].repeat > 0 ? this._repeatAction(id) : this._taskComplete(id), this.party[id].group)
   }
 
   _initiate(id) {
     return this.party[id].timeout === 0 ? this._action(id) : this._addToTimeline(id)
   }
 
-  _dispatch(id, type) {
-    this.events[type] ? this._initiate(id) : { ok: false, data: this.waitingList.add(id) };
+  _dispatch(id, action) {
+    this.events[action] ? this._initiate(id) : { ok: false, data: this.waitingList.add(id) };
   }
 
   _createChannel(data, dataDefinitions$$1) {
@@ -198,27 +219,35 @@ class Cyre {
     return { ok: true, data: data }
   }
 
+
+  // User interfaces
+
   channel(x = {}) {
-    if (this.party[x.id]) return console.error('@qi.channel: chennel already exist', x.id)
+    if (this.party[x.id]) return console.error('@cyre.channel: channel already exist', x.id)
     return this._createChannel(x, dataDefinitions)
   }
 
-  lift(id, payload = 0) {
-    this.party[id] ? (this.party[id].payload = payload, this._dispatch(id, this.party[id].type)) : console.error('@qi.lift : channel not found', id);
+  call(id, payload = 0) {
+    this.party[id] ? (this.party[id].payload = payload, this._dispatch(id, this.party[id].action)) : console.error('@cyre.call : channel not found', id);
   }
+
+  //dispatch accepts object type input eg {id: uber, action: call, payload: 0025100124}
 
   dispatch(data = {}) {
     data.id = data.id ? data.id : 0;
-    data.type ? 0 : console.log('@dispatch : data type requierd for - ', data.id);
-    return this._createChannel(data, dataDefinitions).ok ? { ok: true, data: this._dispatch(data.id, data.type) } : { ok: true, data: data.id }
+    data.action ? 0 : console.log('@dispatch : data action required for - ', data.id);
+    return this._createChannel(data, dataDefinitions).ok ? { ok: true, data: this._dispatch(data.id, data.action) } : { ok: true, data: data.id }
   }
 
-  respond(id = 0, type = 0, payload = 0, interval = 0, repeat = 0) {
-    const data = { id, type, payload, interval, repeat };
+  //respond accepts array of input eg { uber,  call, 0025100124}
+  respond(id = 0, action = 0, payload = 0, interval = 0, repeat = 0) {
+    const data = { id, action, payload, interval, repeat };
     this._createChannel(data, dataDefinitions);
-    this._dispatch(data.id, data.type);
+    this._dispatch(data.id, data.action);
     return { ok: true, data: data.id }
   }
 }
+const cyre = new Cyre();
 
-module.exports = Cyre;
+exports.Cyre = Cyre;
+exports.cyre = cyre;

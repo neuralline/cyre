@@ -1,6 +1,55 @@
+const middleware = {
+    insert: (payload, dataDefinitions) => {
+        const data = {};
+        for (const type in payload) {
+            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        }
+        return { ok: true, data }
+    },
+    update: (payload, dataDefinitions) => {
+        const data = {};
+        for (const type in payload) {
+            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        }
+        return { ok: true, data }
+    }
+};
+
+const dataDefinitions = {
+    id: (x) => {
+        return (typeof x === 'string') ? x : 0
+    },
+    action: (x) => {
+        return (typeof x === 'string') ? x : 0
+    },
+    payload: (x) => {
+        return x || 0
+    },
+    interval: (x) => {
+        return Number.isInteger(x) && x || 0;
+    },
+    repeat: (x) => {
+        return Number.isInteger(x) && x || 0;
+    },
+    group: (x) => {
+        return (typeof x === 'string') ? x : 0
+    },
+    callback: (x) => {
+        return (typeof x === 'function') ? x : 0
+    },
+    log: (x) => {
+        return (typeof x === 'boolean') ? x : false
+    },
+    middleware: (x) => {
+        return (typeof x === 'string') ? x : 'insert'
+    },
+    /* at: (x) => {
+        const at = new Date().
+    }
+ */
+};
+
 // @ts-check
-import middleware from './components/middleware'
-import dataDefinitions from './components/data-definitions'
 
 /* 
 
@@ -23,7 +72,7 @@ import dataDefinitions from './components/data-definitions'
 
 
 
-export class Cyre {
+class Cyre {
   constructor (id, interval) {
     this.id = id;
     this.interval = interval || 16;
@@ -118,17 +167,17 @@ export class Cyre {
       };
       this.interval = this._recuperator(result, this.interval).data;
     }
-    this.recuperating = requestAnimationFrame(this._quartz.bind(this))
+    this.recuperating = requestAnimationFrame(this._quartz.bind(this));
   }
 
   _processingUnit(timeline, precision) {
     return new Promise((success) => {
-      let info = { ok: true, data: [], id: [] }
+      let info = { ok: true, data: [], id: [] };
       for (const id of timeline) {
-        this.party[id].timeout -= precision
-        info.data.push(this.party[id].timeout)
+        this.party[id].timeout -= precision;
+        info.data.push(this.party[id].timeout);
         info.id.push(id);
-        this.party[id].timeout <= precision ? this._action(id) : false
+        this.party[id].timeout <= precision ? this._action(id) : false;
         success(info);
       }
     })
@@ -142,7 +191,7 @@ export class Cyre {
   }
 
   _repeatAction(id) {
-    this.party[id].timeout = this.party[id].interval
+    this.party[id].timeout = this.party[id].interval;
     return { ok: true, done: false, data: --this.party[id].repeat }
   }
 
@@ -155,7 +204,7 @@ export class Cyre {
   }
 
   _dispatch(id, action) {
-    this.events[action] ? this._initiate(id) : { ok: false, data: this.waitingList.add(id) }
+    this.events[action] ? this._initiate(id) : { ok: false, data: this.waitingList.add(id) };
   }
 
   _createChannel(data, dataDefinitions$$1) {
@@ -188,11 +237,12 @@ export class Cyre {
 
   //respond accepts array of input eg { uber,  call, 0025100124}
   respond(id = 0, action = 0, payload = 0, interval = 0, repeat = 0) {
-    const data = { id, action, payload, interval, repeat }
-    this._createChannel(data, dataDefinitions)
-    this._dispatch(data.id, data.action)
+    const data = { id, action, payload, interval, repeat };
+    this._createChannel(data, dataDefinitions);
+    this._dispatch(data.id, data.action);
     return { ok: true, data: data.id }
   }
 }
-export const cyre = new Cyre()
+const cyre = new Cyre();
 
+export { Cyre, cyre };
