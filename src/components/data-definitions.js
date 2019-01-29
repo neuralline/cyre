@@ -2,7 +2,7 @@ export const dataDefinitions = {
     id: (x) => {
         return (typeof x === 'string') ? x : 0
     },
-    action: (x) => {
+    type: (x) => {
         return (typeof x === 'string') ? x : 0
     },
     payload: (x) => {

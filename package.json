@@ -1,6 +1,6 @@
 {
   "name": "cyre",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "time based event manager for JavaScrip apps",
   "main": "dist/cyre.cjs.js",
   "module": "dist/cyre.esm.js",
