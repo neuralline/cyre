@@ -1,15 +1,15 @@
 const middleware = {
-    insert: (payload, dataDefinitions) => {
+    insert: (action, dataDefinitions) => {
         const data = {};
-        for (const type in payload) {
-            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        for (const attribute in action) {
+            data[attribute] = dataDefinitions[attribute] ? dataDefinitions[attribute](action[attribute]) : false;
         }
         return { ok: true, data }
     },
-    update: (payload, dataDefinitions) => {
+    update: (action, dataDefinitions) => {
         const data = {};
-        for (const type in payload) {
-            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        for (const attribute in action) {
+            data[attribute] = dataDefinitions[attribute] ? dataDefinitions[attribute](action[attribute]) : false;
         }
         return { ok: true, data }
     }
@@ -17,36 +17,37 @@ const middleware = {
 
 const dataDefinitions = {
     id: (x) => {
-        return (typeof x === 'string') ? x : 0
+        return (typeof x === 'string') ? x : null
     },
     type: (x) => {
-        return (typeof x === 'string') ? x : 0
+        return (typeof x === 'string') ? x : null
     },
     payload: (x) => {
-        return x || 0
+        return x || null
     },
     interval: (x) => {
-        return Number.isInteger(x) && x || 0;
+        return Number.isInteger(x) && x || 0
     },
     repeat: (x) => {
-        return Number.isInteger(x) && x || 0;
+        return Number.isInteger(x) && x || 0
     },
     group: (x) => {
-        return (typeof x === 'string') ? x : 0
+        return (typeof x === 'string') ? x : null
     },
     callback: (x) => {
-        return (typeof x === 'function') ? x : 0
+        return (typeof x === 'function') ? x : null
     },
     log: (x) => {
         return (typeof x === 'boolean') ? x : false
     },
     middleware: (x) => {
-        return (typeof x === 'string') ? x : 'insert'
+        return (typeof x === 'string') ? x : null
     },
-    /* at: (x) => {
-        const at = new Date().
+    at: (x) => {
+        // const at = new Date()
+        return false
     }
- */
+
 };
 
 // @ts-check
@@ -174,7 +175,7 @@ class Cyre {
   _createChannel(data, dataDefinitions$$1) {
     const condition = this.party[data.id] ? 'update' : 'insert';
     const result = middleware[condition](data, dataDefinitions$$1);
-    result.ok ? this.party[data.id] = result.data : { ok: false, data: console.log('@respond : major malfunctions ', data.id) };
+    result.ok ? this.party[data.id] = result.data : { ok: false, data: console.log('@createAction : major malfunctions ', data.id) };
     this.party[data.id].timeout = this.party[data.id].interval || 0;
     return { ok: true, data: data }
   }
@@ -221,15 +222,7 @@ class Cyre {
   }
 
   type(type, fn, group = []) {
-    return new Promise((success, reject) => {
-      (typeof fn === 'function')
-        ? success({
-          ok: true,
-          data: this.events[type] ? this.events[type].add([fn]) : (this.events[type] = new Set([fn]), this._wait(type)),
-
-        })
-        : reject({ ok: false, data: 'invalid function', msg: console.log(type, fn) });
-    })
+    this.on(type, fn, group = []);
   }
 
   channel(x = {}) {
@@ -242,19 +235,23 @@ class Cyre {
     return this._createChannel(x, dataDefinitions)
   }
 
-  call(id, payload = 0) {
+  emit(id = null, payload = null) {
     this.party[id] ? (this.party[id].payload = payload, this._dispatch(id, this.party[id].type)) : console.error('@cyre.call : channel not found', id);
+  }
+
+  call(id = null, payload = null) {
+    this.emit(id, payload = 0);
   }
 
   //dispatch accepts object type input eg {id: uber, type: call, payload: 0025100124}
   dispatch(data = {}) {
-    data.id = data.id ? data.id : 0;
+    data.id = data.id ? data.id : null;
     data.type ? 0 : console.log('@dispatch : data type required for - ', data.id);
     return this._createChannel(data, dataDefinitions).ok ? { ok: true, data: this._dispatch(data.id, data.type) } : { ok: true, data: data.id }
   }
 
   //respond accepts array of input eg { uber,  call, 0025100124}
-  respond(id = 0, type = 0, payload = 0, interval = 0, repeat = 0) {
+  respond(id = null, type = null, payload = null, interval = 0, repeat = 0) {
     const data = { id, type, payload, interval, repeat };
     this._createChannel(data, dataDefinitions);
     this._dispatch(data.id, data.type);
@@ -262,6 +259,6 @@ class Cyre {
   }
 }
 
-const cyre = new Cyre();
+const cyre = new Cyre('quantum-inceptions');
 
 export { Cyre, cyre };

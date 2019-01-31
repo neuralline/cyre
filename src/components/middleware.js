@@ -1,15 +1,15 @@
 export const middleware = {
-    insert: (payload, dataDefinitions) => {
+    insert: (action, dataDefinitions) => {
         const data = {};
-        for (const type in payload) {
-            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        for (const attribute in action) {
+            data[attribute] = dataDefinitions[attribute] ? dataDefinitions[attribute](action[attribute]) : false;
         }
         return { ok: true, data }
     },
-    update: (payload, dataDefinitions) => {
+    update: (action, dataDefinitions) => {
         const data = {};
-        for (const type in payload) {
-            data[type] = dataDefinitions[type] ? dataDefinitions[type](payload[type]) : false;
+        for (const attribute in action) {
+            data[attribute] = dataDefinitions[attribute] ? dataDefinitions[attribute](action[attribute]) : false;
         }
         return { ok: true, data }
     }

@@ -5,7 +5,7 @@
   ID and Time based event manager
   C.Y.R.E ~/`SAYER`/
   Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-  EVENT HANDLER with ID system 01 - 01 - 2019 
+  VERTICAL EVENT HANDLER with ID system  2019 
 
 ```
 
@@ -24,36 +24,45 @@ yarn add cyre
 ```
 
 ## Usage example
-```sh
-eg simple use- dispatch, on
-  cyre.dispatch{id: 'uber', type: 'call', payload: 'UBER-ID1'}
-  cyre.type('call', callUberFunction)
+```js
 
-  const callUberFunction =(number)=>{
-    console.log('calling taxi on ', number)  
+import {cyre} from 'cyre'
+
+/*
+  
+    {
+      cyre.action: 'predefine action with preconditions and with default payload',
+      cyre.on: 'link action.type with function' , 
+      cyre.emit: 'execute action by id'
+      cyre.dispatch:'define and execute action on demand'
+    }
+
+*/  
+//eg simple use:
+  cyre.on('call_uber', (UBER_ID)=>{
+    return uber.api(UBER_ID).request
   }
+  cyre.dispatch({id: 'uber', type: 'call_uber', payload: 'UBER-ID1'})
 
-
-  advance use- action, type , call
-
-    function:
-      const arrivalTimeFunction =(UBER-ID)=>{
-            eta = uber.api(UBER-ID)
+  //Advance use:
+    //function:
+      const arrivalTimeFunction =(UBER_ID)=>{
+           return uber.api(UBER_ID).eta
         }
 
     //applications:
       //link action with a function
-      cyre.type('check uber', arrivalTimeFunction)
+      cyre.on('check_uber', arrivalTimeFunction)
 
-      //predefine action and conditions with unique ID
-      cyre.action{id: 'check if my uber arrived', action: 'check uber', payload: 'UBER-ID1', interval: 60000, repeat: 5}        
+      //create action with unique ID
+      cyre.action({id: 'uber_eta', type: 'check_uber', payload: 'UBER-ID1'})      
     
-    //user interface: action creators/view model can use the ID to call that action with a new payload:
-     //this will run arrivalTimeFunction five times every one minute
-      cyre.call{'check if my uber arrived'}
+    //user interface: at action creators/view model
+      //execute action with default payload
+      cyre.emit{'uber_eta'}
 
-      //this will update the payload with new data and run arrivalTimeFunction five times every one minute
-      cyre.call{'check if my uber arrived', 'UBER-ID2'}
+      //execute action with new payload
+      cyre.emit{'uber_eta', 'UBER-ID2'}
 
 ```
 
@@ -61,24 +70,24 @@ eg simple use- dispatch, on
 ## Extra features
 
 
-```sh
+```js
 
-//Delay effect
-cyre.dispatch({ID : 'screen resize', type:'adjustScreen', interval: 400})
+//Delay effect/debounce/or throttle action
+cyre.action({id : 'screen resize', type:'adjustScreen', interval: 400})
 ```
 
-```sh
+```js
 
 //Repeat action
-cyre.dispatch({ID : 'api call', type:'apiServer', interval: 400, repeat: 10})
+cyre.action({id : 'api call', type:'apiServer', interval: 400, repeat: 10})
 ```
 
-```sh
+```js
 
 //Stop all iterating actions
 cyre.clr()
 ```
-```sh
+```js
 
 //Remove functions from listening
 cyre.kick(functionName)
@@ -87,6 +96,15 @@ cyre.kick(functionName)
 
 
 ## Release History
+
+
+## Made with Cyre
+
+cyre with React
+
+[https://cyre-react-demo.netlify.com/](cyre-react-demo)
+[https://holo-carousel.firebaseapp.com/](holo-carousel)
+
 
 
 * 1.0.0
