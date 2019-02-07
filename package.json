@@ -1,40 +1,44 @@
 {
-	"name": "cyre",
-	"version": "1.0.5",
-	"description": "time based event manager for JavaScrip apps",
-	"main": "dist/cyre.cjs.js",
-	"module": "dist/cyre.esm.js",
-	"browser": "dist/cyre.js",
-	"scripts": {
-		"build": "rollup -c",
-		"watch": "rollup -c -w",
-		"dev": "npm-run-all --parallel start watch",
-		"start": "serve public"
-	},
-	"author": "Darik Hart",
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/NeuralLine/cyre.git"
-	},
-	"devDependencies": {
-		"npm-run-all": "^4.1.5",
-		"rollup": "^1.1.2",
-		"rollup-plugin-commonjs": "^9.2.0",
-		"rollup-plugin-node-resolve": "^4.0.0",
-		"serve": "^10.1.1"
-	},
-	"keywords": [
-		"pub/sub",
-		"pubsub",
-		"publish/subscribe",
-		"publish",
-		"subscribe",
-		"event",
-		"emitter",
-		"eventemitter",
-		"state manager",
-		"debounce",
-		"redux alternative"
-	]
+  "name": "cyre",
+  "version": "1.0.6",
+  "description": "Time based event manager for JavaScrip apps",
+  "main": "dist/cyre.cjs.js",
+  "module": "dist/cyre.esm.js",
+  "browser": "dist/cyre.js",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "dev": "npm-run-all --parallel start watch",
+    "start": "serve public"
+  },
+  "author": "Darik Hart",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neuralline/cyre.git"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.2.2",
+    "@babel/preset-env": "^7.3.1",
+    "npm-run-all": "^4.1.5",
+    "rollup": "^1.1.2",
+    "rollup-plugin-babel": "^4.3.2",
+    "rollup-plugin-commonjs": "^9.2.0",
+    "rollup-plugin-node-resolve": "^4.0.0",
+    "rollup-plugin-terser": "^4.0.4",
+    "serve": "^10.1.2"
+  },
+  "keywords": [
+    "pub/sub",
+    "pubsub",
+    "publish/subscribe",
+    "publish",
+    "subscribe",
+    "event",
+    "emitter",
+    "eventemitter",
+    "state manager",
+    "debounce",
+    "redux alternative"
+  ]
 }
