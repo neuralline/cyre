@@ -1,10 +1,11 @@
 /** @format */
-
+'use strict'
 // @ts-check
 import middleware from './components/middleware'
 import dataDefinitions from './components/data-definitions'
 
 /* 
+
 
     Neural Line
     Time based event manager
@@ -37,19 +38,27 @@ class Cyre {
     this.recuperating = 0
     this.error = 0
     console.log('%c Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0-- ', 'background: rgb(151, 2, 151); color: white; display: block;')
-    this._quartz()
   }
 
   _log(msg, clg = false) {
     return clg ? '!log into something else ' : console.log(msg)
   }
 
-  _wait(type = null) {
+  /**
+   *@param{string} type action.type
+  
+  */
+
+  _taskWaitingList(type) {
     for (let id of this.waitingList) {
-      this.events[this.party[id].type] ? (this.waitingList.delete(id), this._initiate(id)) : console.log('@wait list nop')
+      this.events[this.party[id].type] ? (this.waitingList.delete(id), this._initiate(id)) : console.log('@cyre: type is not in waiting list')
     }
   }
 
+  /**
+   *@param{string} type action.type
+   *@param{any} payload action.payload
+   */
   _emitAction(type = '', payload = {}, response = {}) {
     for (const fn of this.events[type]) {
       fn(payload, response) //add response
@@ -57,6 +66,10 @@ class Cyre {
     return {ok: true, done: true, data: `${type} action emitted`}
   }
 
+  /**
+   *@param{object} result
+   *@param{number} value
+   */
   _recuperate(result = {}, value = 0) {
     result.data = result.ok
       ? result.data
@@ -68,22 +81,32 @@ class Cyre {
     result.data = result.data[0] || result.data[1] || 0
     return result
   }
-
+  //@TODO this.recuperating should pause quartz when its not in use
   _quartz() {
     /*
       T.I.M.E. - K.E.E.P.E.R.
     */
     const now = performance.now()
     const time = now - this.timestamp
+    this.recuperating = 1
+
     //Timed zone
     if (time >= this.interval) {
       this.timestamp = performance.now()
       const result = this.timeline.size ? this._processingUnit(this.timeline, this.interval) : {ok: false, data: []}
       this.interval = this._recuperate(result, this.interval).data
     }
-    this.recuperating = requestAnimationFrame(this._quartz.bind(this))
+    if (this.timeline.size) {
+      window.requestAnimationFrame(this._quartz.bind(this))
+    } else {
+      window.cancelAnimationFrame(this._quartz.bind(this))
+      this.recuperating = 0
+    }
   }
-
+  /**
+   * @param {object} timeline list of actions in this.timeline
+   * @param {number} precision adjustment to time interval
+   */
   _processingUnit(timeline, precision) {
     return new Promise(success => {
       let info = {ok: true, data: [], id: []}
@@ -98,10 +121,18 @@ class Cyre {
     })
   }
 
+  /**
+   * @param {string} id action id
+   */
   _addToTimeline(id) {
-    return {ok: true, done: false, data: this.timeline.add(id)}
+    this.timeline.add(id)
+    this.recuperating ? true : this._quartz()
+    return {ok: true, done: false, data: ''}
   }
 
+  /**
+   * @param {string} id action id
+   */
   _addToWaitingList(id) {
     this.waitingList.add(id)
     const response = {ok: true, done: false, id, data: this.party[id].payload, group: this.party[id].group || 0, message: 'added to action waiting list'}
@@ -113,17 +144,26 @@ class Cyre {
     }
   }
 
+  /**
+   * @param {string} id action id
+   */
   _completeAction(id) {
     this.timeline.delete(id)
     return true
   }
 
+  /**
+   * @param {string} id action id
+   */
   _repeatAction(id) {
     this.party[id].timeout = this.party[id].interval
     --this.party[id].repeat
     return false
   }
 
+  /**
+   * @param {string} id action id
+   */
   _sendAction(id) {
     const done = this.party[id].repeat > 0 ? this._repeatAction(id) : this._completeAction(id)
     const response = {ok: true, done, id, data: this.party[id].payload, group: this.party[id].group || 0}
@@ -131,40 +171,54 @@ class Cyre {
     return this._emitAction(this.party[id].type, this.party[id].payload, response)
   }
 
+  /**
+   * @param {string} id action id
+   */
   _initiate(id) {
     return this.party[id].timeout === 0 ? this._sendAction(id) : this._addToTimeline(id)
   }
 
+  /**
+   * @param {string} id action id
+   * @param {string} type action type
+   */
   _dispatchAction(id, type) {
     return this.events[type] ? this._initiate(id) : this._addToWaitingList(id)
   }
 
+  /**
+   * @param {object} action action cyre.action
+   * @param {object} dataDefinitions$$1 data definitions for available action attributes
+   */
   _createChannel(action, dataDefinitions$$1) {
     const condition = this.party[action.id] ? 'update' : 'insert'
     const result = middleware[condition](action, dataDefinitions$$1)
     if (!result.ok) {
-      console.error(`@Cyre : Action could not be created for '${action.id}' ${result.message}`)
-      return {ok: false, data: null, message: result.message}
+      //console.error(`@Cyre : Action could not be created for '${action.id}' ${result.message}`)
+      return {ok: false, data: condition, message: result.message}
     }
 
     this.party[action.id] = result.data
     this.party[action.id].timeout = this.party[action.id].interval || 0
-    return {ok: true, data: true}
+    return {ok: true, data: condition}
   }
 
+  /**
+   * @param {function} fn unregister function from cyre.on
+   */
   //system user interface
   off(fn) {
     //remove unwanted listener
     for (let type in this.events) {
-      return this.events[type].has(fn) ? {ok: true, data: this.events[type].delete(fn)} : {ok: false, data: 'Function type not found'}
+      return this.events[type].has(fn) ? {ok: true, data: this.events[type].delete(fn)} : {ok: false, data: 'function not found'}
     }
   }
 
+  //@TODO: list all registered functions action.type
   list() {
-    //list all registered functions action.type
     for (let type in this.events) {
       for (let fn of this.events[type]) {
-        this._log(fn.name)
+        this._log(type + ' ' + fn.name)
       }
     }
   }
@@ -174,6 +228,7 @@ class Cyre {
     return this.timeline.clear()
   }
 
+  //@TODO: this meant to pause all iterable actions
   pause(id) {
     // pause _quartz
     //need some work
@@ -181,59 +236,82 @@ class Cyre {
   }
 
   // User interfaces
+  /**
+   * @param {string} type action.type
+   * @param {function} fn action type function
+   * @param {array} group list of groups its part of
+   */
   on(type, fn, group = []) {
-    return new Promise((success, reject) => {
-      typeof fn === 'function'
-        ? success({
-            ok: true,
-            data: this.events[type] ? this.events[type].add([fn]) : ((this.events[type] = new Set([fn])), this._wait(type))
-          })
-        : reject({ok: false, data: 'invalid function', message: console.log(type, fn)})
-    })
+    return typeof fn === 'function' && type !== ''
+      ? {ok: true, data: this.events[type] ? this.events[type].add([fn]) : ((this.events[type] = new Set([fn])), this._taskWaitingList(type))}
+      : {ok: false, data: type, message: 'invalid function'}
   }
 
+  /**
+   * @param {string} id action id
+   * @param {string} type action type
+   */
   type(id, type) {
     console.log(`cyre.type method not implemented yet in this version, would've update channel.id's type without dispatching the action`)
   }
 
+  /**
+   * @param {object} attribute list of action attributes. {id, type, payload, interval, repeat, log}
+   */
   channel(attribute = {}) {
-    if (this.party[attribute.id]) return console.error('@cyre.action: action already exist', attribute.id)
+    if (this.party[attribute.id]) {
+      console.error('@cyre.action: action already exist', attribute.id)
+      return {ok: false, data: attribute.id, message: 'action already exist'}
+    }
     return this._createChannel(attribute, dataDefinitions)
   }
 
+  /**
+   * @param {object} attribute list of action attributes. {id, type, payload, interval, repeat, log}
+   */
   action(attribute = {}) {
-    if (this.party[attribute.id]) return console.error('@cyre.action: action already exist', attribute.id)
+    if (this.party[attribute.id]) {
+      console.error('@cyre.action: action already exist', attribute.id)
+      return {ok: false, data: attribute.id, message: 'action already exist'}
+    }
     return this._createChannel(attribute, dataDefinitions)
   }
 
-  emit(id = null, payload = null) {
+  /**
+   * @param {string} id action.id
+   * @param {any} payload action.payload.
+   */
+  call(id = '', payload = null) {
     return this.party[id]
-      ? ((this.party[id].payload = payload), this._dispatchAction(id, this.party[id].type))
-      : console.error('@cyre.call : channel not found', id)
+      ? (payload && (this.party[id].payload = payload), this._dispatchAction(id, this.party[id].type))
+      : {ok: false, data: console.error('@cyre.call : action not found', id)}
   }
 
-  call(id = null, payload = null) {
-    this.emit(id, payload)
+  /**
+   * @param {string} id action.id
+   * @param {any} payload action.payload.
+   */
+
+  emit(id, payload) {
+    return this.call(id, payload)
   }
 
+  /**
+   * @param {object} attribute list of action attributes. {id, type, payload, interval, repeat, log}
+   */
   //dispatch accepts object type input eg {id: uber, type: call, payload: 0025100124}
   dispatch(attribute = {}) {
-    attribute.id = attribute.id ? attribute.id : null
+    attribute.id = attribute.id ? attribute.id : ''
     attribute.type ? 0 : console.error('@cyre.dispatch : action type required for - ', attribute.id)
     return this._createChannel(attribute, dataDefinitions).ok
       ? {ok: true, data: this._dispatchAction(attribute.id, attribute.type)}
       : {ok: false, data: attribute.id, message: console.log(`@Cyre couldn't dispatch action`)}
   }
 
-  //respond accepts array of input eg { uber,  call, 0025100124}
-  respond(id = null, type = null, payload = null, interval = 0, repeat = 0) {
-    const data = {id, type, payload, interval, repeat}
-    this._createChannel(data, dataDefinitions)
-    this._dispatchAction(data.id, data.type)
-    return {ok: true, data: data.id}
+  test() {
+    return {ok: true, data: 200, message: 'Cyre: Hi there, what can I help you with'}
   }
 }
-
 const cyre = new Cyre('quantum-inceptions')
 
 export {cyre, Cyre}

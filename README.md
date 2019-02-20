@@ -74,7 +74,7 @@ cyre.action({id: 'screen resize', type: 'adjustScreen', interval: 400})
 
 ```js
 //Repeat action
-cyre.action({id: 'api call', type: 'apiServer', interval: 400, repeat: 10})
+cyre.action({id: 'apiCall', type: 'apiServer', interval: 400, repeat: 10})
 ```
 
 ```js
@@ -93,8 +93,6 @@ cyre.off(functionName)
 ```
 
 ## Cyre examples
-
-cyre with React
 
 [cyre-react-demo](https://cyre-react-demo.netlify.com/)<br />
 
@@ -118,7 +116,6 @@ cyre with React
 
   - increase performance
   - testability
-  - durability
   - reliability
 
 ## Meta

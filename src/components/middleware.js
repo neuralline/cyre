@@ -2,10 +2,15 @@
 
 //@ts-check
 export const middleware = {
+  /**
+   *@param{object} action cyre.action
+   *@param{object} dataDefinitions action attributes
+  
+  */
   insert: (action, dataDefinitions) => {
     const data = {}
     action.id = action.id || null
-    action.type = action.type || null
+    action.type = action.type || action.id
     for (const attribute in action) {
       data[attribute] = dataDefinitions[attribute]
         ? dataDefinitions[attribute](action[attribute])
@@ -17,7 +22,6 @@ export const middleware = {
           }
 
       if (!data[attribute].ok && data[attribute].required) {
-        console.log('middleware error')
         return {ok: false, data, message: data[attribute].message}
       }
 
@@ -26,6 +30,12 @@ export const middleware = {
     }
     return {ok: true, data}
   },
+
+  /**
+   *@param{object} action cyre.action
+   *@param{object} dataDefinitions action attributes
+  
+  */
 
   update: (action, dataDefinitions) => {
     const data = {}
