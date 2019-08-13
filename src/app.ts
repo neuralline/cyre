@@ -40,7 +40,10 @@ const Cyre = (line: string) => {
   const runTimeErrors = []
 
   const constructor = (id = '', interval = 0) => {
-    console.log('%c Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0-- ', 'background: rgb(151, 2, 151); color: white; display: block;')
+    console.log(
+      '%c Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0-- ',
+      'background: rgb(151, 2, 151); color: white; display: block;'
+    )
   }
 
   const setState = (state: object = {}, action: Party) => {
@@ -60,37 +63,67 @@ const Cyre = (line: string) => {
   }
 
   const on = (type: string, fn: Function) => {
-    return typeof fn === 'function' && type !== ''
-      ? {
-          ok: true,
-          payload: globalEvents[type] ? globalEvents[type].add([fn]) : (globalEvents[type] = new Set([fn]))
-        }
-      : {ok: false, payload: type, message: 'invalid function'}
+    const result =
+      typeof fn === 'function' && type !== ''
+        ? {
+            ok: true,
+            payload: globalEvents[type]
+              ? globalEvents[type].add([fn])
+              : (globalEvents[type] = new Set([fn]))
+          }
+        : {ok: false, message: 'invalid function'}
+    return {...result, payload: type}
   }
 
   const type = (id: string, type: string) => {
-    console.log(`cyre.type method not implemented in this version. Would've update channel's type without dispatching the action`)
+    console.log(
+      `cyre.type method not implemented in this version. Would've update channel's type without dispatching the action`
+    )
   }
 
   /*  cyre-channel.ts was here */
 
   const action = (attribute: Party) => {
+    if (!attribute)
+      return {
+        ok: false,
+        payload: undefined,
+        message: '@cyre.action: action id is required'
+      }
     if (globalParty[attribute.id]) {
       error(`@cyre.action: action already exist ${attribute.id}`)
-      return {ok: false, payload: attribute.id, message: 'action already exist'}
+      return {
+        ok: false,
+        payload: attribute.id,
+        message: 'action already exist'
+      }
     }
     const party = createChannel(attribute, dataDefinitions)
     return setParty(party)
   }
 
   const call = (id: string = '', payload: any = null) => {
-    if (!id.trim()) return error(`@cyre.call : id does not exist ${id}`)
+    if (!id.trim()) {
+      error(`@cyre.call : id does not exist ${id}`)
+      return {
+        ok: false,
+        payload: undefined,
+        message: '@cyre.call : id does not exist'
+      }
+    }
     if (!globalParty[id]) {
       error(`@cyre.call: action does not exist ${id}`)
-      return {ok: false, payload: '@cyre.call', message: '@cyre.call : action not found ' + id}
+      return {
+        ok: false,
+        payload: undefined,
+        message: '@cyre.call : action not found ' + id
+      }
     }
 
-    const res = Action({...globalParty[id], payload}, globalEvents).then(data => setParty({...data, payload: null}))
+    const res = Action(
+      {...globalParty[id], payload},
+      globalEvents
+    ).then(data => setParty({...data, payload: null}))
     globalParty[id].timeout === 0 ? true : false //_sendActonToTimeline(party)
   }
 
@@ -99,18 +132,40 @@ const Cyre = (line: string) => {
     return call(id, payload)
   }
 
-  const dispatch = (attribute: {id: ''; type: ''; payload: any}): object => {
+  const dispatch = (attribute: {
+    id: ''
+    type: ''
+    payload: any
+  }): object => {
     attribute.id = attribute.id ? attribute.id : ''
-    attribute.type ? 0 : error(`@cyre.dispatch : action type required for  ${attribute.id}`)
+    attribute.type
+      ? 0
+      : error(
+          `@cyre.dispatch : action type required for  ${attribute.id}`
+        )
     const data = createChannel(attribute, dataDefinitions)
     globalParty[attribute.id] = data.data
     return data.ok
-      ? {ok: true, payload: Action({...globalParty[attribute.id]}, globalEvents)}
-      : {ok: false, payload: attribute.id, message: error(`@Cyre couldn't dispatch action`)}
+      ? {
+          ok: true,
+          payload: Action(
+            {...globalParty[attribute.id]},
+            globalEvents
+          )
+        }
+      : {
+          ok: false,
+          payload: attribute.id,
+          message: error(`@Cyre couldn't dispatch action`)
+        }
   }
 
   const test = (): object => {
-    return {ok: true, payload: 200, message: 'Cyre: Hi there, what can I help you with'}
+    return {
+      ok: true,
+      payload: 200,
+      message: 'Cyre: Hi there, what can I help you with'
+    }
   }
 
   return {
