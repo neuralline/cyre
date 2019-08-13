@@ -4,16 +4,30 @@
 
 ```sh
   Neural Line
-  ID and Time based event manager
+  Time based event manager
   C.Y.R.E ~/`SAYER`/
+  action-on-call
 
 ```
 
-> Redux influenced in app event manager for React and interactive javascript applications.
+> Redux influenced higher order event manager for React and interactive javascript applications.
 
 [![NPM Version][npm-image]][npm-url]
 [![NPM Version][npm-download]][npm-url]
 [![NPM Version][npm-size]][npm-url]
+
+## What's new!
+
+```sh
+Cyre 1.1.0
+. Rewritten in functional way and also in typescript
+. No major new future in this update primarily focused on making sure the new code has no breaking futures and bug free
+pushed its main functions 'action on call' forward and also pushed back the alternatives like dispatch, type, channel and emit.
+. if action's ID and Type are the same you can omit type
+    eg cyre.action({id: notification}) === cyre.action({id: notification, type: notification})
+. functional and OOP git branch
+. bug fixes
+```
 
 ## Installation
 
@@ -30,38 +44,31 @@ import {cyre} from 'cyre'
 
 /*
   {
-    cyre.action: 'predefine action with preconditions and with default payload',
+    cyre.action: 'predefine action with preconditions and default payload',
     cyre.on: 'link action.type with function' ,
-    cyre.emit: 'execute action by id'
+    cyre.call: 'execute action by id'
     cyre.dispatch:'define and execute action on demand'
   }
 
 */
 //eg simple use:
-cyre.on('call_uber', (UBER_ID) => {
-	return console.log(`uber.api(${UBER_ID}).request`);
-}
-  cyre.dispatch({ id: 'uber', type: 'call_uber', payload: 'UBER-ID1' });
 
-  //Advance use:
-    //function:
-      const arrivalTimeFunction = (UBER_ID) => {
-		  return console.log(`uber.api(${UBER_ID}).eta`);
-}
+eg simple use
 
-//applications:
-//link action with a function
-cyre.on('check_uber', arrivalTimeFunction)
+cyre.action({ id: 'uber', type: "call", payload: 44085648634 })
+cyre.on('call', number => {
+  console.log("calling taxi on ", number)
+})
+cyre.call('uber')
 
-//create action with unique ID
-cyre.action({ id: 'uber_eta', type: 'check_uber', payload: 'UBER-ID1' })
+
 
 //user interface: at action creators/view model
 //execute action with default payload
-cyre.emit( 'uber_eta')
+cyre.call('uber_eta')
 
 //execute action with new payload
-cyre.emit( 'uber_eta', 'UBER-ID2')
+cyre.call('uber_eta', 'UBER-ID2')
 
 ```
 
@@ -69,7 +76,7 @@ cyre.emit( 'uber_eta', 'UBER-ID2')
 
 ```js
 //Delay effect/debounce/or throttle action
-cyre.action({id: 'screen resize', type: 'adjustScreen', interval: 400})
+cyre.action({id: 'screen_resize', type: 'adjustScreen', interval: 400})
 ```
 
 ```js

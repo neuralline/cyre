@@ -1,15 +1,15 @@
 {
   "name": "cyre",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "Time based event manager for JavaScrip apps",
+  "input": "src/app.ts",
   "main": "dist/cyre.cjs.js",
   "module": "dist/cyre.esm.js",
   "browser": "dist/cyre.js",
   "scripts": {
-    "build": "rollup -c",
+    "build": "rollup -c ",
     "watch": "rollup -c -w",
     "dev": "npm-run-all --parallel start watch",
-    "start": "serve public",
     "test": "jest"
   },
   "author": "Darik Hart",
@@ -19,15 +19,13 @@
     "url": "https://github.com/neuralline/cyre.git"
   },
   "devDependencies": {
-    "@babel/core": "^7.3.3",
-    "@babel/preset-env": "^7.3.1",
     "npm-run-all": "^4.1.5",
-    "rollup": "^1.2.2",
-    "rollup-plugin-babel": "^4.3.2",
-    "rollup-plugin-commonjs": "^9.2.0",
-    "rollup-plugin-node-resolve": "^4.0.0",
-    "rollup-plugin-terser": "^4.0.4",
-    "serve": "^10.1.2"
+    "rollup": "^1.19.4",
+    "rollup-plugin-commonjs": "^10.0.2",
+    "rollup-plugin-node-resolve": "^5.2.0",
+    "rollup-plugin-terser": "^5.1.1",
+    "rollup-plugin-typescript2": "^0.22.1",
+    "typescript": "^3.5.3"
   },
   "keywords": [
     "pub/sub",
@@ -43,6 +41,6 @@
     "redux alternative"
   ],
   "dependencies": {
-    "jest": "^24.1.0"
+    "jest": "^24.8.0"
   }
 }

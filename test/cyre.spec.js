@@ -1,5 +1,3 @@
-/** @format */
-
 const {cyre} = require('../dist/cyre.cjs')
 
 test('CYRE INTRODUCTION', () => {
