@@ -67,78 +67,22 @@ function __generator(thisArg, body) {
     }
 }
 
-var _this = undefined;
-/* export const _dispatchAction = (party: Party, events: Events) => {
-  return party.timeout === 0 ? _prepareActionToEmit(party, events) : false //_sendActonToTimeline(party)
-}
-export const _initiateAction = (party: Party, events: Events) => {
-  return events[party.type] ? _dispatchAction(party, events) : false //_addToWaitingList(party)
-}
-export const _repeatAction = (party: Party) => {
-  party.timeout = party.interval
-  return party
-}
-export const _emitAction = (party: Party, events: Events) => {
-  events[party.type].forEach((fn: Function) => fn(party.payload, party))
+function __spreadArrays() {
+    for (var s = 0, i = 0, il = arguments.length; i < il; i++) s += arguments[i].length;
+    for (var r = Array(s), k = 0, i = 0; i < il; i++)
+        for (var a = arguments[i], j = 0, jl = a.length; j < jl; j++, k++)
+            r[k] = a[j];
+    return r;
 }
 
-export const _prepareActionToEmit = (party: Party, events: Events) => {
-  const response = {
-    ...party,
-    ok: true,
-    done: true
-  }
-  party = party.repeat > 0 ? _repeatAction(party) : party // _removeTaskFromTimeline(party, new Set())
-  // console.log('@party true ', party)
-  party.log ? _log(response) : false
-  return _emitAction(response, events)
-}
-
-export const _removeTaskFromTimeline = (party: Party, timeline) => {
-  timeline.delete(party.id)
-  return timeline
-} */
-var _prepareActionToEmit = function (party, events) {
-    var response = __assign({}, party, { ok: true, done: true });
-    // console.log('@party true ', party)
-    // party.log ? _log(response) : false
-    return response;
+var CyreLog = function (msg, clg) {
+    if (clg === void 0) { clg = false; }
+    clg ? '!log into something else ' : console.log(__assign({}, msg));
+    return true;
 };
-var _repeatAction = function (party) {
-    return party.repeat ? __assign({}, party, { timeout: party.interval, ok: true, done: false }) : __assign({}, party); // _removeTaskFromTimeline(party, new Set())
+var CyreError = function (log) {
+    console.error('@cyre.error: ', __assign({}, log));
 };
-var _emitAction = function (party, events) {
-    events[party.type].forEach(function (fn) { return fn(party.payload, party); });
-    return __assign({}, party, { listeners: events[party.type].size });
-};
-var _initiateAction = function (party, events) {
-    return events[party.type] ? true : false; //_addToWaitingList(party)
-};
-var Action = function (party, events) { return __awaiter(_this, void 0, void 0, function () {
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                try {
-                    party = _prepareActionToEmit(party, events);
-                    party = _emitAction(party, events);
-                    party = _repeatAction(party);
-                }
-                catch (_c) {
-                }
-                if (!_initiateAction) return [3 /*break*/, 2];
-                return [4 /*yield*/, Promise.all([_prepareActionToEmit, _emitAction, _repeatAction])];
-            case 1:
-                _a = _b.sent();
-                return [3 /*break*/, 3];
-            case 2:
-                _a = __assign({}, party, { ok: false, done: false });
-                _b.label = 3;
-            case 3:
-                return [2 /*return*/, party];
-        }
-    });
-}); };
 
 //@ts-check
 var middleware = {
@@ -149,7 +93,6 @@ var middleware = {
     */
     insert: function (action, dataDefinitions) {
         var data = {};
-        action.type = action.type || action.id;
         for (var attribute in action) {
             data[attribute] = dataDefinitions[attribute]
                 ? dataDefinitions[attribute](action[attribute])
@@ -160,10 +103,14 @@ var middleware = {
                     required: false
                 };
             if (!data[attribute].ok && data[attribute].required) {
-                console.warn('required :', data);
-                return { ok: false, payload: data, message: data[attribute].message };
+                CyreError('required :' + data);
+                return {
+                    ok: false,
+                    payload: data,
+                    message: data[attribute].message
+                };
             }
-            data[attribute].ok ? true : console.error(data[attribute].message);
+            data[attribute].ok ? true : CyreError(data[attribute]);
             data[attribute] = data[attribute].payload;
         }
         return { ok: true, message: 'channel created', payload: data };
@@ -176,8 +123,12 @@ var middleware = {
     update: function (action, dataDefinitions) {
         var data = {};
         for (var attribute in action) {
-            data[attribute] = dataDefinitions[attribute] ? dataDefinitions[attribute](action[attribute]) : false;
-            data[attribute].ok ? true : console.error(data[attribute].message);
+            data[attribute] = dataDefinitions[attribute]
+                ? dataDefinitions[attribute](action[attribute])
+                : false;
+            data[attribute].ok
+                ? true
+                : console.error(data[attribute].message);
             data[attribute] = data[attribute].data;
         }
         return { ok: true, message: 'channel updated', payload: data };
@@ -185,19 +136,91 @@ var middleware = {
 };
 
 /**
- * @format
- * @param {object} action action cyre.action
- * @param {object} dataDefinitions$$1 data definitions for available action attributes
+ *
+ * @  handles the process of creating channel
+ * @
  */
-var createChannel = function (party, dataDefinitions) {
-    party.type ? false : (party.type = party.id);
-    var condition = party ? 'insert' : 'update';
-    var result = middleware[condition](party, dataDefinitions);
-    if (!result.ok) {
-        //console.error(`@Cyre : Action could not be created for '${action.id}' ${result.message}`)
-        return { ok: false, payload: condition, message: result.message };
+var CyreChannel = function (bot, dataDefinitions) {
+    var condition = bot ? 'insert' : 'update';
+    var response = middleware[condition](bot, dataDefinitions);
+    if (!response.ok) {
+        CyreError("@Cyre : Action could not be created for '" + bot.id + "' " + response.message);
+        return {
+            ok: false,
+            payload: condition,
+            message: response.message
+        };
     }
-    return __assign({}, party, result.payload, { timeout: party.interval || 0, ok: true });
+    return __assign(__assign(__assign({}, bot), response.payload), { timeout: bot.interval || 0, ok: true });
+};
+
+var _prepareActionToEmit = function (io, events) {
+    var response = __assign(__assign({}, io), { ok: true, done: true });
+    return response;
+};
+var _repeatAction = function (io) {
+    return io.repeat ? __assign(__assign({}, io), { timeout: io.interval, done: false }) : __assign({}, io); // _removeTaskFromTimeline(io, [])
+};
+var _emitAction = function (io, events) {
+    if (events === void 0) { events = []; }
+    var internalNeuron = [];
+    events.forEach(function (fn) {
+        try {
+            internalNeuron.push(fn(io.payload) || []);
+        }
+        catch (err) {
+            CyreError({ id: io.id, err: err });
+        }
+    });
+    return __assign(__assign({}, io), { ok: true, listeners: events.length, internalNeuron: internalNeuron });
+};
+var _initiateAction = function (io, events) {
+    if (events === void 0) { events = []; }
+    return events ? true : false;
+};
+var CyreAction = function (io, events) {
+    if (events === void 0) { events = []; }
+    return __awaiter(void 0, void 0, void 0, function () {
+        var _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0:
+                    try {
+                        io = _prepareActionToEmit(io, events);
+                        io = _emitAction(io, events);
+                        io = _repeatAction(io);
+                    }
+                    catch (_c) {
+                    }
+                    if (!_initiateAction(io, events)) return [3 /*break*/, 2];
+                    return [4 /*yield*/, Promise.all([_prepareActionToEmit, _emitAction, _repeatAction])];
+                case 1:
+                    _a = _b.sent();
+                    return [3 /*break*/, 3];
+                case 2:
+                    _a = __assign(__assign({}, io), { ok: false, done: false });
+                    _b.label = 3;
+                case 3:
+                    if (io.log)
+                        CyreLog(__assign({}, io));
+                    return [4 /*yield*/, io];
+                case 4: return [2 /*return*/, _b.sent()];
+            }
+        });
+    });
+};
+
+var CyreOn = function (events, fn) {
+    if (events === void 0) { events = []; }
+    if (typeof fn !== 'function') {
+        return { ok: false, message: 'invalid function', payload: fn };
+    }
+    events.push(fn);
+    return {
+        ok: true,
+        message: '@cyre.on : subscription successful',
+        payload: __spreadArrays(events)
+    };
 };
 
 //@ts-check
@@ -237,6 +260,17 @@ var dataDefinitions = {
                 payload: 0,
                 message: "'" + attribute + "' invalid action.interval value",
                 required: false
+            };
+    },
+    toc: function (attribute) {
+        if (attribute === void 0) { attribute = 0; }
+        return Number.isInteger(attribute)
+            ? { ok: true, payload: attribute }
+            : {
+                ok: false,
+                payload: 0,
+                message: "'" + attribute + "' invalid @cyre.call time of creation value",
+                required: true
             };
     },
     repeat: function (attribute) {
@@ -320,10 +354,6 @@ var dataDefinitions = {
     }
 };
 
-var error = function (msg) {
-    console.error(msg);
-};
-
 /*
 
 
@@ -331,23 +361,33 @@ var error = function (msg) {
     Time based event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    action-on-call 2019
+    2019
 
 
 
     eg simple use
-    cyre.action({ id: 'uber', type: 'call', payload: 44085648634 })
-    cyre.on('call', number => {
+    cyre.action({ id: 'uber', payload: 44085648634 })
+    cyre.on('uber', number => {
       console.log("calling taxi on ", number)
     })
     cyre.call('uber')
+    
 
+
+
+the first low: A robot can not injure a human being or alow a human being to be harmed by not helping;
 */
 var Cyre = function (line) {
+    var _this = this;
     var globalEvents = {};
     var globalParty = {};
+    var state = { globalEvents: globalEvents, globalTimeline: {}, globalParty: globalParty };
     var constructor = function (id, interval) {
-        console.log('%c Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0-- ', 'background: rgb(151, 2, 151); color: white; display: block;');
+        console.log('%c Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0--2.L3 ', 'background: rgb(151, 2, 151); color: white; display: block;');
+    };
+    var setState = function (id, action) {
+        state[id][action.id] = __assign({}, action);
+        //call(id, {...state})
     };
     var setParty = function (state) {
         var id = state.id;
@@ -355,62 +395,138 @@ var Cyre = function (line) {
         //call(id, {...state})
     };
     var on = function (type, fn) {
-        var result = typeof fn === 'function' && type !== ''
-            ? {
-                ok: true,
-                payload: globalEvents[type]
-                    ? globalEvents[type].add([fn])
-                    : (globalEvents[type] = new Set([fn]))
-            }
-            : { ok: false, message: 'invalid function' };
-        return __assign({}, result, { payload: type });
+        var subscribers = [];
+        if (Array.isArray(type)) {
+            var dValue = type.map(function (bot) {
+                var name = bot.id;
+                var func = bot.payload;
+                subscribers = globalEvents[name] ? __spreadArrays(globalEvents[name]) : [];
+                globalEvents[name] = CyreOn(subscribers, func).payload;
+                /**
+                 * seeing the possibility if this process can be handled by cyre create channel
+                 * const action = CyreChannel(attribute, typeDefinitions)
+                 */
+            });
+        }
+        else if (typeof type === 'string' && typeof fn === 'function') {
+            subscribers = globalEvents[type] ? __spreadArrays(globalEvents[type]) : [];
+            globalEvents[type] = CyreOn(subscribers, fn).payload;
+        }
+        else
+            return {
+                ok: false,
+                message: 'invalid function',
+                payload: type
+            };
+        return this;
     };
     /*  cyre-channel.ts was here */
     var action = function (attribute) {
-        if (!attribute)
-            return {
+        if (!attribute) {
+            CyreLog({
                 ok: false,
                 payload: undefined,
                 message: '@cyre.action: action id is required'
-            };
-        if (globalParty[attribute.id]) {
-            error("@cyre.action: action already exist " + attribute.id);
-            return {
-                ok: false,
-                payload: attribute.id,
-                message: 'action already exist'
-            };
+            });
         }
-        var party = createChannel(attribute, dataDefinitions);
-        return setParty(party);
+        else if (Array.isArray(attribute)) {
+            attribute.forEach(function (bot) {
+                bot.type = bot.type || bot.id;
+                setParty(CyreChannel(bot, dataDefinitions));
+            });
+        }
+        else {
+            attribute.type = attribute.type || attribute.id;
+            setParty(CyreChannel(attribute, dataDefinitions));
+        }
     };
     var call = function (id, payload) {
-        if (id === void 0) { id = ''; }
+        if (id === void 0) { id = null; }
         if (payload === void 0) { payload = null; }
-        if (!id.trim()) {
-            error("@cyre.call : id does not exist " + id);
-            return {
+        var io = {
+            id: id.trim() || null,
+            ok: false,
+            done: false,
+            toc: performance.now(),
+            payload: payload
+        };
+        if (!io.id) {
+            CyreError({
                 ok: false,
-                payload: undefined,
-                message: '@cyre.call : id does not exist'
-            };
+                done: false,
+                payload: null,
+                message: '@cyre.call: id does not exist'
+            });
+            return false;
         }
-        if (!globalParty[id]) {
-            error("@cyre.call: action does not exist " + id);
-            return {
+        if (!globalParty[io.id]) {
+            CyreError({
                 ok: false,
-                payload: undefined,
-                message: '@cyre.call : action not found ' + id
-            };
+                done: false,
+                toc: performance.now(),
+                payload: null,
+                message: "@cyre.call: " + id + "; The subscriber you called is not responding "
+            });
+            return false;
         }
-        var res = Action(__assign({}, globalParty[id], { payload: payload }), globalEvents).then(function (data) { return setParty(__assign({}, data, { payload: null })); });
-        globalParty[id].timeout === 0 ? true : false; //_sendActonToTimeline(party)
+        if (globalParty[io.id].isThrottling)
+            return;
+        io = payload
+            ? __assign(__assign(__assign({}, io), globalParty[io.id]), { payload: payload }) : __assign(__assign({}, io), globalParty[io.id]);
+        if (globalParty[io.id].isBouncing)
+            return;
+        if (io.timeout === 0) {
+            if (io.throttle) {
+                globalParty[io.id].isThrottling = true;
+                io.hold = io.throttle || 1000;
+            }
+            else if (io.debounce) {
+                globalParty[io.id].isBouncing = true;
+                io.hold = io.throttle || 1000;
+            }
+            CyreAction(__assign({}, io), globalEvents[io.type]).then(function (data) {
+                if (data.internalNeuron) {
+                    data.internalNeuron.map(function (internal) {
+                        if (internal.id) {
+                            call(internal.id, internal.payload || null);
+                        }
+                    });
+                }
+            });
+        }
+        else {
+            sendActionToTimeline(io);
+        }
+    };
+    var sendActionToTimeline = function (io) { return __awaiter(_this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    console.log('@cyre.timeline : action sent to timeline ', io);
+                    return [4 /*yield*/, setTimeout(function () {
+                            console.log('@cyre.timeline : action has been executed');
+                            CyreAction(io, globalEvents[io.type]).then(function (data) {
+                                setState('globalEvents', __assign({}, data));
+                            }, io.timeout);
+                        })];
+                case 1:
+                    _a.sent();
+                    return [4 /*yield*/, false];
+                case 2: return [2 /*return*/, _a.sent()];
+            }
+        });
+    }); };
+    /**
+     * new feature to chain commands in one thread like structure
+     *
+    **/
+    var chain = function () {
     };
     var test = function () {
         return {
             ok: true,
             payload: 200,
-            message: 'Cyre: Hi there, what can I help you with'
+            message: '@cyre: Hi there, what can I help you with?'
         };
     };
     return {
@@ -418,6 +534,7 @@ var Cyre = function (line) {
         call: call,
         //dispatch,
         action: action,
+        chain: chain,
         //channel,
         //type,
         on: on,

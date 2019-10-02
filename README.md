@@ -3,31 +3,46 @@
 # CYRE
 
 ```sh
+
   Neural Line
-  Time based event manager
+  ID based event manager
   C.Y.R.E ~/`SAYER`/
   action-on-call
 
 ```
+> Cyre is designed to provide reactive and dynamic networking throughout the application. It's really interesting because the whole operation evolves around controlling the behavior how they communicate between each other.
 
-> Redux influenced higher order event manager for React and interactive javascript applications.
+>If you are familiar with javascript pub/sub method or Redux's dispatchers/reducers you are good to go with Cyre. The main difference would be Cyre has one extra step, action(action, on, call) some methodology difference
+
+#Action
+> Actions in cyre are the operators, the link between dispatchers and reducers of all  services that application provide. The application could have unlimited number of emitters and subscribers however services can only be able to communicate through if their ID is listed in the actions list. Therefore limiting unauthorized access with reducers or vice-versa.  
+
+>Actions in Cyre stack vertically, each action can have its own middleware, conditions and pre-payload. 
+>One action can have its own error log without affecting  the next action's performance
+```js
+cyre.action('reducer_id')
+```
+#On
+> On in cyre are the reducers/absorbers except that they don't listen to every dispatches/emits. Cyre targets specific reducer by their action type ID so they only act up on when they are called. One action can have multiple listeners and these listeners can be named or anonymous, => arrow, functions
+```js
+cyre.on('uber', number => {
+  return `calling taxi on ${number}`
+})
+```
+#Call
+> Calls in Cyre are interesting methods because they are not particularly emitters more like triggers. I call them Air lift technology. Think of them like an embassy sends rescue drone to return its citizens in post apocalypse situation. Cyre doesn't concern about the emitter or the situation, only their ID. If the is valid against home database, actions list, it will dispatch the package to, trigger action, with that ID with optional new payload. Calls are runtime methods so thats why they need to be lightweight.
+```js
+cyre.call('uber')
+```
+
 
 [![NPM Version][npm-image]][npm-url]
 [![NPM Version][npm-download]][npm-url]
 [![NPM Version][npm-size]][npm-url]
 
-## What's new!
 
-```sh
-Cyre 1.1.0
-. Rewritten in functional way and also in typescript
-. No major new future in this update primarily focused on making sure the new code has no breaking futures and bug free
-pushed its main functions 'action on call' forward and also pushed back the alternatives like dispatch, type, channel and emit.
-. if action's ID and Type are the same you can omit type
-    eg cyre.action({id: notification}) === cyre.action({id: notification, type: notification})
-. functional and OOP git branch
-. bug fixes
-```
+
+
 
 ## Installation
 
@@ -55,8 +70,8 @@ import {cyre} from 'cyre'
 
 eg simple use
 
-cyre.action({ id: 'uber', type: "call", payload: 44085648634 })
-cyre.on('call', number => {
+cyre.action({ id: 'uber', payload: 44085648634 })
+cyre.on('uber', number => {
   console.log("calling taxi on ", number)
 })
 cyre.call('uber')
@@ -65,10 +80,15 @@ cyre.call('uber')
 
 //user interface: at action creators/view model
 //execute action with default payload
-cyre.call('uber_eta')
+cyre.call('uber')
 
 //execute action with new payload
-cyre.call('uber_eta', 'UBER-ID2')
+cyre.call('uber', 220748567807)
+
+
+
+
+
 
 ```
 
@@ -76,12 +96,21 @@ cyre.call('uber_eta', 'UBER-ID2')
 
 ```js
 //Delay effect/debounce/or throttle action
-cyre.action({id: 'screen_resize', type: 'adjustScreen', interval: 400})
+cyre.action({
+  id: 'screen_resize',
+  type: 'adjustScreen',
+  interval: 400
+})
 ```
 
 ```js
 //Repeat action
-cyre.action({id: 'apiCall', type: 'apiServer', interval: 400, repeat: 10})
+cyre.action({
+  id: 'apiCall',
+  type: 'apiServer',
+  interval: 400,
+  repeat: 10
+})
 ```
 
 ```js
@@ -109,18 +138,16 @@ cyre.off(functionName)
 
 [Cyre React example](https://github.com/neuralline/cyre-react-counter-demo)<br />
 
-[Holo carousel](https://github.com/neuralline/holo-carousel)
+[holo-carousel](https://github.com/neuralline/holo-carousel)
 
 ## Project pipeline
 
 - 1.0.0 initial commit
-
   - adding functionality
-  - useability
-  - compatibility with varies mvc
+  - expand useability
+  - fix compatibility
 
 - 1.2.0 optimization
-
   - increase performance
   - testability
   - reliability
@@ -142,7 +169,7 @@ Expands VERTICALLY as projects grows 2019
 
 ```
 
-<!-- Markdown link & img dfn's -->
+<!-- Markdown link & img -->
 
 [npm-image]: https://img.shields.io/npm/v/cyre.svg?style=flat
 [npm-url]: https://www.npmjs.com/package/cyre

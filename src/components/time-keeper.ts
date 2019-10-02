@@ -16,21 +16,7 @@ const _quartz = (timeline: [] = [], bot = {}): object => {
   console.log('TYME')
   let timestamp = 0
   let recuperating = 1
-  const timeKeeper = () => {
-    const now = performance.now()
-    const time: number = now - timestamp
-    let precisionAdjustment: number = 20
 
-    //Timed zone
-    if (time >= precisionAdjustment) {
-      return inTimeZone(timeline, bot, precisionAdjustment)
-    }
-    if (timeline.length) {
-      window.requestAnimationFrame(timeKeeper)
-    } else {
-      recuperating = 0
-    }
-  }
   return {...timeline}
 }
 
@@ -50,6 +36,22 @@ export const inTimeZone = (
   return timeline.size
     ? _processingUnit(timeline, bot, precisionAdjustment)
     : {ok: false, payload: []}
+}
+
+const timeKeeper = () => {
+  const now = performance.now()
+  const time: number = now - timestamp
+  let precisionAdjustment: number = 20
+
+  //Timed zone
+  if (time >= precisionAdjustment) {
+    return inTimeZone(timeline, bot, precisionAdjustment)
+  }
+  if (timeline.length) {
+    window.requestAnimationFrame(timeKeeper)
+  } else {
+    recuperating = 0
+  }
 }
 
 export default _quartz

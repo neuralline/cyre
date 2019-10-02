@@ -44,6 +44,16 @@ const dataDefinitions = {
         }
   },
 
+  toc: (attribute: number = 0) => {
+    return Number.isInteger(attribute)
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: 0,
+          message: `'${attribute}' invalid @cyre.call time of creation value`,
+          required: true
+        }
+  },
   repeat: (attribute: number = 0) => {
     return Number.isInteger(attribute)
       ? {ok: true, payload: attribute}

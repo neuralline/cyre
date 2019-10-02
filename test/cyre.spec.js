@@ -7,11 +7,6 @@ test('CYRE INTRODUCTION', () => {
     message: 'Cyre: Hi there, what can I help you with'
   })
 })
-test('CYRE construction', () => {
-  expect(cyre.constructor()).expect({
-    undefined
-  })
-})
 test('CYRE prevent null action', () => {
   expect(cyre.action()).toEqual({
     ok: false,
