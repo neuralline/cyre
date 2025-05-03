@@ -3,141 +3,183 @@
 # CYRE
 
 ```sh
-  Neural Line
-  ID and Time based event manager
-  C.Y.R.E ~/`SAYER`/
-
+Neural Line
+Reactive event manager
+C.Y.R.E ~/`SAYER`/
+action-on-call
 ```
 
-> Redux influenced in app event manager for React and interactive javascript applications.
+> Cyre is a sophisticated event management system that provides reactive networking throughout your application. At its core is the Q.U.A.N.T.U.M. TimeKeeper, evolved from the original Quantum-Inception clock (2016) to now power precise event timing and management with an advanced quantum breathing system for natural rate limiting and system protection.
 
-[![NPM Version][npm-image]][npm-url]
-[![NPM Version][npm-download]][npm-url]
-[![NPM Version][npm-size]][npm-url]
+## Core Features
+
+### Event Management
+
+- Action-based event dispatching
+- Reactive state management
+- Automatic change detection
+- Smart surge protection with quantum breathing
+- Event chaining through intraLinks
+
+### Quantum TimeKeeper & Breathing System
+
+- High-precision timing control with quantum breathing
+- Intelligent recuperation mode for system health
+- Natural rate limiting through breathing patterns
+- Self-healing system protection
+- Cross-platform (Node.js and Browser)
+
+### Performance Features
+
+- Automatic performance optimization
+- Smart surge protection with quantum breathing
+- Built-in metrics tracking
+- Efficient state updates
+- System stress adaptation
 
 ## Installation
 
 ```sh
 npm i cyre
+# or
 yarn add cyre
 ```
 
-## Usage example
+## Basic Usage
 
-```js
-
+```typescript
 import {cyre} from 'cyre'
 
-/*
-  {
-    cyre.action: 'predefine action with preconditions and with default payload',
-    cyre.on: 'link action.type with function' ,
-    cyre.emit: 'execute action by id'
-    cyre.dispatch:'define and execute action on demand'
+// Define an action with protection
+cyre.action({
+  id: 'user-sync',
+  type: 'sync',
+  payload: {userId: 123},
+  priority: 'medium', // Priority level for breathing system
+  interval: 5000, // 5 second interval (adjusts with system stress)
+  repeat: 'infinite' // Continuous sync
+})
+
+// Listen for events
+cyre.on('sync', payload => {
+  console.log('Syncing user:', payload)
+})
+
+// Trigger action - automatically protected by quantum breathing
+cyre.call('user-sync')
+```
+
+## Advanced Features
+
+### Quantum Breathing Protection
+
+```typescript
+// Action automatically adapts to system stress
+cyre.action({
+  id: 'protected-action',
+  priority: 'high', // Higher priority during stress
+  interval: 1000 // Interval adapts to breathing rate
+})
+
+// System automatically:
+// - Adjusts intervals based on stress
+// - Enters recuperation when needed
+// - Recovers naturally through breathing
+// - Maintains quantum precision
+```
+
+### Action Chaining
+
+```typescript
+cyre.on('event-a', data => {
+  // Chain to next action
+  return {
+    id: 'event-b',
+    payload: processedData
   }
+})
+```
 
-*/
-//eg simple use:
-cyre.on('call_uber', (UBER_ID) => {
-	return console.log(`uber.api(${UBER_ID}).request`);
+### Built-in Performance Controls
+
+```typescript
+cyre.action({
+  id: 'protected-action',
+  priority: 'low', // Automatic breathing control
+  detectChanges: true // Only trigger on changes
+})
+
+// Monitor breathing state
+const breathingState = cyre.getBreathingState()
+console.log(`System stress: ${breathingState.stress * 100}%`)
+```
+
+### System Health Monitoring
+
+```typescript
+// Check system health through breathing metrics
+const {breathing, stress} = quantumState.get()
+
+if (breathing.isRecuperating) {
+  console.log(`System recuperating at ${breathing.recuperationDepth * 100}%`)
 }
-  cyre.dispatch({ id: 'uber', type: 'call_uber', payload: 'UBER-ID1' });
 
-  //Advance use:
-    //function:
-      const arrivalTimeFunction = (UBER_ID) => {
-		  return console.log(`uber.api(${UBER_ID}).eta`);
-}
-
-//applications:
-//link action with a function
-cyre.on('check_uber', arrivalTimeFunction)
-
-//create action with unique ID
-cyre.action({ id: 'uber_eta', type: 'check_uber', payload: 'UBER-ID1' })
-
-//user interface: at action creators/view model
-//execute action with default payload
-cyre.emit( 'uber_eta')
-
-//execute action with new payload
-cyre.emit( 'uber_eta', 'UBER-ID2')
-
+console.log(`Current stress levels:
+  CPU: ${stress.cpu * 100}%
+  Memory: ${stress.memory * 100}%
+  Event Loop: ${stress.eventLoop}ms
+  Combined: ${stress.combined * 100}%`)
 ```
 
-## Extra features
+## Project Evolution
 
-```js
-//Delay effect/debounce/or throttle action
-cyre.action({id: 'screen resize', type: 'adjustScreen', interval: 400})
-```
+- 1.0.0: Initial release
 
-```js
-//Repeat action
-cyre.action({id: 'apiCall', type: 'apiServer', interval: 400, repeat: 10})
-```
+  - Core event management
+  - Basic timing control
+  - State management
 
-```js
-//Log for specific action
-cyre.action({id: 'apiCall', type: 'apiServer', log: true})
-```
+- 2.0.0: Quantum Update
 
-```js
-//Stop all iterating actions
-cyre.clr()
-```
+  - Enhanced TimeKeeper integration
+  - Performance optimizations
+  - Advanced metrics
+  - Cross-platform support
 
-```js
-//Remove functions from listening
-cyre.off(functionName)
-```
+- 3.0.0: Function Architecture
 
-## Cyre examples
+  - Functional architecture
+  - Enhanced type safety
+  - Improved performance
+  - Better developer experience
 
-[cyre-react-demo](https://cyre-react-demo.netlify.com/)<br />
+- 3.1.0: Quantum Breathing (Current)
 
-[holo-carousel ES6](https://holo-carousel.firebaseapp.com/)
+  - Natural rate limiting through Breathing Rate
+  - System-wide stress management
+  - Self-healing recuperation
+  - Adaptive timing controls
+  - Priority-based execution
 
-## Made with Cyre git projects
+## Philosophy
 
-[Cyre React example](https://github.com/neuralline/cyre-react-counter-demo)<br />
+Cyre follows these core principles:
 
-[Holo carousel](https://github.com/neuralline/holo-carousel)
+1. **Precision**: Accurate timing and reliable event handling
+2. **Protection**: Natural rate limiting through quantum breathing
+3. **Performance**: System-aware optimization and stress management
+4. **Adaptability**: Self-adjusting to system conditions
+5. **Predictability**: Consistent behavior with natural protection
 
-## Project pipeline
+## Origins
 
-- 1.0.0 initial commit
-
-  - adding functionality
-  - useability
-  - compatibility with varies mvc
-
-- 1.2.0 optimization
-
-  - increase performance
-  - testability
-  - reliability
-
-## Meta
-
-Distributed under the MIT license. See `LICENSE` for more information.
-
-[https://github.com/NeuralLine](https://github.com/NeuralLine)
-
-## Contributing
-
-1. Fork it (<https://www.npmjs.com/package/cyre/fork>)
+Originally evolved from the Quantum-Inception clock project (2016), Cyre has grown into a full-featured event management system while maintaining its quantum timing heritage. The latest evolution introduces quantum breathing for natural system protection and rate limiting.
 
 ```sh
-
 Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-Expands VERTICALLY as projects grows 2019
-
+Expands HORIZONTALLY as your projects grow
 ```
 
-<!-- Markdown link & img dfn's -->
+## License
 
-[npm-image]: https://img.shields.io/npm/v/cyre.svg?style=flat
-[npm-url]: https://www.npmjs.com/package/cyre
-[npm-download]: https://img.shields.io/npm/dt/cyre.svg?style=flat
-[npm-size]: https://img.shields.io/bundlephobia/min/cyre.svg?style=flat
+Distributed under the MIT license. See `LICENSE` for more information.
