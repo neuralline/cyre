@@ -1,4 +1,3 @@
-// vitest.config.ts
 import {defineConfig} from 'vitest/config'
 import * as path from 'path'
 import {fileURLToPath} from 'url'
@@ -17,7 +16,8 @@ export default defineConfig({
     coverage: {
       provider: 'istanbul',
       reporter: ['text', 'json', 'html'],
-      include: ['src/components/cyre-time-keeper.ts']
+      include: ['src/**/*.ts'],
+      exclude: ['**/*.{test,spec}.ts']
     },
     deps: {
       inline: [/^(?!.*node_modules).*$/]
@@ -30,28 +30,42 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     lib: {
-      entry: path.resolve(__dirname, 'src/app.ts'),
+      entry: path.resolve(__dirname, 'src/index.ts'),
       name: 'cyre',
-      formats: ['es'],
-      fileName: format => `${format}/index.js`
+      formats: ['es', 'cjs', 'umd'],
+      fileName: format => {
+        switch (format) {
+          case 'es':
+            return 'es/index.js'
+          case 'cjs':
+            return 'cjs/index.js'
+          case 'umd':
+            return 'umd/cyre.js'
+          default:
+            return `${format}/index.js`
+        }
+      }
     },
     rollupOptions: {
       external: [],
       output: {
         globals: {},
-        dir: 'dist',
-        entryFileNames: `[format]/index.js`,
-        chunkFileNames: `[format]/[name].js`,
-        assetFileNames: `assets/[name].[ext]`,
         exports: 'named',
         extend: true,
-        name: 'cyre'
-      },
-      input: {
-        index: path.resolve(__dirname, 'src/app.ts')
+        name: 'cyre',
+        // Generate minified UMD version
+        manualChunks: undefined
       }
     },
     sourcemap: true,
+    minify: 'terser',
+    target: 'es2020',
+    terserOptions: {
+      compress: {
+        drop_console: false,
+        pure_funcs: []
+      }
+    },
     emptyOutDir: true
   }
 })

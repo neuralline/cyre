@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "types": ["node"],
-    "target": "esnext",
+    "types": ["node", "vitest/globals"],
+    "target": "es2020",
     "useDefineForClassFields": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "esnext",
@@ -21,9 +21,12 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"],
   "references": [{"path": "./tsconfig.node.json"}]
 }

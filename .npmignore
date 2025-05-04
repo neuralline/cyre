@@ -1,4 +1,36 @@
-.git
-yarn.lock
-/.yarn
+# Source files
+src/
+test/
+examples/
 
+# Configuration files
+.eslintrc.js
+.github/
+.vscode/
+.editorconfig
+.gitignore
+*.config.js
+*.config.ts
+vitest.setup.ts
+tsconfig.json
+tsconfig.*.json
+
+# Build artifacts
+coverage/
+.nyc_output/
+.turbo/
+.cache/
+node_modules/
+
+# Development files
+*.log
+*.tsbuildinfo
+.env
+.env.*
+
+# Documentation that's redundant with npm
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+
+# Only include minimized in production
+!dist/
