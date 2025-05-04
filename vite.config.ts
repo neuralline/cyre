@@ -38,7 +38,7 @@ export default defineConfig({
           case 'es':
             return 'es/index.js'
           case 'cjs':
-            return 'cjs/index.js'
+            return 'cjs/index.cjs' // Use .cjs extension for CommonJS
           case 'umd':
             return 'umd/cyre.js'
           default:
@@ -52,10 +52,20 @@ export default defineConfig({
         globals: {},
         exports: 'named',
         extend: true,
+        // Ensure UMD format works in all environments
+        format: 'umd',
         name: 'cyre',
+        // Force CommonJS output to be compatible with ES modules
+        interop: 'auto',
         // Generate minified UMD version
         manualChunks: undefined
       }
+    },
+    // Make CommonJS format work with "type": "module" in package.json
+    commonjsOptions: {
+      requireReturnsDefault: 'auto',
+      transformMixedEsModules: true,
+      esmExternals: true
     },
     sourcemap: true,
     minify: 'terser',
