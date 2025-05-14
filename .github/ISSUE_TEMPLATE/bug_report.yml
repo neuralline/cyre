@@ -1,0 +1,96 @@
+name: Bug Report
+description: File a bug report
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out this form as completely as possible.
+  
+  - type: input
+    id: version
+    attributes:
+      label: Cyre Version
+      description: What version of Cyre are you using?
+      placeholder: e.g., 3.1.5
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Where are you running Cyre?
+      options:
+        - Node.js
+        - Browser
+        - Both
+    validations:
+      required: true
+  
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      description: If using Node.js, what version?
+      placeholder: e.g., 16.14.0
+  
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: If using in browser, which browser and version?
+      placeholder: e.g., Chrome 98
+  
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is
+      placeholder: Tell us what happened
+    validations:
+      required: true
+  
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Create an action with '...'
+        2. Call the action with '...'
+        3. See error
+    validations:
+      required: true
+  
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear description of what you expected to happen
+    validations:
+      required: true
+  
+  - type: textarea
+    id: code
+    attributes:
+      label: Code Sample
+      description: Please provide a minimal code sample that reproduces the issue
+      render: typescript
+  
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Please copy and paste any relevant log output
+      render: shell
+  
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

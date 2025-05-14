@@ -17,14 +17,7 @@ export {cyre, Cyre, CyreLog}
 export default cyre
 
 // Export utility components
-export {
-  pipe,
-  memoize,
-  isEqual,
-  debounce,
-  throttle,
-  tryCatch
-} from './libs/utils'
+export {pipe, memoize, isEqual, tryCatch} from './libs/utils'
 //export {createCyreChannel, type Channel} from './libs/create-cyre-channel'
 
 // Export types
