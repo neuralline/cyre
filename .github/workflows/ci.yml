@@ -2,7 +2,7 @@ name: Cyre CI
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches: [ main, master, develop ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch: # Allow manual triggering
@@ -31,7 +31,14 @@ jobs:
           cache: 'pnpm'
       
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          pnpm install
+          pnpm add -D @vitest/coverage-istanbul
+      
+      # Set NODE_OPTIONS for node.js crypto
+      - name: Set Node Options
+        run: |
+          echo "NODE_OPTIONS=--experimental-global-webcrypto" >> $GITHUB_ENV
       
       - name: Run tests
         run: pnpm test

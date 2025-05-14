@@ -28,7 +28,14 @@ jobs:
           cache: 'pnpm'
       
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          pnpm install
+          pnpm add -D @vitest/coverage-istanbul
+      
+      # Set NODE_OPTIONS for node.js crypto
+      - name: Set Node Options
+        run: |
+          echo "NODE_OPTIONS=--experimental-global-webcrypto" >> $GITHUB_ENV
       
       - name: Run tests with coverage
         run: pnpm coverage

@@ -1,4 +1,5 @@
 // vitest.setup.ts
+import './src/utils/crypto-polyfill' // Import the crypto polyfill first
 
 import {beforeAll, afterAll, vi} from 'vitest'
 

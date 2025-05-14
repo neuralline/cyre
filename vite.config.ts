@@ -12,9 +12,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'],
+    include: [
+      'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}',
+      'test/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'
+    ],
     coverage: {
-      provider: 'istanbul',
+      provider: 'istanbul', // Use istanbul instead of v8
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
       exclude: ['**/*.{test,spec}.ts']

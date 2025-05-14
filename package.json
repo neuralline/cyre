@@ -17,7 +17,8 @@
   "scripts": {
     "dev": "vite build --watch",
     "build": "rimraf dist && vite build && tsc --emitDeclarationOnly",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "lint": "eslint --ext .ts,.tsx src",
     "lint:fix": "eslint --ext .ts,.tsx src --fix",
