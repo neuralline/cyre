@@ -120,12 +120,17 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
     return handleNormalCall(action, payload)
   }
+  // Fix for scheduleIntervalAction function in app.ts
 
   const scheduleIntervalAction = async (
     action: IO,
     interval: number,
     payload?: ActionPayload
   ): Promise<CyreResponse> => {
+    // IMPORTANT: Use the original repeat value directly
+    // We pass it directly to timeKeeper.keep without any conversion
+    const repeatValue = action.repeat
+
     const timerId = timeKeeper.keep(
       interval,
       async () => {
@@ -137,7 +142,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           })
         }
       },
-      action.repeat || true,
+      repeatValue, // Pass the original value directly without any conversion
       action.id
     )
 
@@ -154,7 +159,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       payload: null,
       message: `Scheduled with breathing-adjusted interval: ${Math.round(
         interval
-      )}ms`
+      )}ms. First execution will occur after this interval.`
     }
   }
 
@@ -237,13 +242,12 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     }
   }
 
-  // Fix error handling in CyreAction return
   const handleNormalCall = async (
     action: IO,
     payload?: ActionPayload
   ): Promise<CyreResponse> => {
     try {
-      // Add stronger throttling enforcement
+      // Handle throttling (existing implementation)
       if (action.throttle) {
         const now = Date.now()
         const lastExecution = io.getMetrics(action.id)?.lastExecutionTime || 0
@@ -260,6 +264,62 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           }
         }
       }
+
+      // Handle debouncing
+      if (action.debounce) {
+        // If there's an existing debounce timer, cancel it
+        if (action.debounceTimerId) {
+          timeKeeper.forget(action.debounceTimerId)
+          action.debounceTimerId = undefined
+        }
+
+        // Create a new unique ID for this debounce timer
+        const debounceTimerId = `${action.id}-debounce-${Date.now()}`
+
+        // Store this payload to use when the timer executes
+        const debouncedPayload = payload ?? action.payload
+
+        // Setup a new debounce timer
+        const timerResult = timeKeeper.keep(
+          action.debounce,
+          async () => {
+            // Execute the action after the debounce delay
+            const result = await useDispatch({
+              ...action,
+              timeOfCreation: performance.now(),
+              payload: debouncedPayload,
+              // Clear the debounce timer ID since it's now executing
+              debounceTimerId: undefined
+            })
+
+            // Update metrics after execution
+            metricsState.recordCall(action.priority?.level)
+          },
+          false, // Don't repeat
+          debounceTimerId
+        )
+
+        // Store the timer ID to be able to cancel it later
+        if (timerResult.kind === 'ok') {
+          // Update the action in the store with the debounce timer ID
+          action.debounceTimerId = debounceTimerId
+          io.set(action)
+
+          return {
+            ok: true,
+            payload: null,
+            message: `Debounced: will execute after ${action.debounce}ms`
+          }
+        } else {
+          return {
+            ok: false,
+            payload: null,
+            message: `Failed to setup debounce: ${timerResult.error.message}`
+          }
+        }
+      }
+
+      // No throttle or debounce, execute normally
       const result = await useDispatch({
         ...action,
         timeOfCreation: performance.now(),

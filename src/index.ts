@@ -7,8 +7,14 @@
 */
 
 // Export main components
-export {Cyre, cyre, CyreLog} from './app'
-export default './app'
+// Import the cyre instance and related utilities from app.ts
+import {cyre, Cyre, CyreLog} from './app'
+
+// Export everything as both named exports and default export
+export {cyre, Cyre, CyreLog}
+
+// Also export cyre as the default export for compatibility
+export default cyre
 
 // Export utility components
 export {

@@ -1,7 +1,6 @@
 //src/test/quantum-surge.ts
 
-import {cyre} from '../src/app'
-import {CyreLog} from '../src/components/cyre-logger'
+import {cyre, CyreLog} from '../src/app'
 
 /*
 
@@ -77,20 +76,17 @@ cyre.on([
 cyre.action([
   {
     id: 'quantum-initiator',
-    type: 'quantum-initiator',
     payload: {start: true},
-    repeat: false, // Reduced repeats due to higher intensity
+    repeat: 5, // Reduced repeats due to higher intensity
     interval: 50 // Faster interval
   },
   {
     id: 'quantum-amplifier',
-    type: 'quantum-amplifier',
     payload: null,
     throttle: 100 // Start with minimal protection
   },
   {
     id: 'quantum-reactor',
-    type: 'quantum-reactor',
     payload: null,
     debounce: 100 // Start with minimal protection
   }

@@ -33,7 +33,7 @@ interface BaseProperties {
 
 // Timer Related Types
 export type TimerStatus = 'active' | 'paused'
-export type TimerRepeat = number | boolean
+export type TimerRepeat = number | boolean | typeof Infinity
 
 export interface dataDefinitions extends BaseProperties {
   interval?: number
@@ -61,7 +61,7 @@ export interface IO extends BaseProperties {
   interval?: number
   throttle?: number
   debounce?: number
-  repeat?: TimerRepeat
+  repeat?: number | boolean // Ensure boolean is explicitly allowed
   hold?: number
   holding?: boolean
   isThrottling?: boolean | number
