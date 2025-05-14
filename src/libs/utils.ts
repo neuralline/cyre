@@ -90,68 +90,38 @@ export const measurePerformance = <TArgs extends Array<unknown>, TResult>(
   }
 }
 
-// /**
-//  * Creates a debounced version of a function
-//  */
-// export const debounce = <TArgs extends Array<unknown>, TResult>(
-//   fn: (...args: TArgs) => TResult,
-//   delay: number
-// ) => {
-//   let timeoutId: NodeJS.Timeout
-//   let latestArgs: TArgs
+// src/utils/crypto-polyfill.ts
 
-//   const debounced = (...args: TArgs): void => {
-//     latestArgs = args
-//     clearTimeout(timeoutId)
-//     timeoutId = setTimeout(() => fn(...latestArgs), delay)
-//   }
+/**
+ * Polyfill for crypto.randomUUID() in test environments
+ * This resolves the "crypto is not defined" error in tests
+ */
 
-//   debounced.cancel = () => {
-//     clearTimeout(timeoutId)
-//   }
+// Check if crypto is available globally
+if (typeof crypto === 'undefined') {
+  // Create a simple polyfill for minimal crypto functionality
+  // @ts-ignore - we're intentionally adding to the global scope
+  global.crypto = {
+    // Simple UUID v4 implementation for tests
+    randomUUID: (): `${string}-${string}-${string}-${string}-${string}` => {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = (Math.random() * 16) | 0
+        const v = c === 'x' ? r : (r & 0x3) | 0x8
+        return v.toString(16)
+      }) as `${string}-${string}-${string}-${string}-${string}` // Cast to the expected type
+    },
+    // Simple implementation of getRandomValues for tests
+    getRandomValues: <T extends Uint8Array>(array: T | any): T | any => {
+      if (array === null) return null // Handle null case
+      for (let i = 0; i < array.length; i++) {
+        array[i] = Math.floor(Math.random() * 256) // No need for casting
+      }
+      return array
+    }
+  }
+}
 
-//   return debounced
-// }
-
-// /**
-//  * Creates a throttled version of a function
-//  */
-// export const throttle = <TArgs extends Array<unknown>, TResult>(
-//   fn: (...args: TArgs) => TResult,
-//   limit: number
-// ) => {
-//   let timeoutId: NodeJS.Timeout | null = null
-//   let lastRun = 0
-//   let latestArgs: TArgs
-
-//   const throttled = (...args: TArgs): void => {
-//     latestArgs = args
-//     const now = Date.now()
-
-//     if (lastRun && now < lastRun + limit) {
-//       // If last run is too recent, schedule for later
-//       if (timeoutId === null) {
-//         timeoutId = setTimeout(() => {
-//           lastRun = Date.now()
-//           timeoutId = null
-//           fn(...latestArgs)
-//         }, limit)
-//       }
-//     } else {
-//       lastRun = now
-//       fn(...args)
-//     }
-//   }
-
-//   throttled.cancel = () => {
-//     if (timeoutId) {
-//       clearTimeout(timeoutId)
-//       timeoutId = null
-//     }
-//   }
-
-//   return throttled
-// }
+export {}
 
 /**
  * Option type for handling nullable values

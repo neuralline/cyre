@@ -21,20 +21,42 @@ jobs:
         with:
           fetch-depth: 0
       
+      # Setup PNPM with explicit version
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+          run_install: false
+      
+      # Setup Node.js with correct caching
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
           registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
       
+      # Now run the install with proper error handling
       - name: Install dependencies
-        run: npm ci || npm install
+        run: |
+          # Make sure pnpm-lock.yaml exists
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "Creating pnpm-lock.yaml"
+            pnpm install --lockfile-only
+          fi
+          
+          pnpm install
+      
+      # Set NODE_OPTIONS for node.js crypto (in case tests use it)
+      - name: Set Node Options
+        run: |
+          echo "NODE_OPTIONS=--experimental-global-webcrypto" >> $GITHUB_ENV
       
       - name: Run tests
-        run: npm test
+        run: pnpm test
       
       - name: Build package
-        run: npm run build
+        run: pnpm build
       
       - name: Version bump (manual trigger)
         if: github.event_name == 'workflow_dispatch'
@@ -42,9 +64,9 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           if [[ "${{ github.event.inputs.version }}" =~ ^(patch|minor|major)$ ]]; then
-            npm version ${{ github.event.inputs.version }} -m "Bump version to %s [skip ci]"
+            pnpm version ${{ github.event.inputs.version }} -m "Bump version to %s [skip ci]"
           else
-            npm version ${{ github.event.inputs.version }} -m "Set version to %s [skip ci]"
+            pnpm version ${{ github.event.inputs.version }} -m "Set version to %s [skip ci]"
           fi
           
       - name: Push version changes
@@ -52,6 +74,6 @@ jobs:
         run: git push --follow-tags
       
       - name: Publish to npm
-        run: npm publish
+        run: pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
