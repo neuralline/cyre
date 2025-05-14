@@ -90,68 +90,68 @@ export const measurePerformance = <TArgs extends Array<unknown>, TResult>(
   }
 }
 
-/**
- * Creates a debounced version of a function
- */
-export const debounce = <TArgs extends Array<unknown>, TResult>(
-  fn: (...args: TArgs) => TResult,
-  delay: number
-) => {
-  let timeoutId: NodeJS.Timeout
-  let latestArgs: TArgs
+// /**
+//  * Creates a debounced version of a function
+//  */
+// export const debounce = <TArgs extends Array<unknown>, TResult>(
+//   fn: (...args: TArgs) => TResult,
+//   delay: number
+// ) => {
+//   let timeoutId: NodeJS.Timeout
+//   let latestArgs: TArgs
 
-  const debounced = (...args: TArgs): void => {
-    latestArgs = args
-    clearTimeout(timeoutId)
-    timeoutId = setTimeout(() => fn(...latestArgs), delay)
-  }
+//   const debounced = (...args: TArgs): void => {
+//     latestArgs = args
+//     clearTimeout(timeoutId)
+//     timeoutId = setTimeout(() => fn(...latestArgs), delay)
+//   }
 
-  debounced.cancel = () => {
-    clearTimeout(timeoutId)
-  }
+//   debounced.cancel = () => {
+//     clearTimeout(timeoutId)
+//   }
 
-  return debounced
-}
+//   return debounced
+// }
 
-/**
- * Creates a throttled version of a function
- */
-export const throttle = <TArgs extends Array<unknown>, TResult>(
-  fn: (...args: TArgs) => TResult,
-  limit: number
-) => {
-  let timeoutId: NodeJS.Timeout | null = null
-  let lastRun = 0
-  let latestArgs: TArgs
+// /**
+//  * Creates a throttled version of a function
+//  */
+// export const throttle = <TArgs extends Array<unknown>, TResult>(
+//   fn: (...args: TArgs) => TResult,
+//   limit: number
+// ) => {
+//   let timeoutId: NodeJS.Timeout | null = null
+//   let lastRun = 0
+//   let latestArgs: TArgs
 
-  const throttled = (...args: TArgs): void => {
-    latestArgs = args
-    const now = Date.now()
+//   const throttled = (...args: TArgs): void => {
+//     latestArgs = args
+//     const now = Date.now()
 
-    if (lastRun && now < lastRun + limit) {
-      // If last run is too recent, schedule for later
-      if (timeoutId === null) {
-        timeoutId = setTimeout(() => {
-          lastRun = Date.now()
-          timeoutId = null
-          fn(...latestArgs)
-        }, limit)
-      }
-    } else {
-      lastRun = now
-      fn(...args)
-    }
-  }
+//     if (lastRun && now < lastRun + limit) {
+//       // If last run is too recent, schedule for later
+//       if (timeoutId === null) {
+//         timeoutId = setTimeout(() => {
+//           lastRun = Date.now()
+//           timeoutId = null
+//           fn(...latestArgs)
+//         }, limit)
+//       }
+//     } else {
+//       lastRun = now
+//       fn(...args)
+//     }
+//   }
 
-  throttled.cancel = () => {
-    if (timeoutId) {
-      clearTimeout(timeoutId)
-      timeoutId = null
-    }
-  }
+//   throttled.cancel = () => {
+//     if (timeoutId) {
+//       clearTimeout(timeoutId)
+//       timeoutId = null
+//     }
+//   }
 
-  return throttled
-}
+//   return throttled
+// }
 
 /**
  * Option type for handling nullable values
