@@ -19,19 +19,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       
+      # Setup PNPM with explicit version
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
         with:
           version: 8
+          run_install: false # Don't run install yet
       
+      # Setup Node.js with correct caching
       - name: Set up Node.js ${{ matrix.node }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node }}
-          cache: 'pnpm'
+          cache: 'pnpm' # This tells setup-node to use pnpm for caching
       
+      # Now run the install with proper error handling
       - name: Install dependencies
         run: |
+          # Make sure pnpm-lock.yaml exists before CI runs
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "Creating pnpm-lock.yaml"
+            pnpm install --lockfile-only
+          fi
+          
+          # Install dependencies, including coverage tool
           pnpm install
           pnpm add -D @vitest/coverage-istanbul
       
@@ -55,19 +66,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       
+      # Setup PNPM with explicit version
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
         with:
           version: 8
+          run_install: false
       
+      # Setup Node.js with correct caching
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
           cache: 'pnpm'
       
+      # Now run the install with proper error handling
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          # Make sure pnpm-lock.yaml exists
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "Creating pnpm-lock.yaml"
+            pnpm install --lockfile-only
+          fi
+          
+          pnpm install
       
       - name: Build package
         run: pnpm build

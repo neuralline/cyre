@@ -21,11 +21,14 @@ jobs:
         with:
           fetch-depth: 0
       
+      # Setup PNPM with explicit version
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
         with:
           version: 8
+          run_install: false
       
+      # Setup Node.js with correct caching
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
@@ -33,8 +36,21 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
       
+      # Now run the install with proper error handling
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          # Make sure pnpm-lock.yaml exists
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "Creating pnpm-lock.yaml"
+            pnpm install --lockfile-only
+          fi
+          
+          pnpm install
+      
+      # Set NODE_OPTIONS for node.js crypto (in case tests use it)
+      - name: Set Node Options
+        run: |
+          echo "NODE_OPTIONS=--experimental-global-webcrypto" >> $GITHUB_ENV
       
       - name: Run tests
         run: pnpm test

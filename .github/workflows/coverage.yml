@@ -16,19 +16,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       
+      # Setup PNPM with explicit version
       - name: Setup PNPM
         uses: pnpm/action-setup@v2
         with:
           version: 8
+          run_install: false
       
+      # Setup Node.js with correct caching
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
           cache: 'pnpm'
       
+      # Now run the install with proper error handling
       - name: Install dependencies
         run: |
+          # Make sure pnpm-lock.yaml exists
+          if [ ! -f "pnpm-lock.yaml" ]; then
+            echo "Creating pnpm-lock.yaml"
+            pnpm install --lockfile-only
+          fi
+          
           pnpm install
           pnpm add -D @vitest/coverage-istanbul
       
@@ -39,6 +49,17 @@ jobs:
       
       - name: Run tests with coverage
         run: pnpm coverage
+      
+      # Add job summary with coverage results
+      - name: Generate coverage summary
+        run: |
+          echo "## Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage reports generated successfully." >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "./coverage/coverage-summary.json" ]; then
+            TOTAL=$(cat ./coverage/coverage-summary.json | grep -o '"pct": [0-9.]*' | head -1 | grep -o '[0-9.]*')
+            echo "Total coverage: ${TOTAL}%" >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
