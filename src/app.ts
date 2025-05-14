@@ -120,12 +120,17 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
     return handleNormalCall(action, payload)
   }
+  // Fix for scheduleIntervalAction function in app.ts
 
   const scheduleIntervalAction = async (
     action: IO,
     interval: number,
     payload?: ActionPayload
   ): Promise<CyreResponse> => {
+    // IMPORTANT: Use the original repeat value directly
+    // We pass it directly to timeKeeper.keep without any conversion
+    const repeatValue = action.repeat
+
     const timerId = timeKeeper.keep(
       interval,
       async () => {
@@ -137,7 +142,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           })
         }
       },
-      action.repeat || true,
+      repeatValue, // Pass the original value directly without any conversion
       action.id
     )
 
@@ -154,7 +159,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       payload: null,
       message: `Scheduled with breathing-adjusted interval: ${Math.round(
         interval
-      )}ms`
+      )}ms. First execution will occur after this interval.`
     }
   }
 

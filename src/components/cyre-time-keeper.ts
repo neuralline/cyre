@@ -56,6 +56,15 @@ const convertDurationToMs = (duration: TimerDuration): number => {
   )
 }
 
+const shouldContinueRepeating = (repeat: TimerRepeat | undefined): boolean => {
+  // Critical function to determine if repeat should continue
+  return (
+    repeat === true ||
+    repeat === Infinity ||
+    (typeof repeat === 'number' && repeat > 0)
+  )
+}
+
 const initializeFormation = (
   id: string,
   rawDuration: number,
@@ -75,13 +84,15 @@ const initializeFormation = (
   const systemState = metricsState.get()
   const stressFactor = 1 + (systemState.stress?.combined || 0)
 
+  // Create the formation with the ORIGINAL repeat value
+  // No conversion to avoid any issues
   const formation: Timer = {
     id,
     startTime: now,
     duration: isLongDuration ? TIMING.MAX_TIMEOUT : rawDuration * stressFactor,
     originalDuration: rawDuration,
     callback,
-    repeat,
+    repeat: repeat, // Store the original repeat value
     executionCount: 0,
     lastExecutionTime: 0,
     nextExecutionTime:
@@ -140,21 +151,18 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
 
+    // Only decrement numeric repeat values
     if (
-      currentFormation.repeat !== true &&
-      typeof currentFormation.repeat === 'number'
+      typeof currentFormation.repeat === 'number' &&
+      currentFormation.repeat > 0
     ) {
       currentFormation.repeat = currentFormation.repeat - 1
     }
 
     timeline.add(currentFormation)
 
-    // Check if we should continue repeating
-    if (
-      currentFormation.repeat === true ||
-      (typeof currentFormation.repeat === 'number' &&
-        currentFormation.repeat > 0)
-    ) {
+    // Use the consistent function to check if should continue
+    if (shouldContinueRepeating(currentFormation.repeat)) {
       scheduleNext(currentFormation)
     } else {
       timeline.forget(currentFormation.id)
@@ -216,8 +224,6 @@ const createRecuperationChecker = (formation: Timer): NodeJS.Timeout => {
   timeoutRef = setTimeout(check, checkInterval)
   return timeoutRef
 }
-
-// src/components/cyre-time-keeper.ts (partial)
 
 const scheduleNext = (formation: Timer): void => {
   if (!formation || !formation.id) return
@@ -306,6 +312,7 @@ const TimeKeeper = {
       const msValue =
         typeof duration === 'number' ? duration : convertDurationToMs(duration)
 
+      // Pass the original repeat value without any conversion
       const formation = initializeFormation(id, msValue, callback, repeat)
       timeline.add(formation)
       scheduleNext(formation)

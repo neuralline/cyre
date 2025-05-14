@@ -1,3 +1,4 @@
+// example/basic.ts
 import {cyre, CyreLog} from '../src/app'
 //export default cyre
 
@@ -53,6 +54,23 @@ cyre.action([
 ])
 
 // Example calls (now without await to allow parallel execution)
-cyre.call('userProfile', {name: 'Jane'})
-cyre.call('action1', {data: 'John'})
-cyre.call('action2', {data: 'Doe'})
+// cyre.call('userProfile', {name: 'Jane'})
+// cyre.call('action1', {data: 'John'})
+// cyre.call('action2', {data: 'Doe'})
+
+// Define an action with repeat: true
+cyre.action({
+  id: 'forever-action',
+  type: 'repeating',
+  payload: {value: 42},
+  interval: 2000, // 2 seconds
+  repeat: true // Should repeat indefinitely
+})
+
+// Listen for events
+cyre.on('forever-action', payload => {
+  console.log('Action executed at:', new Date().toISOString(), payload)
+})
+
+// Trigger the action - should repeat indefinitely
+cyre.call('forever-action')

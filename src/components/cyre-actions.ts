@@ -122,7 +122,7 @@ const executeAction = (action: ActionResult): ActionResult => {
       status: 'completed'
     }
   } catch (error) {
-    CyreLog.error(`${MSG.ACTION_EXECUTE_FAILED}: ${error}`)
+    CyreLog.error(`${MSG.ACTION_EXECUTE_FAILED}: ${action}`)
     // Return error result and prevent further pipeline execution
     return {
       ...action,
