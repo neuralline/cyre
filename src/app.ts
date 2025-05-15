@@ -49,6 +49,7 @@ interface CyreInstance {
     ) => void | Promise<void> | {id: string; payload?: unknown}
   ) => SubscriptionResponse
   shutdown: () => void
+  lock: () => void
   status: () => boolean
   forget: (id: string) => boolean
   get: (id: string) => IO | undefined
@@ -67,7 +68,8 @@ interface CyreInstance {
 }
 
 const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
-  let isShutdown = false
+  let isShutdown = false // Cyre shutdown state
+  let isLocked = false // Cyre locked state
 
   const initializeBreathing = () => {
     timeKeeper.keep(
@@ -83,6 +85,27 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       },
       true
     )
+  }
+
+  const lock = (): CyreResponse => {
+    if (isShutdown) {
+      return {
+        ok: false,
+        message: MSG.CALL_OFFLINE,
+        payload: null
+      }
+    }
+
+    isLocked = true
+    CyreLog.info(
+      'Cyre system locked - no new channels or subscribers can be added'
+    )
+
+    return {
+      ok: true,
+      message: 'System locked successfully',
+      payload: null
+    }
   }
 
   const processCall = async (
@@ -376,6 +399,10 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       CyreLog.error(MSG.OFFLINE)
       return
     }
+    if (isLocked) {
+      CyreLog.error('Cannot add new channels: system is locked')
+      return
+    }
 
     try {
       if (Array.isArray(attribute)) {
@@ -590,6 +617,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     action,
     on: subscribe,
     shutdown,
+    lock,
     status,
     forget,
     get,

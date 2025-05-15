@@ -56,13 +56,23 @@ const convertDurationToMs = (duration: TimerDuration): number => {
   )
 }
 
+/**
+ * Ensures robust determination of whether a timer should continue repeating
+ * This handles both boolean values (for infinite repetition) and numbers (for countdown)
+ */
 const shouldContinueRepeating = (repeat: TimerRepeat | undefined): boolean => {
-  // Critical function to determine if repeat should continue
-  return (
-    repeat === true ||
-    repeat === Infinity ||
-    (typeof repeat === 'number' && repeat > 0)
-  )
+  // Handle boolean true or Infinity for infinite repetition
+  if (repeat === true || repeat === Infinity) {
+    return true
+  }
+
+  // Handle positive numbers for countdown repetition
+  if (typeof repeat === 'number' && repeat > 0) {
+    return true
+  }
+
+  // Any other value means no repetition
+  return false
 }
 
 const initializeFormation = (
@@ -92,7 +102,7 @@ const initializeFormation = (
     duration: isLongDuration ? TIMING.MAX_TIMEOUT : rawDuration * stressFactor,
     originalDuration: rawDuration,
     callback,
-    repeat: repeat, // Store the original repeat value
+    repeat: repeat, // Store the original repeat value exactly as provided
     executionCount: 0,
     lastExecutionTime: 0,
     nextExecutionTime:
@@ -151,13 +161,14 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
 
-    // Only decrement numeric repeat values
+    // Fixed: Only decrement numeric repeat values, preserve boolean values
     if (
       typeof currentFormation.repeat === 'number' &&
       currentFormation.repeat > 0
     ) {
       currentFormation.repeat = currentFormation.repeat - 1
     }
+    // Do not modify repeat if it's boolean true (for infinite repetition)
 
     timeline.add(currentFormation)
 
