@@ -93,6 +93,16 @@ export const metricsState = {
   hibernating: false,
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
+  isLocked: false,
+
+  lock: (): void => {
+    metricsState.isLocked = true
+    metricsState.update({isLocked: true})
+  },
+
+  isSystemLocked: (): boolean => {
+    return metricsState.isLocked
+  },
 
   get: (): Readonly<MetricsState> => {
     const state = metricsStore.get('quantum')!
@@ -200,6 +210,7 @@ export const metricsState = {
     metricsState.inRecuperation = false
     metricsState.hibernating = false
     metricsState.activeFormations = 0
+    metricsState.isLocked = false
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
       metricsState.recuperationInterval = undefined

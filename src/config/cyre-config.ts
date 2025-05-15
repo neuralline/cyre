@@ -27,6 +27,9 @@ export const MSG = {
   OFFLINE: '@cyre: System is offline',
   ONLINE: '@cyre: System is online',
   WELCOME: '@cyre: Welcome! How can I assist you?',
+  SYSTEM_LOCKED: 'System is locked: cannot add new channels or subscribers',
+  SYSTEM_LOCKED_CHANNELS: 'Cannot add new channels: system is locked',
+  SYSTEM_LOCKED_SUBSCRIBERS: 'Cannot add new subscribers: system is locked',
 
   // Action Related
   ACTION_PREPARE_FAILED: 'Failed to prepare action: invalid configuration',
@@ -197,7 +200,8 @@ export const defaultMetrics: QuantumState = {
   lastUpdate: Date.now(),
   inRecuperation: false,
   hibernating: false,
-  activeFormations: 0
+  activeFormations: 0,
+  isLocked: false
 }
 
 export const systemMetrics = {

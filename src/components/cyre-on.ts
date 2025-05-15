@@ -1,4 +1,5 @@
 // src/components/cyre-on.ts
+import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
 import {On, Subscriber, SubscriptionResponse, IO} from '../interfaces/interface'
@@ -77,10 +78,25 @@ const addSingleSubscriber = (
 
     const {subscriber} = validation
 
-    // Check for existing subscriber
+    // Enhanced duplicate subscriber detection
     const existing = subscribers.get(subscriber.id)
     if (existing) {
-      CyreLog.info(`${subscriber.id}: ${MSG.SUBSCRIPTION_EXISTS}`)
+      // Add more prominent warning with both CyreLog and console.warn
+      const duplicateMessage = `DUPLICATE LISTENER DETECTED: Channel "${subscriber.id}" already has a listener attached!`
+
+      // Use warning level instead of just info
+      CyreLog.warn(duplicateMessage)
+
+      // Also log directly to console for better visibility during development
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`🔥 ${duplicateMessage}`)
+        console.warn(
+          'This may cause unexpected behavior if the previous listener is still active.'
+        )
+        console.warn(
+          'Consider using cyre.forget() to remove previous listeners before adding new ones.'
+        )
+      }
     }
 
     // Add or update subscriber
@@ -155,6 +171,14 @@ export const subscribe: On = (
     payload?: unknown
   ) => void | Promise<void> | {id: string; payload?: unknown}
 ): SubscriptionResponse => {
+  //check if system new registry is locked
+  if (metricsState.isSystemLocked()) {
+    CyreLog.error(MSG.SYSTEM_LOCKED_SUBSCRIBERS)
+    return {
+      ok: false,
+      message: MSG.SYSTEM_LOCKED_SUBSCRIBERS
+    }
+  }
   // Handle array of subscribers
   if (Array.isArray(type)) {
     return addMultipleSubscribers(type)
