@@ -1,4 +1,4 @@
-// src/elements/data-definitions.ts
+// src/elements/data-definitions.ts - Updated to better handle boolean values
 
 const dataDefinitions = {
   id: (attribute: string = '') => {
@@ -47,16 +47,29 @@ const dataDefinitions = {
           required: true
         }
   },
-  repeat: (attribute: number = 0) => {
-    return Number.isInteger(attribute)
-      ? {ok: true, payload: attribute}
-      : {
-          ok: false,
-          payload: 0,
-          message: `'${attribute}' invalid action.repeat value`,
-          required: false
-        }
+
+  // Updated to properly handle boolean values for repeat
+  repeat: (attribute: any = 0) => {
+    if (typeof attribute === 'number') {
+      return {ok: true, payload: attribute}
+    }
+
+    if (typeof attribute === 'boolean') {
+      return {ok: true, payload: attribute}
+    }
+
+    if (attribute === Infinity) {
+      return {ok: true, payload: attribute}
+    }
+
+    return {
+      ok: false,
+      payload: 0,
+      message: `'${attribute}' invalid action.repeat value. Expected number, boolean, or Infinity.`,
+      required: false
+    }
   },
+
   message: (attribute: string = '') => {
     return typeof attribute === 'string'
       ? {ok: true, payload: attribute}
