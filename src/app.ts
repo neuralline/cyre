@@ -96,7 +96,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       }
     }
 
-    isLocked = true
+    metricsState.isLocked = true
     CyreLog.info(
       'Cyre system locked - no new channels or subscribers can be added'
     )
@@ -399,8 +399,8 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       CyreLog.error(MSG.OFFLINE)
       return
     }
-    if (isLocked) {
-      CyreLog.error('Cannot add new channels: system is locked')
+    if (metricsState.isLocked) {
+      CyreLog.error(MSG.SYSTEM_LOCKED_CHANNELS)
       return
     }
 

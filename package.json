@@ -3,17 +3,6 @@
   "version": "3.1.6",
   "description": "Reactive and dynamic networking system with quantum-timed event orchestration, intelligent load balancing, and advanced state management for JavaScript applications",
   "input": "src/index.ts",
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/es/index.js",
-  "browser": "dist/umd/cyre.js",
-  "unpkg": "dist/umd/cyre.min.js",
-  "files": [
-    "dist",
-    "LICENSE",
-    "README.md",
-    "package.json"
-  ],
-  "sideEffects": false,
   "scripts": {
     "dev": "vite build --watch",
     "build": "rimraf dist && vite build && tsc --emitDeclarationOnly",
@@ -22,13 +11,22 @@
     "coverage": "vitest run --coverage",
     "lint": "eslint --ext .ts,.tsx src",
     "lint:fix": "eslint --ext .ts,.tsx src --fix",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "version": "npm run build && git add -A dist",
+    "postversion": "git push && git push --tags"
   },
   "author": "Darik.",
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/neuralline/cyre.git"
+    "url": "git+https://github.com/neuralline/cyre.git"
+  },
+  "homepage": "https://github.com/neuralline/cyre#readme",
+  "bugs": {
+    "url": "https://github.com/neuralline/cyre/issues"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
@@ -61,6 +59,18 @@
   ],
   "type": "module",
   "types": "./dist/types/index.d.ts",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/es/index.js",
+  "browser": "dist/umd/cyre.js",
+  "unpkg": "dist/umd/cyre.min.js",
+  "files": [
+    "dist",
+    "docs",
+    "LICENSE",
+    "README.md",
+    "package.json"
+  ],
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
@@ -70,7 +80,7 @@
     }
   },
   "engines": {
-    "node": ">=16.0.0"
+    "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977"
+  "packageManager": "pnpm@10.11.0"
 }

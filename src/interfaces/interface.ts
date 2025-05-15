@@ -190,6 +190,7 @@ export interface QuantumState {
   hibernating: boolean
   recuperationInterval?: NodeJS.Timeout
   activeFormations: number
+  isLocked: boolean
 }
 
 // Enums
