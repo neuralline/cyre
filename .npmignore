@@ -27,6 +27,7 @@ node_modules/
 *.tsbuildinfo
 .env
 .env.*
+.npmrc
 
 # Documentation that's redundant with npm
 CODE_OF_CONDUCT.md

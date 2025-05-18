@@ -143,8 +143,11 @@ export const timeline = {
   },
   get: (id: StateKey): Timer | undefined => timelineStore.get(id),
   forget: (id: StateKey): boolean => {
-    const timer = timelineStore.get(id)
-    if (timer?.timeoutId) clearTimeout(timer.timeoutId)
+    const timers = timelineStore.getAll().filter(timer => timer.id === id)
+    timers.forEach(timer => {
+      if (timer.timeoutId) clearTimeout(timer.timeoutId)
+      if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
+    })
     return timelineStore.forget(id)
   },
   clear: (): void => {

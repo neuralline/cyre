@@ -383,7 +383,8 @@ describe('Cyre Performance Metrics and Monitoring', () => {
       type: 'channel-metrics',
       payload: {initial: true},
       interval: 5000, // Add interval to create a formation
-      repeat: 3
+      repeat: 3,
+      delay: 0
     })
 
     // Call action to initialize

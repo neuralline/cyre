@@ -54,28 +54,70 @@ export interface dataDefinitions extends BaseProperties {
   skipReason?: string
 }
 
+/**
+ * Configuration object for CYRE actions
+ * @interface IO
+ */
 export interface IO extends BaseProperties {
-  appID?: string
-  timeOfCreation?: number
+  /** Unique identifier for this action */
+  id: string
+
+  /** Optional grouping category (defaults to id if not specified) */
   type?: string
+
+  /** Initial or default payload data */
+  payload?: ActionPayload
+
+  /** Milliseconds between executions for repeated actions */
   interval?: number
+
+  /**
+   * Number of times to repeat execution, true for infinite repeats
+   * @example repeat: 3 // Execute a total of 3 times
+   * @example repeat: true // Repeat indefinitely
+   */
+  repeat?: number | boolean
+
+  /**
+   * Milliseconds to delay before first execution
+   * @example delay: 1000 // Wait 1 second before first execution
+   */
+  delay?: number
+
+  /**
+   * Minimum milliseconds between executions (rate limiting)
+   * @example throttle: 500 // At most one execution per 500ms
+   */
   throttle?: number
+
+  /**
+   * Collapse rapid calls within this window (milliseconds)
+   * @example debounce: 300 // Wait 300ms after last call before executing
+   */
   debounce?: number
-  repeat?: number | boolean // Ensure boolean is explicitly allowed
-  hold?: number
-  holding?: boolean
-  isThrottling?: boolean | number
-  isBouncing?: boolean | number
-  onError?: string
-  intraLink?: {
-    id: string
-    payload: ActionPayload
-  }
+
+  /** Only execute if payload has changed from previous execution */
   detectChanges?: boolean
-  previousPayload?: ActionPayload
-  skipped?: boolean
-  skipReason?: string
+
+  /** Enable logging for this action */
+  log?: boolean
+
+  /** ID of the debounce timer if one is active */
+  debounceTimerId?: string
+
+  /**
+   * Priority level for execution during system stress
+   * @example priority: { level: 'high' }
+   */
   priority?: PriorityConfig
+
+  /**
+   * Middleware functions to process action before execution
+   * @example middleware: ['validate', 'transform']
+   */
+  middleware?: string[]
+
+  /** Allow indexing with string keys for additional properties */
   [key: string]: any
 }
 
@@ -102,6 +144,7 @@ export interface Subscriber extends ISubscriber {}
 export interface SubscriptionResponse {
   ok: boolean
   message: string
+  unsubscribe?: () => boolean
 }
 
 export type On = (

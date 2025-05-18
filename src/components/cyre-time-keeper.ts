@@ -8,6 +8,36 @@ import {timeline} from '../context/state'
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
       Q0.0U0.0A0.0N0.0T0.0U0.0M0
+
+
+
+
+
+      Cyre Interval, Delay, Repeat Logic
+
+      Interval Actions:
+      First execution WAITS for the interval, then repeats 
+      Aligns with setInterval behavior that developers expect
+
+      Delay Actions:
+      First execution WAITS for delay
+      overwrites interval for initial execution waiting time
+     
+
+      Repeat Handling:
+      repeat specifies TOTAL number of executions 
+      repeat: 3 = Execute exactly 3 times total
+
+
+      Combined Delay and Interval:
+      Delay applies first, then interval timing for subsequent executions
+      No immediate executions for interval or delay actions
+
+
+      Edge Cases:
+      { repeat: 0 } = Do not execute at all. 
+      { repeat: 1, interval: 1000 } = Wait 1000ms, execute once, done.
+      { delay: 0 } = wait 0ms then execute.
 */
 
 const createPrecisionTimer = (
@@ -54,25 +84,6 @@ const convertDurationToMs = (duration: TimerDuration): number => {
     (duration.seconds || 0) * 1000 +
     (duration.milliseconds || 0)
   )
-}
-
-/**
- * Ensures robust determination of whether a timer should continue repeating
- * This handles both boolean values (for infinite repetition) and numbers (for countdown)
- */
-const shouldContinueRepeating = (repeat: TimerRepeat | undefined): boolean => {
-  // Handle boolean true or Infinity for infinite repetition
-  if (repeat === true || repeat === Infinity) {
-    return true
-  }
-
-  // Handle positive numbers for countdown repetition
-  if (typeof repeat === 'number' && repeat > 0) {
-    return true
-  }
-
-  // Any other value means no repetition
-  return false
 }
 
 const initializeFormation = (
@@ -129,6 +140,7 @@ const initializeFormation = (
   return formation
 }
 
+// Excerpt from executeCallback in cyre-time-keeper.ts
 const executeCallback = async (formation: Timer): Promise<void> => {
   if (!formation || !formation.id) return
 
@@ -161,19 +173,25 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
 
-    // Fixed: Only decrement numeric repeat values, preserve boolean values
+    // Decrement repeat count appropriately
+    // For numeric repeat values, decrease by 1 after execution
     if (
       typeof currentFormation.repeat === 'number' &&
       currentFormation.repeat > 0
     ) {
       currentFormation.repeat = currentFormation.repeat - 1
     }
-    // Do not modify repeat if it's boolean true (for infinite repetition)
+    // Do not modify 'true' or 'infinite' repeat values
 
     timeline.add(currentFormation)
 
     // Use the consistent function to check if should continue
-    if (shouldContinueRepeating(currentFormation.repeat)) {
+    // Only schedule another execution if we haven't reached our repeat count
+    if (
+      currentFormation.repeat === true ||
+      (typeof currentFormation.repeat === 'number' &&
+        currentFormation.repeat > 0)
+    ) {
       scheduleNext(currentFormation)
     } else {
       timeline.forget(currentFormation.id)
