@@ -16,40 +16,37 @@ import {
   HistoryEntry,
   Result,
   SubscriptionWithCleanup
-} from '../interfaces/hooks'
+} from '../interfaces/hooks-interface'
+import {
+  registerMiddleware,
+  MiddlewareFunction
+} from '../components/cyre-middleware'
 
 /**
  * Creates a Cyre channel with enhanced capabilities
  *
- * @param prefix - Optional prefix for channel ID (default: "channel")
- * @param options - Optional channel configuration
+ * @param options - Channel configuration options including identification and protection
  * @returns A channel object with CYRE operations bound to a specific ID
  */
 export function useCyre<TPayload = ActionPayload>(
-  prefix = 'channel',
   options: CyreHookOptions<TPayload> = {}
 ): CyreHook<TPayload> {
-  const channelId = `${prefix}-${crypto.randomUUID()}`
+  // Use name/tag from options, or generate a default identifier
+  const channelName = options.name || options.tag || 'channel'
+  const channelId = `${channelName}-${crypto.randomUUID()}`
 
   // Configure debugging
   const debugEnabled = options.debug === true
   const debugLog = debugEnabled
     ? (message: string, data?: any) =>
         console.log(
-          `[Channel:${channelId}] ${message}`,
+          `[${channelName}:${channelId.slice(-8)}] ${message}`,
           data !== undefined ? data : ''
         )
     : () => {}
 
   // Initialize state tracking
   let isInitialized = false
-
-  // Initialize middleware system
-  const middlewares: CyreMiddleware<TPayload>[] = []
-
-  // Initialize history tracking
-  const history: HistoryEntry<TPayload>[] = []
-  const historyLimit = 10
 
   // Initialize subscription tracking
   interface ChannelSubscription {
@@ -71,6 +68,9 @@ export function useCyre<TPayload = ActionPayload>(
         debugLog('Initializing channel')
       }
 
+      // Collect middleware IDs from action config if present
+      const existingMiddleware = config.middleware || []
+
       cyre.action({
         ...config,
         id: channelId,
@@ -79,7 +79,9 @@ export function useCyre<TPayload = ActionPayload>(
         debounce: options.protection?.debounce,
         detectChanges: options.protection?.detectChanges,
         priority: options.priority,
-        payload: config.payload ?? options.initialPayload ?? {}
+        payload: config.payload ?? options.initialPayload ?? {},
+        // Ensure middleware array is preserved
+        middleware: existingMiddleware
       })
 
       isInitialized = true
@@ -97,46 +99,6 @@ export function useCyre<TPayload = ActionPayload>(
     }
   }
 
-  /**
-   * Execute middleware chain with the provided payload
-   */
-  const executeMiddleware = async (
-    initialPayload: TPayload
-  ): Promise<CyreResponse> => {
-    if (middlewares.length === 0) {
-      return cyre.call(channelId, initialPayload)
-    }
-
-    // Create middleware execution chain
-    let index = 0
-    const execute = async (payload: TPayload): Promise<CyreResponse> => {
-      if (index < middlewares.length) {
-        const middleware = middlewares[index++]
-        return middleware(payload, execute)
-      } else {
-        return cyre.call(channelId, payload)
-      }
-    }
-
-    return execute(initialPayload)
-  }
-
-  /**
-   * Add entry to history log
-   */
-  const addToHistory = (payload: TPayload, response: CyreResponse): void => {
-    history.unshift({
-      timestamp: Date.now(),
-      payload,
-      response
-    })
-
-    // Trim if exceeding limit
-    if (history.length > historyLimit) {
-      history.pop()
-    }
-  }
-
   // Auto-initialize if enabled
   if (options.autoInit !== false) {
     initialize()
@@ -146,6 +108,9 @@ export function useCyre<TPayload = ActionPayload>(
   const channel: CyreHook<TPayload> = {
     /** The unique ID for this channel */
     id: channelId,
+
+    /** The friendly name for this channel */
+    name: channelName,
 
     /** Initialize or update the channel configuration */
     action: (config: ChannelConfig): Result<boolean, Error> => {
@@ -186,6 +151,7 @@ export function useCyre<TPayload = ActionPayload>(
             subscriptions.splice(index, 1)
             debugLog(`Unsubscribed, remaining: ${subscriptions.length}`)
           }
+          return cyre.forget(channelId)
         }
       }
     },
@@ -210,8 +176,8 @@ export function useCyre<TPayload = ActionPayload>(
       debugLog('Calling with payload', finalPayload)
 
       try {
-        // Execute middleware chain
-        const response = await executeMiddleware(finalPayload)
+        // Call the action - middleware will be applied by core system
+        const response = await cyre.call(channelId, finalPayload)
 
         // Log the result
         if (response.ok) {
@@ -219,9 +185,6 @@ export function useCyre<TPayload = ActionPayload>(
         } else {
           debugLog(`Call failed: ${response.message}`)
         }
-
-        // Add to history
-        addToHistory(finalPayload, response)
 
         return response
       } catch (error) {
@@ -324,25 +287,88 @@ export function useCyre<TPayload = ActionPayload>(
 
     /**
      * Register middleware for pre/post processing
+     * Now uses core middleware system
+     */
+    /**
+     * Register middleware for pre/post processing
      */
     middleware: (middleware: CyreMiddleware<TPayload>): void => {
       debugLog('Adding middleware')
-      middlewares.push(middleware)
+
+      // Generate a unique ID for this middleware
+      const middlewareId = `${channelId}-middleware-${crypto
+        .randomUUID()
+        .slice(0, 8)}`
+
+      // Adapt the CyreMiddleware interface to the core middleware interface
+      const adaptedMiddleware: MiddlewareFunction = async (
+        action: IO,
+        actionPayload: ActionPayload
+      ) => {
+        try {
+          // Only apply to this channel's actions
+          if (action.id !== channelId) {
+            return {action, payload: actionPayload}
+          }
+
+          // Call the channel middleware
+          const result = await middleware(
+            actionPayload as TPayload,
+            async processedPayload =>
+              await cyre.call(channelId, processedPayload)
+          )
+
+          // If middleware returns a result, continue the chain
+          if (result.ok) {
+            return {action, payload: result.payload || actionPayload}
+          }
+
+          // Otherwise, reject the action
+          return null
+        } catch (error) {
+          debugLog('Middleware error', error)
+          return null
+        }
+      }
+
+      // Register the adapted middleware
+      registerMiddleware(middlewareId, adaptedMiddleware)
+
+      // Update the action's middleware array
+      const action = cyre.get(channelId)
+      if (action) {
+        const middlewareArray = action.middleware || []
+        cyre.action({
+          ...action,
+          middleware: [...middlewareArray, middlewareId]
+        })
+      }
     },
 
     /**
-     * Get execution history
+     * Get execution history using core history system via public API
      */
     getHistory: (): ReadonlyArray<HistoryEntry<TPayload>> => {
-      return [...history]
+      const rawHistory = cyre.getHistory(channelId)
+      // Convert to expected format
+      return rawHistory.map(entry => ({
+        timestamp: entry.timestamp,
+        payload: entry.payload as TPayload,
+        response: {
+          ok: entry.result.ok,
+          payload: null,
+          message: entry.result.message || '',
+          error: entry.result.error ? new Error(entry.result.error) : undefined
+        }
+      }))
     },
 
     /**
-     * Clear execution history
+     * Clear execution history using core history system via public API
      */
     clearHistory: (): void => {
       debugLog('Clearing history')
-      history.length = 0
+      cyre.clearHistory(channelId)
     },
 
     /**
@@ -355,7 +381,3 @@ export function useCyre<TPayload = ActionPayload>(
 
   return channel
 }
-
-/**
- * Type definition for the useCyre return value
- */

@@ -8,7 +8,11 @@ import {BREATHING, MSG} from './config/cyre-config'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
-import {applyMiddleware} from './components/cyre-middleware'
+import {
+  applyMiddleware,
+  MiddlewareFunction,
+  registerMiddleware
+} from './components/cyre-middleware'
 import dataDefinitions from './elements/data-definitions'
 import type {
   ActionId,
@@ -149,7 +153,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     timeline.forget(action.id)
 
     // Determine timing behavior
-    const hasDelay = action.delay !== undefined
+    const hasDelay = action.delay !== undefined && action.delay >= 0
     const hasInterval = action.interval && action.interval > 0
     const repeatValue = action.repeat
 
@@ -325,16 +329,16 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
   }
 
   const useDispatch = async (io: IO): Promise<CyreResponse> => {
-    if (!io?.type) {
+    if (!io?.id) {
       throw new Error('Invalid IO object')
     }
 
     try {
       // Try to find subscriber by type or id
-      const subscriber = subscribers.get(io.type) || subscribers.get(io.id)
+      const subscriber = subscribers.get(io.id)
 
       if (!subscriber) {
-        const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${io.type}`
+        const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${io.id}`
         CyreLog.error(error)
 
         // Record failed dispatch in history
@@ -673,7 +677,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       CyreLog.error(MSG.OFFLINE)
       return
     }
-    if (metricsState.isLocked) {
+    if (metricsState.isSystemLocked()) {
       CyreLog.error(MSG.SYSTEM_LOCKED_CHANNELS)
       return
     }
@@ -686,7 +690,24 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             dataDefinitions
           )
           if (processedChannel.ok && processedChannel.payload) {
-            io.set(processedChannel.payload)
+            // Ensure the action is properly stored
+            const payload = processedChannel.payload
+            io.set(payload)
+
+            // Debug log to confirm storage
+            CyreLog.debug(`Action ${payload.id} registered successfully`)
+
+            // Double-check that action was stored correctly
+            const stored = io.get(payload.id)
+            if (!stored) {
+              CyreLog.error(
+                `Failed to retrieve action ${payload.id} after storage`
+              )
+            }
+          } else {
+            CyreLog.error(
+              `Failed to process action: ${processedChannel.message}`
+            )
           }
         })
       } else {
@@ -695,7 +716,22 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           dataDefinitions
         )
         if (processedChannel.ok && processedChannel.payload) {
-          io.set(processedChannel.payload)
+          // Ensure the action is properly stored
+          const payload = processedChannel.payload
+          io.set(payload)
+
+          // Debug log to confirm storage
+          CyreLog.debug(`Action ${payload.id} registered successfully`)
+
+          // Double-check that action was stored correctly
+          const stored = io.get(payload.id)
+          if (!stored) {
+            CyreLog.error(
+              `Failed to retrieve action ${payload.id} after storage`
+            )
+          }
+        } else {
+          CyreLog.error(`Failed to process action: ${processedChannel.message}`)
         }
       }
     } catch (error) {
@@ -703,6 +739,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     }
   }
 
+  //init Cyre
   const initialize = (): CyreResponse => {
     isShutdown = false
     initializeBreathing()
@@ -871,29 +908,50 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     }
   }
 
-  const middleware = (id: string, fn: Function) => {
+  /**
+   * Register middleware
+   * @param id Unique middleware identifier
+   * @param fn Middleware function
+   * @returns Response indicating success or failure
+   */
+  const middleware = (id: string, fn: Function): CyreResponse => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
-      return
+      return {
+        ok: false,
+        message: MSG.CALL_OFFLINE,
+        payload: null
+      }
     }
 
-    if (metricsState.isLocked) {
-      CyreLog.error(MSG.SYSTEM_LOCKED_CHANNELS)
-      return
+    if (metricsState.isSystemLocked()) {
+      return {
+        ok: false,
+        message: MSG.SYSTEM_LOCKED_CHANNELS,
+        payload: null
+      }
     }
 
     try {
-      const middlewareFn = fn as (
-        action: IO,
-        payload: ActionPayload
-      ) => Promise<{action: IO; payload: ActionPayload} | null>
+      // Register the middleware
+      const success = registerMiddleware(id, fn)
 
-      // Import this dynamically to avoid circular dependencies
-      import('./components/cyre-middleware').then(module => {
-        module.registerMiddleware(id, middlewareFn)
-      })
+      return {
+        ok: success,
+        message: success
+          ? `Middleware '${id}' registered successfully`
+          : `Failed to register middleware '${id}'`,
+        payload: null
+      }
     } catch (error) {
-      CyreLog.error(`Failed to register middleware: ${error}`)
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      CyreLog.error(`Failed to register middleware: ${errorMessage}`)
+
+      return {
+        ok: false,
+        message: `Failed to register middleware: ${errorMessage}`,
+        payload: null
+      }
     }
   }
 

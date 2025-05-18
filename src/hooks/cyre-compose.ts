@@ -5,7 +5,7 @@ import type {
   ActionPayload,
   CyreResponse
 } from '../interfaces/interface'
-import type {CyreChannel} from '../interfaces/hooks'
+import type {CyreChannel} from '../interfaces/hooks-interface'
 
 /**
  * Options for composed channels

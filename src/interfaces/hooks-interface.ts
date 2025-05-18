@@ -26,6 +26,10 @@ export interface ProtectionOptions {
  * Configuration options for creating a Cyre channel
  */
 export interface CyreHookOptions<TPayload = ActionPayload> {
+  /** Friendly name identifier for this channel (for debugging) */
+  name?: string
+  /** Alternative name for backwards compatibility */
+  tag?: string
   /** Auto-initialize the channel action (default: true) */
   autoInit?: boolean
   /** Enable debug logging for channel operations */
@@ -36,6 +40,8 @@ export interface CyreHookOptions<TPayload = ActionPayload> {
   priority?: PriorityConfig
   /** Initialize with specified payload */
   initialPayload?: TPayload
+  /** Maximum number of history entries to keep */
+  historyLimit?: number
 }
 
 /**
@@ -84,6 +90,9 @@ export type ChannelConfig = Omit<IO, 'id'>
 export interface CyreHook<TPayload = ActionPayload> {
   /** Channel unique identifier */
   id: string
+
+  /** channel name for debugging and identification for */
+  name: string
 
   /** Initialize or update channel configuration */
   action: (config: ChannelConfig) => Result<boolean, Error>

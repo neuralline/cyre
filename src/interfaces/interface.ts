@@ -139,6 +139,13 @@ export interface ISubscriber {
   fn: Function
 }
 
+export interface IMiddleware extends ISubscriber {
+  fn: (
+    action: IO,
+    payload: ActionPayload
+  ) => Promise<{action: IO; payload: ActionPayload} | null>
+}
+
 export interface Subscriber extends ISubscriber {}
 
 export interface SubscriptionResponse {
