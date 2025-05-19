@@ -7,7 +7,8 @@ export enum LogLevel {
   WARN = 'WARN',
   ERROR = 'ERROR',
   SUCCESS = 'SUCCESS',
-  CRITICAL = 'CRITICAL'
+  CRITICAL = 'CRITICAL',
+  QUANTUM = 'QUANTUM' // New level specifically for quantum headers
 }
 /* 
 
@@ -36,6 +37,7 @@ export const Colors = {
   bgRed: '\x1b[41m',
   bgYellow: '\x1b[43m',
   bgBlue: '\x1b[44m',
+  bgMagenta: '\x1b[45m', // Added for quantum header
   // Add text styles
   bold: '\x1b[1m',
   dim: '\x1b[2m',
@@ -46,11 +48,12 @@ export const Colors = {
 // Define log level colors
 const levelColors: Record<LogLevel, (keyof typeof Colors)[]> = {
   [LogLevel.DEBUG]: ['dim', 'cyan'],
-  [LogLevel.INFO]: ['blue', 'bold'],
+  [LogLevel.INFO]: ['blue', 'bold', 'dim'],
   [LogLevel.WARN]: ['yellowBright', 'bold'],
   [LogLevel.ERROR]: ['redBright', 'bold'],
-  [LogLevel.SUCCESS]: ['greenBright', 'bold'],
-  [LogLevel.CRITICAL]: ['bgRed', 'whiteBright', 'bold']
+  [LogLevel.SUCCESS]: ['greenBright', 'bold', 'dim'],
+  [LogLevel.CRITICAL]: ['bgRed', 'whiteBright', 'bold'],
+  [LogLevel.QUANTUM]: ['bgMagenta', 'white'] // Styling for quantum header
 }
 
 // Add environment detection
@@ -71,7 +74,8 @@ const logLevelPriority: Record<LogLevel, number> = {
   [LogLevel.WARN]: 2,
   [LogLevel.ERROR]: 3,
   [LogLevel.SUCCESS]: 1,
-  [LogLevel.CRITICAL]: 1
+  [LogLevel.CRITICAL]: 1,
+  [LogLevel.QUANTUM]: 1
 }
 
 // Base logging function to reduce duplication
@@ -103,7 +107,14 @@ type LogFunction = (
 const baseLogger = (
   level: LogLevel,
   colors: (keyof typeof Colors)[],
-  consoleMethod: 'log' | 'error' | 'warn' | 'debug'
+  consoleMethod:
+    | 'log'
+    | 'error'
+    | 'warn'
+    | 'debug'
+    | 'info'
+    | 'quantum'
+    | 'critical'
 ): LogFunction => {
   return (message: unknown, timestamp = true, useConsole = false) => {
     if (logLevelPriority[level] < logLevelPriority[currentLogLevel]) {
@@ -148,6 +159,12 @@ export const log = {
   info: baseLogger(LogLevel.INFO, levelColors[LogLevel.INFO], 'log'),
   debug: baseLogger(LogLevel.DEBUG, levelColors[LogLevel.DEBUG], 'debug'),
   success: baseLogger(LogLevel.SUCCESS, levelColors[LogLevel.SUCCESS], 'log'),
+  critical: baseLogger(
+    LogLevel.CRITICAL,
+    levelColors[LogLevel.CRITICAL],
+    'log'
+  ),
+  quantum: baseLogger(LogLevel.QUANTUM, levelColors[LogLevel.QUANTUM], 'log'), // Use the specialized method for quantum headers,
 
   // Method to set log level
   setLevel: setLogLevel,

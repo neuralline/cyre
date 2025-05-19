@@ -12,8 +12,9 @@ import {CyreHook, CyreChannel} from './interfaces/hooks-interface'
 import {cyre, Cyre, log} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
+import {createStream} from './hooks/cyre-stream'
 // Export everything as both named exports and default export
-export {cyre, Cyre, log, useCyre, cyreCompose}
+export {cyre, Cyre, log, useCyre, cyreCompose, createStream}
 
 // Also export cyre as the default export for compatibility
 export default cyre

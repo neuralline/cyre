@@ -39,7 +39,8 @@ import type {
       })
       cyre.call('uber') 
 
-    Cyre's first low: A robot can not injure a human being or allow a human being to be harmed by not helping.
+    Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
+    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
 */
 
 interface CyreInstance {
@@ -737,7 +738,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     initializeBreathing()
     timeKeeper.resume()
 
-    console.log(
+    log.quantum(
       '%c' + MSG.QUANTUM_HEADER,
       'background: rgb(151, 2, 151); color: white; display: block;'
     )
