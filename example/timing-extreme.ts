@@ -111,7 +111,7 @@ const monitor = setInterval(() => {
         ).toFixed(2) + ' MB'
       : '0 MB'
 
-  CyreLog.debug({
+  log.debug({
     timestamp: Date.now(),
     runtime: `${runTime.toFixed(1)}s`,
     metrics: {
@@ -140,7 +140,7 @@ const monitor = setInterval(() => {
     // 1GB limit
     clearInterval(monitor)
     cyre.shutdown()
-    CyreLog.success(
+    log.success(
       `Extreme burst test complete - Final Metrics: ${JSON.stringify({
         finalMetrics: metrics,
         memoryLeak: memoryTrend
@@ -182,7 +182,7 @@ const generateExtremeBursts = async () => {
 
 // Start extreme burst test
 generateExtremeBursts().catch(error => {
-  CyreLog.error('Extreme burst generation error:', error)
+  log.error('Extreme burst generation error:', error)
   cyre.shutdown()
 })
 

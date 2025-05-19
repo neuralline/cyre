@@ -1,6 +1,6 @@
 // src/context/state.ts
 
-import {CyreLog} from '../components/cyre-logger'
+import {log} from '../components/cyre-logger'
 import type {
   ActionMetrics,
   ActionPayload,
@@ -77,7 +77,7 @@ export const io = {
       // Record call in quantum state
       metricsState.recordCall(ioState.priority?.level)
     } catch (error) {
-      CyreLog.error(
+      log.error(
         `Failed to set IO: ${
           error instanceof Error ? error.message : String(error)
         }`
@@ -110,7 +110,7 @@ export const io = {
     return !isEqual(newPayload, previousPayload)
   },
 
-  getPreviousPayload: (id: StateKey): ActionPayload | undefined => {
+  getPrevious: (id: StateKey): ActionPayload | undefined => {
     return payloadHistory.get(id)
   },
 

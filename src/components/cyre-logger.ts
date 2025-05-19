@@ -6,7 +6,8 @@ export enum LogLevel {
   INFO = 'INFO',
   WARN = 'WARN',
   ERROR = 'ERROR',
-  SUCCESS = 'SUCCESS'
+  SUCCESS = 'SUCCESS',
+  CRITICAL = 'CRITICAL'
 }
 /* 
 
@@ -48,7 +49,8 @@ const levelColors: Record<LogLevel, (keyof typeof Colors)[]> = {
   [LogLevel.INFO]: ['blue', 'bold'],
   [LogLevel.WARN]: ['yellowBright', 'bold'],
   [LogLevel.ERROR]: ['redBright', 'bold'],
-  [LogLevel.SUCCESS]: ['greenBright', 'bold']
+  [LogLevel.SUCCESS]: ['greenBright', 'bold'],
+  [LogLevel.CRITICAL]: ['bgRed', 'whiteBright', 'bold']
 }
 
 // Add environment detection
@@ -68,7 +70,8 @@ const logLevelPriority: Record<LogLevel, number> = {
   [LogLevel.INFO]: 1,
   [LogLevel.WARN]: 2,
   [LogLevel.ERROR]: 3,
-  [LogLevel.SUCCESS]: 1
+  [LogLevel.SUCCESS]: 1,
+  [LogLevel.CRITICAL]: 1
 }
 
 // Base logging function to reduce duplication
@@ -116,6 +119,8 @@ const baseLogger = (
           ? 'color: red; font-weight: bold'
           : level === LogLevel.WARN
           ? 'color: orange; font-weight: bold'
+          : level === LogLevel.CRITICAL
+          ? 'color: orange; font-weight: bold'
           : level === LogLevel.SUCCESS
           ? 'color: green; font-weight: bold'
           : level === LogLevel.INFO
@@ -136,11 +141,20 @@ const baseLogger = (
   }
 }
 
-// Create enhanced CyreLog object
-export const CyreLog = {
+// Create core logger object with all methods
+export const log = {
   error: baseLogger(LogLevel.ERROR, levelColors[LogLevel.ERROR], 'error'),
   warn: baseLogger(LogLevel.WARN, levelColors[LogLevel.WARN], 'warn'),
   info: baseLogger(LogLevel.INFO, levelColors[LogLevel.INFO], 'log'),
   debug: baseLogger(LogLevel.DEBUG, levelColors[LogLevel.DEBUG], 'debug'),
-  success: baseLogger(LogLevel.SUCCESS, levelColors[LogLevel.SUCCESS], 'log')
+  success: baseLogger(LogLevel.SUCCESS, levelColors[LogLevel.SUCCESS], 'log'),
+
+  // Method to set log level
+  setLevel: setLogLevel,
+
+  // Current log level accessor
+  getLevel: () => currentLogLevel
 }
+
+// For backwards compatibility, export CyreLog as well
+export const CyreLog = log

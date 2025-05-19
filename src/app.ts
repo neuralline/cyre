@@ -1,7 +1,7 @@
 // src/app.ts
 import CyreAction from './components/cyre-actions'
 import CyreChannel from './components/cyre-channels'
-import {CyreLog} from './components/cyre-logger'
+import {log} from './components/cyre-logger'
 import {subscribe} from './components/cyre-on'
 import timeKeeper from './components/cyre-time-keeper'
 import {BREATHING, MSG} from './config/cyre-config'
@@ -39,7 +39,7 @@ import type {
       })
       cyre.call('uber') 
 
-    Cyre's first low: A robot can not injure a human being or allow a human being to be harmed by not helping;
+    Cyre's first low: A robot can not injure a human being or allow a human being to be harmed by not helping.
 */
 
 interface CyreInstance {
@@ -60,7 +60,7 @@ interface CyreInstance {
   pause: (id?: string) => void
   resume: (id?: string) => void
   hasChanged: (id: string, payload: ActionPayload) => boolean
-  getPreviousPayload: (id: string) => ActionPayload | undefined
+  getPrevious: (id: string) => ActionPayload | undefined
   getBreathingState: () => Readonly<BreathingMetrics>
   getPerformanceState: () => {
     totalProcessingTime: number
@@ -103,9 +103,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     }
 
     metricsState.lock()
-    CyreLog.info(
-      'Cyre system locked - no new channels or subscribers can be added'
-    )
+    log.info('Cyre system locked - no new channels or subscribers can be added')
 
     return {
       ok: true,
@@ -339,7 +337,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
       if (!subscriber) {
         const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${io.id}`
-        CyreLog.error(error)
+        log.error(error)
 
         // Record failed dispatch in history
         historyState.record(io.id, io.payload, {
@@ -371,7 +369,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       )
 
       if (io.log) {
-        CyreLog.info({
+        log.info({
           ...dispatch,
           executionTime: duration,
           timestamp: Date.now()
@@ -384,7 +382,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           const {id, payload} = dispatch.intraLink
           await call(id, payload)
         } catch (error) {
-          CyreLog.error(`Linked action error: ${error}`)
+          log.error(`Linked action error: ${error}`)
         }
       }
 
@@ -396,7 +394,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      CyreLog.error(`Dispatch error: ${errorMessage}`)
+      log.error(`Dispatch error: ${errorMessage}`)
 
       // Record error in history
       historyState.record(io.id, io.payload, {
@@ -674,11 +672,11 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const action = (attribute: IO | IO[]): void => {
     if (isShutdown) {
-      CyreLog.error(MSG.OFFLINE)
+      log.error(MSG.OFFLINE)
       return
     }
     if (metricsState.isSystemLocked()) {
-      CyreLog.error(MSG.SYSTEM_LOCKED_CHANNELS)
+      log.error(MSG.SYSTEM_LOCKED_CHANNELS)
       return
     }
 
@@ -695,19 +693,15 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             io.set(payload)
 
             // Debug log to confirm storage
-            CyreLog.debug(`Action ${payload.id} registered successfully`)
+            log.debug(`Action ${payload.id} registered successfully`)
 
             // Double-check that action was stored correctly
             const stored = io.get(payload.id)
             if (!stored) {
-              CyreLog.error(
-                `Failed to retrieve action ${payload.id} after storage`
-              )
+              log.error(`Failed to retrieve action ${payload.id} after storage`)
             }
           } else {
-            CyreLog.error(
-              `Failed to process action: ${processedChannel.message}`
-            )
+            log.error(`Failed to process action: ${processedChannel.message}`)
           }
         })
       } else {
@@ -721,21 +715,19 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           io.set(payload)
 
           // Debug log to confirm storage
-          CyreLog.debug(`Action ${payload.id} registered successfully`)
+          log.debug(`Action ${payload.id} registered successfully`)
 
           // Double-check that action was stored correctly
           const stored = io.get(payload.id)
           if (!stored) {
-            CyreLog.error(
-              `Failed to retrieve action ${payload.id} after storage`
-            )
+            log.error(`Failed to retrieve action ${payload.id} after storage`)
           }
         } else {
-          CyreLog.error(`Failed to process action: ${processedChannel.message}`)
+          log.error(`Failed to process action: ${processedChannel.message}`)
         }
       }
     } catch (error) {
-      CyreLog.error(`Action registration failed: ${error}`)
+      log.error(`Action registration failed: ${error}`)
     }
   }
 
@@ -759,14 +751,14 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const status = () => {
     isShutdown
-      ? CyreLog.info({ok: true, message: MSG.OFFLINE})
-      : CyreLog.info({ok: true, message: MSG.ONLINE})
+      ? log.info({ok: true, message: MSG.OFFLINE})
+      : log.info({ok: true, message: MSG.ONLINE})
     return isShutdown
   }
 
   const forget = (id: string): boolean => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return false
     }
 
@@ -776,7 +768,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const get = (id: string): IO | undefined => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return undefined
     }
     return io.get(id)
@@ -784,7 +776,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const pause = (id?: string): void => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return
     }
 
@@ -807,7 +799,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const resume = (id?: string): void => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return
     }
 
@@ -830,18 +822,18 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const hasChanged = (id: string, payload: ActionPayload): boolean => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return false
     }
     return io.hasChanged(id, payload)
   }
 
-  const getPreviousPayload = (id: string): ActionPayload | undefined => {
+  const getPrevious = (id: string): ActionPayload | undefined => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return undefined
     }
-    return io.getPreviousPayload(id)
+    return io.getPrevious(id)
   }
 
   const getBreathingState = () => {
@@ -885,7 +877,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const getHistory = (actionId?: string) => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return []
     }
 
@@ -897,7 +889,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
   const clearHistory = (actionId?: string) => {
     if (isShutdown) {
-      CyreLog.error(MSG.CALL_OFFLINE)
+      log.error(MSG.CALL_OFFLINE)
       return
     }
 
@@ -945,7 +937,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      CyreLog.error(`Failed to register middleware: ${errorMessage}`)
+      log.error(`Failed to register middleware: ${errorMessage}`)
 
       return {
         ok: false,
@@ -976,7 +968,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
         process.exit(0)
       }
     } catch (error) {
-      CyreLog.error(`Failed to shutdown gracefully: ${error}`)
+      log.error(`Failed to shutdown gracefully: ${error}`)
       if (typeof process !== 'undefined' && process.exit) {
         process.exit(1)
       }
@@ -1007,7 +999,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     pause,
     resume,
     hasChanged,
-    getPreviousPayload,
+    getPrevious,
     getBreathingState,
     getPerformanceState,
     getMetrics,
@@ -1021,5 +1013,5 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 const cyre = Cyre('quantum-inceptions')
 cyre.initialize()
 
-export {Cyre, cyre, CyreLog}
+export {Cyre, cyre, log}
 export default cyre

@@ -172,11 +172,19 @@ export function useCyre<TPayload = ActionPayload>(
         }
       }
 
+      // Get the current action to check middleware array
+      const action = cyre.get(channelId)
+      debugLog(
+        `Call - Current action has middleware: ${JSON.stringify(
+          action?.middleware || []
+        )}`
+      )
+
       const finalPayload = payload || ({} as TPayload)
       debugLog('Calling with payload', finalPayload)
 
       try {
-        // Call the action - middleware will be applied by core system
+        // Call the action
         const response = await cyre.call(channelId, finalPayload)
 
         // Log the result
@@ -207,9 +215,12 @@ export function useCyre<TPayload = ActionPayload>(
       payload?: TPayload
     ): Promise<Result<CyreResponse, Error>> => {
       try {
+        debugLog('Making safe call with payload', payload)
         const response = await channel.call(payload)
+        debugLog('Safe call succeeded', response)
         return {success: true, value: response}
       } catch (error) {
+        debugLog('Safe call failed', error)
         return {
           success: false,
           error: error instanceof Error ? error : new Error(String(error))
@@ -261,7 +272,7 @@ export function useCyre<TPayload = ActionPayload>(
      * Get previous payload
      */
     getPrevious: (): TPayload | undefined => {
-      return cyre.getPreviousPayload(channelId) as TPayload | undefined
+      return cyre.getPrevious(channelId) as TPayload | undefined
     },
 
     /**
@@ -300,53 +311,80 @@ export function useCyre<TPayload = ActionPayload>(
         .randomUUID()
         .slice(0, 8)}`
 
-      // Adapt the CyreMiddleware interface to the core middleware interface
-      const adaptedMiddleware: MiddlewareFunction = async (
-        action: IO,
-        actionPayload: ActionPayload
-      ) => {
-        try {
-          // Only apply to this channel's actions
-          if (action.id !== channelId) {
-            return {action, payload: actionPayload}
+      // Register the middleware function
+      const response = cyre.middleware(
+        middlewareId,
+        async (action, actionPayload) => {
+          try {
+            // Only apply to this channel's actions
+            if (action.id !== channelId) {
+              return {action, payload: actionPayload}
+            }
+
+            debugLog(`Executing middleware ${middlewareId}`)
+
+            // Prepare next function
+            const next = async (
+              processedPayload: TPayload
+            ): Promise<CyreResponse> => {
+              debugLog('Middleware calling next with processed payload')
+              return await cyre.call(channelId, processedPayload)
+            }
+
+            // Call the channel middleware
+            const result = await middleware(actionPayload as TPayload, next)
+
+            // If middleware returns a result, continue the chain
+            if (result.ok) {
+              debugLog('Middleware transformation successful')
+              return {action, payload: result.payload || actionPayload}
+            }
+
+            // Otherwise, reject the action
+            debugLog('Middleware rejected the action')
+            return null
+          } catch (error) {
+            debugLog('Middleware error', error)
+            return null
           }
-
-          // Call the channel middleware
-          const result = await middleware(
-            actionPayload as TPayload,
-            async processedPayload =>
-              await cyre.call(channelId, processedPayload)
-          )
-
-          // If middleware returns a result, continue the chain
-          if (result.ok) {
-            return {action, payload: result.payload || actionPayload}
-          }
-
-          // Otherwise, reject the action
-          return null
-        } catch (error) {
-          debugLog('Middleware error', error)
-          return null
         }
-      }
+      )
 
-      // Register the adapted middleware
-      registerMiddleware(middlewareId, adaptedMiddleware)
+      if (response.ok) {
+        // Get the current action configuration
+        const action = cyre.get(channelId)
 
-      // Update the action's middleware array
-      const action = cyre.get(channelId)
-      if (action) {
-        const middlewareArray = action.middleware || []
-        cyre.action({
-          ...action,
-          middleware: [...middlewareArray, middlewareId]
-        })
+        if (action) {
+          // Important: Create a proper middleware array
+          const currentMiddleware = Array.isArray(action.middleware)
+            ? action.middleware
+            : []
+          const updatedMiddleware = [...currentMiddleware, middlewareId]
+
+          // Update the action with the new middleware array
+          cyre.action({
+            ...action,
+            // Explicitly set the middleware array
+            middleware: updatedMiddleware
+          })
+
+          // Verify the update was successful
+          const updatedAction = cyre.get(channelId)
+          debugLog(
+            `Middleware registered and added to action, middleware array: [${
+              updatedAction?.middleware?.join(', ') || ''
+            }]`
+          )
+        } else {
+          debugLog('Cannot add middleware: Action not found')
+        }
+      } else {
+        debugLog(`Failed to register middleware: ${response.message}`)
       }
     },
 
     /**
-     * Get execution history using core history system via public API
+     * Get execution history using core history system via cyre API
      */
     getHistory: (): ReadonlyArray<HistoryEntry<TPayload>> => {
       const rawHistory = cyre.getHistory(channelId)

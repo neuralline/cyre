@@ -9,75 +9,87 @@ C.Y.R.E ~/`SAYER`/
 action-on-call
 ```
 
-> Cyre is a sophisticated event management system that provides reactive networking throughout your application. At its core is the Q.U.A.N.T.U.M. TimeKeeper, evolved from the original Quantum-Inception clock (2016) to now power precise event timing and management with an advanced quantum breathing system for natural rate limiting and system protection.
-
-## Core Features
-
-### Event Management
-
-- Action-based event dispatching
-- Reactive state management
-- Automatic change detection
-- Smart surge protection with quantum breathing
-- Event chaining through intraLinks
-
-### Quantum TimeKeeper & Breathing System
-
-- High-precision timing control with quantum breathing
-- Intelligent recuperation mode for system health
-- Natural rate limiting through breathing patterns
-- Self-healing system protection
-- Cross-platform (Node.js and Browser)
-
-### Performance Features
-
-- Automatic performance optimization
-- Smart surge protection with quantum breathing
-- Built-in metrics tracking
-- Efficient state updates
-- System stress adaptation
-
 ## Installation
 
 ```sh
 npm i cyre
-# or
+```
+
+```sh
 yarn add cyre
 ```
+
+```sh
+pnpm add cyre
+```
+
+> Cyre is a general purpose event management system that provides reactive networking throughout your application. Evolved from the original Quantum-Inception clock (2016) to now power 24/7 server, long and short scheduling, bridge between multiple applications and still has low learning curve
+
+## Core Features
+
+## Core Features
+
+### Event managment
+
+- **action-on-call**: follows three phase for better event decoupling.
+- **cyre.action**: every channel has its own safeguard/middleware
+- **intraLink action chaining**: Data flows seamlessly between connected actions
+  **Cascading Protection**: Multiple defense layers prevent runaway reactions
+
+### Breath System
+
+- **Breathing-Based Protection**: Natural rate limiting through biologically-inspired patterns
+- **System-Aware Recovery**: Enters recuperation mode during high stress
+- **Self-Healing Architecture**: Automatic recovery from system overload
+- **Predictive Timing**: Adjusts execution schedules based on observed system patterns
+- **Precision**: High-accuracy timing even for extremely long durations
+- **Circuit Breaker Pattern**: Prevents cascading failures under load
+- **Surge Protection**: Intelligent throttling with adaptive backoff
+- **Priority-Based Execution**: Critical actions take precedence during stress
+
+### Intelligent State Management
+
+- **State**: Cyre's payload is defacto state with zero setup. Has access to them through cyre.get() , Cyre.hasChanged() and cyre.gerPrevious()
+- **Change Detection**: Prevents unnecessary updates, optimizing resource usage
+- **Historical State Tracking**: Maintains record for metrics and rollback
+
+### TimeKeeper
+
+- **Task Scheduling**: Precise timing control for both immediate and long-term operations
+- **Long-Duration Support**: Handles durations beyond JavaScript's timeout limits (over 24 days)
+- **Repeat & Interval**: Configurable execution patterns with intelligent timing
+- **Protection Integration**: Seamlessly works with debounce and throttle mechanisms
+
+### Performance Optimization
+
+- **Stress-Aware Scheduling**: Dynamically balances workload based on system metrics
+- **Resource-Conscious Execution**: Only runs when necessary (change detection)
+- **Execution Metrics**: Built-in performance tracking
+- **Cross-Platform Optimization**: Specialized for both Node.js and Browser environments
 
 ## Basic Usage
 
 ```typescript
 import {cyre} from 'cyre'
 
-// Define an action with protection
-cyre.action({
-  id: 'user-sync',
-  type: 'sync',
-  payload: {userId: 123},
-  priority: 'medium', // Priority level for breathing system
-  interval: 5000, // 5 second interval (adjusts with system stress)
-  repeat: 'infinite' // Continuous sync
+cyre.action({id: 'uber', payload: 44085648634})
+
+cyre.on('uber', number => {
+  console.log('Calling Uber: ', number)
 })
 
-// Listen for events
-cyre.on('sync', payload => {
-  console.log('Syncing user:', payload)
-})
-
-// Trigger action - automatically protected by quantum breathing
-cyre.call('user-sync')
+cyre.call('uber')
 ```
 
 ## Advanced Features
 
-### Quantum Breathing Protection
+### Breath Protection
 
 ```typescript
 // Action automatically adapts to system stress
 cyre.action({
   id: 'protected-action',
-  priority: 'high', // Higher priority during stress
+  priority: {level: high}, // Higher priority during stress
   interval: 1000 // Interval adapts to breathing rate
 })
 
@@ -135,25 +147,40 @@ console.log(`Current stress levels:
 
 - 1.0.0: Initial release
 
-  - Core event management
-  - Basic timing control
-  - State management
+  - `Quantum inception` of Cyre
+  - Core event management `action-on-call`
+  - Timing control `TimeKeeper`
+  - Recuperation
+  - OOP architecture (discontinued)
 
-- 2.0.0: Quantum Update
+- 2.0.0: SOLID
 
+  - Functional SOLID architecture (refactor)
   - Enhanced TimeKeeper integration
   - Performance optimizations
-  - Advanced metrics
   - Cross-platform support
 
-- 3.0.0: Function Architecture
+- 3.0.0: Interface
 
-  - Functional architecture
+  - Typescript update (refactor)
   - Enhanced type safety
   - Improved performance
   - Better developer experience
 
-- 3.1.0: Quantum Breathing (Current)
+- 3.0.1: TimeKeeper
+
+  - Robust timeKeeper
+  - better integration with core
+  - precision timing
+  - adapted TimeKeepers terminology like Keep and Forget
+
+- 3.0.2: Surge
+
+  - Surge protection
+  - insures Cyre's capability to run 24/7
+  - Improved performance
+
+- 3.1.0: Breath
 
   - Natural rate limiting through Breathing Rate
   - System-wide stress management
@@ -161,19 +188,38 @@ console.log(`Current stress levels:
   - Adaptive timing controls
   - Priority-based execution
 
+- 3.1.6: Cyre lock
+
+  - Added `cyre.lock()` to prevent runtime modification
+  - Enhanced queue management for interval actions
+  - Expanded test coverage for edge cases
+  - Improved documentation and examples
+  - Fixed detectChanges behavior with debounce
+
+- 4.0.0: Cyre hooks
+  - Introducing `useCyre`
+  - Delay
+  - Middleware
+  - cyre-compose (batch channel processing)
+  - Update Cyre logics
+
 ## Philosophy
 
 Cyre follows these core principles:
 
-1. **Precision**: Accurate timing and reliable event handling
-2. **Protection**: Natural rate limiting through quantum breathing
-3. **Performance**: System-aware optimization and stress management
-4. **Adaptability**: Self-adjusting to system conditions
-5. **Predictability**: Consistent behavior with natural protection
+- **Precision**: Accurate timing and reliable event handling
+- **Protection**: Natural rate limiting through quantum breathing
+- **Performance**: System-aware optimization and stress management
+- **Adaptability**: Self-adjusting to system conditions
+- **Predictability**: Consistent behavior with Cyre logics
+- first come first serve
+- keep Cyre agile, light-weight and cutting age
+- independent Channels:
+- expand horizontally
 
 ## Origins
 
-Originally evolved from the Quantum-Inception clock project (2016), Cyre has grown into a full-featured event management system while maintaining its quantum timing heritage. The latest evolution introduces quantum breathing for natural system protection and rate limiting.
+Originally evolved from the Quantum-Inception clock project (2016), Cyre has grown into a full-featured event management system while maintaining its quantum timing heritage. The latest evolution introduces ...
 
 ```sh
 Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0

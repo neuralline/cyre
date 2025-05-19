@@ -1,7 +1,7 @@
 // src/components/cyre-middleware.ts
 
 import type {IO, ActionPayload} from '../interfaces/interface'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 import {middlewares} from '../context/state'
 
 /* 
@@ -23,12 +23,12 @@ export type MiddlewareFunction = (
 export const registerMiddleware = (id: string, fn: Function): boolean => {
   try {
     if (!id || typeof id !== 'string') {
-      CyreLog.error('Invalid middleware ID')
+      log.error('Invalid middleware ID')
       return false
     }
 
     if (typeof fn !== 'function') {
-      CyreLog.error('Invalid middleware function')
+      log.error('Invalid middleware function')
       return false
     }
 
@@ -38,10 +38,10 @@ export const registerMiddleware = (id: string, fn: Function): boolean => {
       fn
     })
 
-    CyreLog.info(`Middleware '${id}' registered successfully`)
+    log.info(`Middleware '${id}' registered successfully`)
     return true
   } catch (error) {
-    CyreLog.error(`Failed to register middleware: ${error}`)
+    log.error(`Failed to register middleware: ${error}`)
     return false
   }
 }
@@ -70,7 +70,7 @@ export const applyMiddleware = async (
     // Get middleware from centralized store
     const middleware = middlewares.get(middlewareId)
     if (!middleware) {
-      CyreLog.warn(`Middleware '${middlewareId}' not found and will be skipped`)
+      log.warn(`Middleware '${middlewareId}' not found and will be skipped`)
       continue
     }
 
@@ -83,14 +83,14 @@ export const applyMiddleware = async (
 
       // If middleware returned null, reject the action
       if (middlewareResult === null) {
-        CyreLog.info(`Middleware '${middlewareId}' rejected the action`)
+        log.info(`Middleware '${middlewareId}' rejected the action`)
         return null
       }
 
       // Otherwise, update our result state for the next middleware
       result = middlewareResult
     } catch (error) {
-      CyreLog.error(`Middleware '${middlewareId}' failed: ${error}`)
+      log.error(`Middleware '${middlewareId}' failed: ${error}`)
       return null
     }
   }

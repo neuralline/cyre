@@ -1,7 +1,7 @@
 // src/components/cyre-actions.ts
 import {io, subscribers} from '../context/state'
 import {IO} from '../interfaces/interface'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 import {pipe} from '../libs/utils'
 import {MSG} from '../config/cyre-config'
 
@@ -122,7 +122,7 @@ const executeAction = (action: ActionResult): ActionResult => {
       status: 'completed'
     }
   } catch (error) {
-    CyreLog.error(
+    log.error(
       `CYRE ACTION ERROR: ${MSG.ACTION_EXECUTE_FAILED} -id ${action.id} ${
         error instanceof Error ? error.message : String(error)
       }`
@@ -141,11 +141,11 @@ const executeAction = (action: ActionResult): ActionResult => {
 const logAction = (action: ActionResult): ActionResult => {
   if (action.log) {
     if (action.status === 'error') {
-      CyreLog.error(action)
+      log.error(action)
     } else if (action.status === 'skipped') {
-      CyreLog.info(action)
+      log.info(action)
     } else {
-      CyreLog.info(action)
+      log.info(action)
     }
   }
   return action
@@ -168,7 +168,7 @@ const updateStore = (action: ActionResult): ActionResult => {
 const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   // Handle null/undefined input before pipe
   if (!initialIO) {
-    CyreLog.error(MSG.ACTION_PREPARE_FAILED)
+    log.error(MSG.ACTION_PREPARE_FAILED)
     return {
       id: 'CYRE-ERROR',
       type: '',
@@ -192,7 +192,7 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
     )
     return result
   } catch (error) {
-    CyreLog.error(`Action processing failed: ${error}`)
+    log.error(`Action processing failed: ${error}`)
     return {
       id: 'CYRE-ERROR',
       ...initialIO,

@@ -2,7 +2,7 @@
 import {MSG} from '../config/cyre-config'
 import {IO} from '../interfaces/interface'
 import {memoize} from '../libs/utils'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 
 /* 
 
@@ -127,7 +127,7 @@ const processDataDefinitions = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    CyreLog.error(`Data definition processing failed: ${errorMessage}`)
+    log.error(`Data definition processing failed: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.CHANNEL_INVALID_DEFINITION
@@ -174,7 +174,7 @@ const CyreChannel = (
   try {
     // Type guard check
     if (!isValidChannel(channel)) {
-      CyreLog.error(MSG.CHANNEL_INVALID_STRUCTURE)
+      log.error(MSG.CHANNEL_INVALID_STRUCTURE)
       return {
         ok: false,
         message: MSG.CHANNEL_INVALID_STRUCTURE
@@ -184,7 +184,7 @@ const CyreChannel = (
     // Validate basic channel structure
     const validation = validateChannel(channel)
     if (!validation.isValid) {
-      CyreLog.error(validation.error!)
+      log.error(validation.error!)
       return {
         ok: false,
         message: validation.error
@@ -193,7 +193,7 @@ const CyreChannel = (
 
     // Validate against definitions
     if (!validateDefinitions(channel, definitions)) {
-      CyreLog.error(MSG.CHANNEL_INVALID_DEFINITION)
+      log.error(MSG.CHANNEL_INVALID_DEFINITION)
       return {
         ok: false,
         message: MSG.CHANNEL_INVALID_DEFINITION
@@ -213,7 +213,7 @@ const CyreChannel = (
     })
 
     // Log success
-    CyreLog.success(MSG.CHANNEL_CREATED)
+    log.success(MSG.CHANNEL_CREATED)
 
     return {
       ok: true,
@@ -222,7 +222,7 @@ const CyreChannel = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    CyreLog.error(`Channel processing failed: ${errorMessage}`)
+    log.error(`Channel processing failed: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.CHANNEL_CREATION_FAILED

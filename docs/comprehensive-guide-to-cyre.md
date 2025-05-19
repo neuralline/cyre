@@ -93,7 +93,7 @@ interface CyreInstance {
   pause: (id?: string) => void
   resume: (id?: string) => void
   hasChanged: (id: string, payload: ActionPayload) => boolean
-  getPreviousPayload: (id: string) => ActionPayload | undefined
+  getPrevious: (id: string) => ActionPayload | undefined
   getBreathingState: () => Readonly<BreathingMetrics>
   getPerformanceState: () => {
     totalProcessingTime: number

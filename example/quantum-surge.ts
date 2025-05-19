@@ -112,7 +112,7 @@ cyre.on([
 
       if (totalDelay > 1000) {
         // Log only significant delays
-        CyreLog.warn(
+        log.warn(
           `High latency detected [ID: ${payload.id}] ` +
             `Total: ${totalDelay}ms, Process: ${processDelay}ms`
         )
@@ -150,7 +150,7 @@ const monitor = setInterval(() => {
   const runTime = (Date.now() - startTime) / 1000
   const breathingState = cyre.getBreathingState()
 
-  CyreLog.debug({
+  log.debug({
     timestamp: Date.now(),
     runtime: `${runTime.toFixed(1)}s`,
     metrics: {
@@ -179,7 +179,7 @@ const monitor = setInterval(() => {
   ) {
     clearInterval(monitor)
     cyre.shutdown()
-    CyreLog.success(
+    log.success(
       `Quantum surge test complete - Final metrics: ${JSON.stringify(metrics)}`
     )
   }

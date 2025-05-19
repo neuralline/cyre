@@ -316,7 +316,7 @@ if (cyre.hasChanged('user-status', newData)) {
 
 ---
 
-### `cyre.getPreviousPayload(id)`
+### `cyre.getPrevious(id)`
 
 Retrieves the most recent payload used for the specified action.
 
@@ -330,7 +330,7 @@ Retrieves the most recent payload used for the specified action.
 
 ```javascript
 // Get the previous payload
-const prevPayload = cyre.getPreviousPayload('user-data')
+const prevPayload = cyre.getPrevious('user-data')
 if (prevPayload) {
   console.log('Previous user data:', prevPayload)
 }
