@@ -26,7 +26,11 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "example/cyre-hooks-node-example.ts",
+    "test/history-api.test.ts"
+  ],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"],
   "references": [{"path": "./tsconfig.node.json"}]
 }

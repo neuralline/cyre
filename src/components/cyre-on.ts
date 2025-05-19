@@ -2,7 +2,7 @@
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
-import {On, Subscriber, SubscriptionResponse, IO} from '../interfaces/interface'
+import {On, Subscriber, SubscriptionResponse} from '../interfaces/interface'
 import {CyreLog} from './cyre-logger'
 
 /* 
@@ -179,14 +179,33 @@ export const subscribe: On = (
       message: MSG.SYSTEM_LOCKED_SUBSCRIBERS
     }
   }
+
   // Handle array of subscribers
   if (Array.isArray(type)) {
-    return addMultipleSubscribers(type)
+    const result = addMultipleSubscribers(type)
+    // Add unsubscribe function for array case
+    if (result.ok) {
+      result.unsubscribe = () => {
+        let allRemoved = true
+        type.forEach(sub => {
+          if (!subscribers.forget(sub.id)) {
+            allRemoved = false
+          }
+        })
+        return allRemoved
+      }
+    }
+    return result
   }
 
   // Handle single subscriber
   if (typeof type === 'string' && fn) {
-    return addSingleSubscriber(type, fn)
+    const result = addSingleSubscriber(type, fn)
+    // Add unsubscribe function for single case
+    if (result.ok) {
+      result.unsubscribe = () => subscribers.forget(type)
+    }
+    return result
   }
 
   CyreLog.error(MSG.SUBSCRIPTION_INVALID_PARAMS)

@@ -1,4 +1,4 @@
-//cyre/comprehensive-guide-to-cyre.md
+//docs/comprehensive-guide-to-cyre.md
 
 # Comprehensive Guide to Cyre
 

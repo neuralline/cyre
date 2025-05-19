@@ -117,15 +117,30 @@ const dataDefinitions = {
         }
   },
 
-  middleware: (attribute: string = '') => {
-    return typeof attribute === 'string'
-      ? {ok: true, payload: attribute}
-      : {
-          ok: false,
-          payload: null,
-          message: `'${attribute}' invalid action.middleware value`,
-          required: false
-        }
+  middleware: (attribute: any = []) => {
+    // Check if it's an array
+    if (Array.isArray(attribute)) {
+      return {
+        ok: true,
+        payload: attribute
+      }
+    }
+
+    // Handle string case for backward compatibility
+    if (typeof attribute === 'string') {
+      return {
+        ok: true,
+        payload: [attribute]
+      }
+    }
+
+    // Invalid value
+    return {
+      ok: false,
+      payload: [],
+      message: `'${attribute}' invalid action.middleware value`,
+      required: false
+    }
   },
 
   throttle: (attribute: number = 0) => {

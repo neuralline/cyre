@@ -11,9 +11,16 @@ import type {
 import {isEqual} from '../libs/utils'
 import {metricsState, type QuantumState} from './metrics-state'
 
-// Enhanced types for state management
-type Listener<T> = (state: T) => void
-type Unsubscribe = () => void
+import type {StateKey} from '../interfaces/interface'
+import {createStore} from './create-store'
+
+// Update to include proper middleware typing
+import type {MiddlewareFunction} from '../components/cyre-middleware'
+
+// Define a middleware type that works with the ISubscriber interface
+export interface IMiddleware extends ISubscriber {
+  fn: MiddlewareFunction
+}
 
 export interface StateActionMetrics {
   lastExecutionTime: number
@@ -24,12 +31,11 @@ export interface StateActionMetrics {
     message: string
   }>
 }
-import type {StateKey} from '../interfaces/interface'
-import {createStore} from './create-store'
 
 // Create stores with proper typing
 const ioStore = createStore<IO>()
 const subscriberStore = createStore<ISubscriber>()
+const middlewareStore = createStore<IMiddleware>()
 const timelineStore = createStore<Timer>()
 const payloadHistory = createStore<ActionPayload>()
 const actionMetrics = createStore<StateActionMetrics>()
@@ -136,6 +142,28 @@ export const subscribers = {
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
 
+export const middlewares = {
+  add: (middleware: ISubscriber): void => {
+    if (!middleware?.id || typeof middleware.fn !== 'function') {
+      throw new Error('Invalid middleware format')
+    }
+
+    // Store middleware in the central store
+    middlewareStore.set(middleware.id, middleware)
+  },
+  get: (id: StateKey): ISubscriber | undefined => {
+    return middlewareStore.get(id)
+  },
+  forget: (id: StateKey): boolean => {
+    return middlewareStore.forget(id)
+  },
+  clear: (): void => {
+    middlewareStore.clear()
+  },
+  getAll: (): ISubscriber[] => {
+    return middlewareStore.getAll()
+  }
+}
 export const timeline = {
   add: (timer: Timer): void => {
     if (!timer.id) return
@@ -143,8 +171,11 @@ export const timeline = {
   },
   get: (id: StateKey): Timer | undefined => timelineStore.get(id),
   forget: (id: StateKey): boolean => {
-    const timer = timelineStore.get(id)
-    if (timer?.timeoutId) clearTimeout(timer.timeoutId)
+    const timers = timelineStore.getAll().filter(timer => timer.id === id)
+    timers.forEach(timer => {
+      if (timer.timeoutId) clearTimeout(timer.timeoutId)
+      if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
+    })
     return timelineStore.forget(id)
   },
   clear: (): void => {
@@ -163,7 +194,8 @@ export const stores = Object.freeze({
   io: ioStore,
   subscribers: subscriberStore,
   timeline: timelineStore,
-  quantum: metricsState
+  quantum: metricsState,
+  middleware: middlewareStore
 })
 
 // Export types

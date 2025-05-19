@@ -96,7 +96,7 @@ const executeAction = (action: ActionResult): ActionResult => {
   try {
     const subscriber = subscribers.get(action.id)
     if (!subscriber) {
-      throw new Error('No subscriber found')
+      throw new Error(`No subscriber found for: ${action.id}`)
     }
 
     const result = subscriber.fn(action.payload)
@@ -123,7 +123,7 @@ const executeAction = (action: ActionResult): ActionResult => {
     }
   } catch (error) {
     CyreLog.error(
-      `${MSG.ACTION_EXECUTE_FAILED}: ${action}, Error: ${
+      `CYRE ACTION ERROR: ${MSG.ACTION_EXECUTE_FAILED} -id ${action.id} ${
         error instanceof Error ? error.message : String(error)
       }`
     )
@@ -170,7 +170,7 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   if (!initialIO) {
     CyreLog.error(MSG.ACTION_PREPARE_FAILED)
     return {
-      id: '',
+      id: 'CYRE-ERROR',
       type: '',
       ok: false,
       done: false,
@@ -194,6 +194,7 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   } catch (error) {
     CyreLog.error(`Action processing failed: ${error}`)
     return {
+      id: 'CYRE-ERROR',
       ...initialIO,
       ok: false,
       done: false,

@@ -1,3 +1,4 @@
+import {CyreHook, CyreChannel} from './interfaces/hooks-interface'
 /* 
     Neural Line
     Reactive event manager
@@ -9,9 +10,10 @@
 // Export main components
 // Import the cyre instance and related utilities from app.ts
 import {cyre, Cyre, CyreLog} from './app'
-
+import {cyreCompose} from './hooks/cyre-compose'
+import {useCyre} from './hooks/use-cyre'
 // Export everything as both named exports and default export
-export {cyre, Cyre, CyreLog}
+export {cyre, Cyre, CyreLog, useCyre, cyreCompose}
 
 // Also export cyre as the default export for compatibility
 export default cyre
@@ -33,6 +35,7 @@ export type {
   SystemMetrics,
   CyreResponse
 } from './interfaces/interface'
+export type {CyreHook, CyreChannel}
 
 // Version information
-export const version = '3.1.2'
+export const version = '3.1.7'
