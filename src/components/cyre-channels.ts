@@ -213,7 +213,7 @@ const CyreChannel = (
     })
 
     // Log success
-    log.success(MSG.CHANNEL_CREATED)
+    log.debug(`${MSG.CHANNEL_CREATED}: ${channel.id}`)
 
     return {
       ok: true,

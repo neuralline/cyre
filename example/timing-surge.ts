@@ -1,4 +1,4 @@
-import {cyre, CyreLog} from '../src/app'
+import {cyre} from '../src/app'
 /*
 
     C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E.

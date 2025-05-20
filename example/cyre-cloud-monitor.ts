@@ -2,7 +2,7 @@
 
 //example cyre usage
 
-import {cyre, CyreLog} from 'cyre'
+import {cyre} from 'cyre'
 
 // Initialize monitoring system
 const initializeMonitoring = () => {

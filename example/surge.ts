@@ -1,6 +1,6 @@
 //src/test/quantum-surge.ts
 
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 
 /*
 

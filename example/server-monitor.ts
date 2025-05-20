@@ -1,6 +1,6 @@
 // real-system-monitor.ts
 
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 import * as os from 'os' // Built-in Node.js module for system information
 
 /**

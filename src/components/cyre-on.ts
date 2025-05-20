@@ -81,7 +81,7 @@ const addSingleSubscriber = (
     // Enhanced duplicate subscriber detection
     const existing = subscribers.get(subscriber.id)
     if (existing) {
-      // Add more prominent warning with both CyreLog and console.warn
+      // Add more prominent warning with both cyre-log and console.warn
       const duplicateMessage = `DUPLICATE LISTENER DETECTED: Channel "${subscriber.id}" already has a listener attached!`
 
       // Use warning level instead of just info
@@ -91,10 +91,7 @@ const addSingleSubscriber = (
       if (typeof console !== 'undefined' && console.warn) {
         console.warn(`🔥 ${duplicateMessage}`)
         console.warn(
-          'This may cause unexpected behavior if the previous listener is still active.'
-        )
-        console.warn(
-          'Consider using cyre.forget() to remove previous listeners before adding new ones.'
+          'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
         )
       }
     }
@@ -102,14 +99,14 @@ const addSingleSubscriber = (
     // Add or update subscriber
     subscribers.add(subscriber)
 
-    log.info(`${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`)
+    log.debug(`${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`)
     return {
       ok: true,
       message: `${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Failed to add subscriber: ${errorMessage}`)
+    log.error(`${MSG.SUBSCRIPTION_FAILED}: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.SUBSCRIPTION_FAILED

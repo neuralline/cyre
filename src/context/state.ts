@@ -1,5 +1,4 @@
-// src/context/state.ts
-
+// src/context/state.ts - Update with timer utilities
 import {log} from '../components/cyre-logger'
 import type {
   ActionMetrics,
@@ -13,6 +12,7 @@ import {metricsState, type QuantumState} from './metrics-state'
 
 import type {StateKey} from '../interfaces/interface'
 import {createStore} from './create-store'
+import timeKeeper from '../components/cyre-time-keeper'
 
 // Update to include proper middleware typing
 import type {MiddlewareFunction} from '../components/cyre-middleware'
@@ -125,6 +125,45 @@ export const io = {
       errors: []
     }
     actionMetrics.set(id, {...current, ...update})
+  },
+
+  /**
+   * Set a timer with proper error handling
+   * @returns Object indicating success and optional timerId/message
+   */
+  setTimer: (
+    duration: number,
+    callback: () => void,
+    timerId: string
+  ): {ok: boolean; message?: string} => {
+    try {
+      const result = timeKeeper.keep(
+        duration,
+        callback,
+        1, // Execute once
+        timerId
+      )
+
+      return result.kind === 'ok'
+        ? {ok: true}
+        : {ok: false, message: result.error.message}
+    } catch (error) {
+      log.error(`Failed to set timer: ${error}`)
+      return {ok: false, message: String(error)}
+    }
+  },
+
+  /**
+   * Clear a timer by ID
+   */
+  clearTimer: (timerId: string): boolean => {
+    try {
+      timeKeeper.forget(timerId)
+      return true
+    } catch (error) {
+      log.error(`Failed to clear timer ${timerId}: ${error}`)
+      return false
+    }
   }
 }
 
@@ -181,9 +220,6 @@ export const timeline = {
   clear: (): void => {
     timelineStore.getAll().forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
-      if (timer.recuperationInterval) {
-        clearTimeout(timer.recuperationInterval)
-      }
     })
     timelineStore.clear()
   },

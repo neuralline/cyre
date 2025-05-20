@@ -8,7 +8,11 @@ import {BREATHING, MSG} from './config/cyre-config'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
-import {applyMiddleware, registerMiddleware} from './components/cyre-middleware'
+import {
+  safeApplyMiddleware,
+  registerMiddleware
+} from './components/cyre-middleware'
+import {applyProtectionLayers} from './components/cyre-protection'
 import dataDefinitions from './elements/data-definitions'
 import type {
   ActionId,
@@ -26,7 +30,7 @@ import type {
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.0.1 2025
+    Version 4.0.2 2025
 
     example use:
       cyre.action({id: 'uber', payload: 44085648634})
@@ -165,221 +169,42 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
   }
 
   /**
-   * Entry point for action execution
+   * Executes an action immediately with standardized approach
    */
-  const call = async (
-    id?: ActionId,
-    payload?: ActionPayload
-  ): Promise<CyreResponse> => {
-    // System shutdown check
-    if (isShutdown) {
-      return {ok: false, message: MSG.CALL_OFFLINE, payload: null}
-    }
-
-    // ID validation
-    if (!id?.trim()) {
-      return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
-    }
-
-    // Action retrieval from store
-    const action = io.get(id.trim())
-    if (!action) {
-      return {
-        ok: false,
-        payload: null,
-        message: `${MSG.CALL_NOT_RESPONDING}: ${id}`
-      }
-    }
-
-    try {
-      // Apply protection layers first (throttle, debounce, change detection)
-      const protectionResult = await applyProtectionLayers(action, payload)
-      if (protectionResult.protected) {
-        return protectionResult.response // Early return if any protection prevented execution
-      }
-
-      // Use the potentially modified payload from protection layers
-      const finalPayload = protectionResult.payload ?? payload ?? action.payload
-
-      // Route based on timing settings
-      if (action.interval || action.delay) {
-        return scheduleTimedExecution(action, finalPayload)
-      } else {
-        return executeImmediately(action, finalPayload)
-      }
-    } catch (error) {
-      return standardErrorResponse('Call failed', error)
-    }
-  }
-
-  /**
-   * Applies protection layers (throttle, debounce, change detection)
-   * Returns whether execution was prevented and a response if so
-   */
-  interface ProtectionResult {
-    protected: boolean
-    response?: CyreResponse
-    payload?: ActionPayload
-  }
-
-  const applyProtectionLayers = async (
+  const executeImmediately = async (
     action: IO,
-    payload?: ActionPayload
-  ): Promise<ProtectionResult> => {
-    const finalPayload = payload ?? action.payload
-
-    // 1. Check system state (recuperation mode)
-    const {breathing} = metricsState.get()
-    if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-      return {
-        protected: true,
-        response: {
-          ok: false,
-          payload: null,
-          message: `System recuperating (${(
-            breathing.recuperationDepth * 100
-          ).toFixed(1)}% depth). Try later.`
-        }
-      }
-    }
-
-    // 2. Check repeat: 0 case
-    if (action.repeat === 0) {
-      return {
-        protected: true,
-        response: {
-          ok: true,
-          payload: null,
-          message: 'Action registered but not executed (repeat: 0)'
-        }
-      }
-    }
-
-    // 3. Throttle (industry standard - first call passes)
-    if (action.throttle) {
-      const throttleResult = throttleCheck(action)
-      if (throttleResult.blocked) {
-        return {
-          protected: true,
-          response: throttleResult.response
-        }
-      }
-    }
-
-    // 4. Debounce (only handles debouncing, nothing else)
-    if (action.debounce) {
-      return {
-        protected: true,
-        response: debounceAction(action, finalPayload)
-      }
-    }
-
-    // 5. Change Detection
-    if (action.detectChanges && !io.hasChanged(action.id, finalPayload)) {
-      return {
-        protected: true,
-        response: {
-          ok: true,
-          payload: null,
-          message: 'Execution skipped: No changes detected in payload'
-        }
-      }
-    }
-    if (action.middleware?.length > 0) {
-      const middlewareResult = await applyMiddleware(action, finalPayload)
-      if (!middlewareResult) {
-        return {
-          protected: true,
-          response: {
+    payload: ActionPayload
+  ): Promise<CyreResponse> => {
+    try {
+      // Apply middleware if present - do this AFTER other protections
+      if (action.middleware?.length > 0) {
+        const middlewareResult = await safeApplyMiddleware(action, payload)
+        if (!middlewareResult) {
+          return {
             ok: false,
             payload: null,
             message: 'Action rejected by middleware'
           }
         }
+
+        // Update with middleware results
+        action = middlewareResult.action
+        payload = middlewareResult.payload
       }
 
-      // Middleware modified the action/payload but didn't block execution
-      return {
-        protected: false,
-        payload: middlewareResult.payload,
-        action: middlewareResult.action
-      }
-    }
+      // Dispatch the action
+      const dispatchResult = await useDispatch({
+        ...action,
+        timeOfCreation: performance.now(),
+        payload
+      })
 
-    // No protection blocked execution
-    return {
-      protected: false,
-      payload: finalPayload
-    }
-  }
+      // Record metrics
+      metricsState.recordCall(action.priority?.level)
 
-  /**
-   * Implements industry-standard throttle behavior
-   * First call always passes through, subsequent calls are rate-limited
-   */
-  interface ThrottleResult {
-    blocked: boolean
-    response?: CyreResponse
-  }
-
-  const throttleCheck = (action: IO): ThrottleResult => {
-    const now = Date.now()
-    const lastExecution = io.getMetrics(action.id)?.lastExecutionTime || 0
-    const timeSinceLastExecution = now - lastExecution
-
-    // Industry standard: First execution always goes through (lastExecution === 0)
-    if (lastExecution !== 0 && timeSinceLastExecution < action.throttle) {
-      return {
-        blocked: true,
-        response: {
-          ok: false,
-          payload: null,
-          message: `Throttled: ${
-            action.throttle - timeSinceLastExecution
-          }ms remaining`
-        }
-      }
-    }
-
-    return {blocked: false}
-  }
-
-  /**
-   * Implements focused debounce behavior
-   * Only handles setting up a timer for future execution
-   */
-  const debounceAction = (action: IO, payload: ActionPayload): CyreResponse => {
-    // Cancel any existing debounce timer
-    if (action.debounceTimerId) {
-      timeKeeper.forget(action.debounceTimerId)
-      action.debounceTimerId = undefined
-    }
-
-    // Create new debounce timer ID
-    const debounceTimerId = `${action.id}-debounce-${Date.now()}`
-
-    // Set up debounce timer - important: just handling debounce here!
-    const timerResult = timeKeeper.keep(
-      action.debounce,
-      async () => {
-        // After debounce period, process the action normally
-        // This will go through the FULL PIPELINE again including other protections
-        await call(action.id, payload)
-      },
-      false, // Don't repeat
-      debounceTimerId
-    )
-
-    // Update action with timer ID
-    if (timerResult.kind === 'ok') {
-      action.debounceTimerId = debounceTimerId
-      io.set(action)
-    }
-
-    return {
-      ok: true,
-      payload: null,
-      message: `Debounced: will execute after ${action.debounce}ms`
+      return dispatchResult
+    } catch (error) {
+      return standardErrorResponse('Execution failed', error)
     }
   }
 
@@ -504,30 +329,6 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
   }
 
   /**
-   * Executes an action immediately with standardized approach
-   */
-  const executeImmediately = async (
-    action: IO,
-    payload: ActionPayload
-  ): Promise<CyreResponse> => {
-    try {
-      // Simply dispatch the action - protections and middleware already applied
-      const dispatchResult = await useDispatch({
-        ...action,
-        timeOfCreation: performance.now(),
-        payload
-      })
-
-      // Record metrics
-      metricsState.recordCall(action.priority?.level)
-
-      return dispatchResult
-    } catch (error) {
-      return standardErrorResponse('Execution failed', error)
-    }
-  }
-
-  /**
    * Standardized error response generator
    */
   const standardErrorResponse = (
@@ -541,6 +342,60 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       ok: false,
       payload: null,
       message: `${context}: ${errorMessage}`
+    }
+  }
+
+  /**
+   * Entry point for action execution
+   */
+  const call = async (
+    id?: ActionId,
+    payload?: ActionPayload
+  ): Promise<CyreResponse> => {
+    // System shutdown check
+    if (isShutdown) {
+      return {ok: false, message: MSG.CALL_OFFLINE, payload: null}
+    }
+
+    // ID validation
+    if (!id?.trim()) {
+      return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
+    }
+
+    // Action retrieval from store
+    const action = io.get(id.trim())
+    if (!action) {
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.CALL_NOT_RESPONDING}: ${id}`
+      }
+    }
+
+    try {
+      // Apply protection layers first (throttle, debounce, change detection)
+      const protectionResult = await applyProtectionLayers(
+        action,
+        payload,
+        executeImmediately,
+        metricsState.get().breathing.isRecuperating
+      )
+
+      if (protectionResult.protected) {
+        return protectionResult.response! // Early return if any protection prevented execution
+      }
+
+      // Use the potentially modified payload from protection layers
+      const finalPayload = protectionResult.payload ?? payload ?? action.payload
+
+      // Route based on timing settings
+      if (action.interval || action.delay) {
+        return scheduleTimedExecution(action, finalPayload)
+      } else {
+        return executeImmediately(action, finalPayload)
+      }
+    } catch (error) {
+      return standardErrorResponse('Call failed', error)
     }
   }
 
@@ -567,7 +422,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             io.set(payload)
 
             // Debug log to confirm storage
-            log.debug(`Action ${payload.id} registered successfully`)
+            log.debug(`Action registered: ${payload.id}`)
 
             // Double-check that action was stored correctly
             const stored = io.get(payload.id)
@@ -589,7 +444,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           io.set(payload)
 
           // Debug log to confirm storage
-          log.debug(`Action ${payload.id} registered successfully`)
+          log.debug(`Action registered: ${payload.id}`)
 
           // Double-check that action was stored correctly
           const stored = io.get(payload.id)
@@ -804,7 +659,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       return {
         ok: success,
         message: success
-          ? `Middleware '${id}' registered successfully`
+          ? `Middleware registered: ${id}`
           : `Failed to register middleware '${id}'`,
         payload: null
       }
@@ -847,7 +702,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
         process.exit(1)
       }
     }
-    log.quantum('Cyre shuting down')
+    log.quantum('Cyre shutting down')
   }
 
   if (typeof window !== 'undefined') {

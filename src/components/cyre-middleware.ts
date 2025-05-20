@@ -1,5 +1,4 @@
-// src/components/cyre-middleware.ts
-
+// src/components/cyre-middleware.ts - Enhanced middleware handling
 import type {IO, ActionPayload} from '../interfaces/interface'
 import {log} from './cyre-logger'
 import {middlewares} from '../context/state'
@@ -96,4 +95,43 @@ export const applyMiddleware = async (
   }
 
   return result
+}
+
+/**
+ * Applies middleware to an action with better error handling
+ */
+export const safeApplyMiddleware = async (
+  action: IO,
+  payload: ActionPayload
+): Promise<{
+  action: IO
+  payload: ActionPayload
+} | null> => {
+  try {
+    if (
+      !action.middleware ||
+      !Array.isArray(action.middleware) ||
+      action.middleware.length === 0
+    ) {
+      return {action, payload}
+    }
+
+    log.debug(
+      `Applying ${action.middleware.length} middleware to action ${action.id}`
+    )
+
+    // Apply middleware with proper error handling
+    const result = await applyMiddleware(action, payload)
+
+    if (result) {
+      log.debug(`Middleware successfully applied to ${action.id}`)
+      return result
+    } else {
+      log.info(`Action ${action.id} rejected by middleware`)
+      return null
+    }
+  } catch (error) {
+    log.error(`Error applying middleware to ${action.id}: ${error}`)
+    return null
+  }
 }

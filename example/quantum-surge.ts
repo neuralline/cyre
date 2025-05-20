@@ -1,4 +1,4 @@
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 import type {CyreResponse} from '../src/interfaces/interface'
 
 /*
