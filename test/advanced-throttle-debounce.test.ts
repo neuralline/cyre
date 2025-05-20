@@ -1,4 +1,4 @@
-// src/tests/advanced-throttle-debounce.test.ts
+// src/test/advanced-throttle-debounce.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/app'

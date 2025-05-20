@@ -48,7 +48,7 @@ export const Colors = {
 // Define log level colors
 const levelColors: Record<LogLevel, (keyof typeof Colors)[]> = {
   [LogLevel.DEBUG]: ['dim', 'cyan'],
-  [LogLevel.INFO]: ['blue', 'bold', 'dim'],
+  [LogLevel.INFO]: ['blue', 'bold'],
   [LogLevel.WARN]: ['yellowBright', 'bold'],
   [LogLevel.ERROR]: ['redBright', 'bold'],
   [LogLevel.SUCCESS]: ['greenBright', 'bold', 'dim'],
@@ -174,4 +174,3 @@ export const log = {
 }
 
 // For backwards compatibility, export CyreLog as well
-export const CyreLog = log

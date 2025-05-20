@@ -29,7 +29,8 @@
   "include": [
     "src/**/*",
     "example/cyre-hooks-node-example.ts",
-    "test/history-api.test.ts"
+    "test/history-api.test.ts",
+    "test/improved-throttle-debounce.test.ts"
   ],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"],
   "references": [{"path": "./tsconfig.node.json"}]

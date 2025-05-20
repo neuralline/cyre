@@ -181,6 +181,9 @@ export const timeline = {
   clear: (): void => {
     timelineStore.getAll().forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
+      if (timer.recuperationInterval) {
+        clearTimeout(timer.recuperationInterval)
+      }
     })
     timelineStore.clear()
   },
