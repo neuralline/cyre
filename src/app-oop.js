@@ -23,7 +23,7 @@ import dataDefinitions from './components/data-definitions'
       console.log('calling taxi on ', number)  
     }
 
-    Cyre's first low: A robot can not injure a human being or alow a human being to be harmed by not helping;
+    Cyre's first law: A robot can not injure a human being or alow a human being to be harmed by not helping;
 
 */
 

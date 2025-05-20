@@ -68,6 +68,7 @@ const validateAction = (action: ActionResult): ActionResult => {
   }
 }
 
+// Note: We keep this but it's typically handled earlier in the pipeline now
 const checkPayloadChanges = (action: ActionResult): ActionResult => {
   if (!action.detectChanges) {
     return action
@@ -127,7 +128,6 @@ const executeAction = (action: ActionResult): ActionResult => {
         error instanceof Error ? error.message : String(error)
       }`
     )
-    // Return error result and prevent further pipeline execution
     return {
       ...action,
       ok: false,
@@ -165,7 +165,7 @@ const updateStore = (action: ActionResult): ActionResult => {
  * CyreAction function - handles single action execution
  * Repeat/interval handling is managed by the call method
  */
-const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
+export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   // Handle null/undefined input before pipe
   if (!initialIO) {
     log.error(MSG.ACTION_PREPARE_FAILED)
@@ -183,7 +183,6 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
     const result = pipe(
       prepareAction(initialIO),
       validateAction,
-      checkPayloadChanges,
       executeAction,
       (action: ActionResult) =>
         action.status === 'error' ? action : logAction(action),
@@ -194,8 +193,8 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   } catch (error) {
     log.error(`Action processing failed: ${error}`)
     return {
-      id: 'CYRE-ERROR',
       ...initialIO,
+      id: 'CYRE-ERROR',
       ok: false,
       done: false,
       status: 'error',

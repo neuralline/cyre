@@ -351,18 +351,6 @@ export interface SurgeProtectionConfig {
   }
 }
 
-export type ProtectionResult = {
-  delay: number
-  needsProtection: boolean
-  metrics: {
-    channelCalls: number
-    totalCalls: number
-    callsPerSecond: number
-    systemLoad: SystemMetrics
-    protectionFactor: number
-  }
-}
-
 // Enhanced type definitions
 export type ValidationResult = {
   isValid: boolean
@@ -423,4 +411,22 @@ export type BreathingState = {
   pattern: keyof typeof BREATHING.PATTERNS
   nextBreathDue: number
   recuperationInterval?: NodeJS.Timeout
+}
+
+/**
+ * Result of protection layer evaluation
+ */
+export interface ProtectionResult {
+  protected: boolean
+  response?: CyreResponse
+  payload?: ActionPayload
+  action?: IO // Added to allow middleware to modify the action
+}
+
+/**
+ * Result of throttle check
+ */
+export interface ThrottleResult {
+  blocked: boolean
+  response?: CyreResponse
 }
