@@ -64,8 +64,10 @@ export const io = {
       cleanupAction(ioState.id)
       ioStore.set(ioState.id, enhanced)
 
+      // Initialize action metrics - critical fix: initialize lastExecutionTime to 0
+      // This ensures first throttled calls correctly pass through
       actionMetrics.set(ioState.id, {
-        lastExecutionTime: Date.now(),
+        lastExecutionTime: 0, // Set to 0 instead of now() to fix throttle first-call passing
         executionCount: 0,
         errors: []
       })
@@ -107,6 +109,12 @@ export const io = {
 
   hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
     const previousPayload = payloadHistory.get(id)
+
+    // If no previous payload, consider it changed
+    if (previousPayload === undefined) {
+      return true
+    }
+
     return !isEqual(newPayload, previousPayload)
   },
 
@@ -124,9 +132,16 @@ export const io = {
       executionCount: 0,
       errors: []
     }
-    actionMetrics.set(id, {...current, ...update})
-  },
 
+    // Create a new object with updated values
+    const updated = {
+      ...current,
+      ...update
+    }
+
+    // Store the updated metrics
+    actionMetrics.set(id, updated)
+  },
   /**
    * Set a timer with proper error handling
    * @returns Object indicating success and optional timerId/message

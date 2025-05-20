@@ -1,5 +1,6 @@
 // interfaces/interface.ts
 
+import {ProtectionFunction} from '@/components/cyre-protection-pipeline'
 import {BREATHING} from '../config/cyre-config'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
@@ -116,6 +117,12 @@ export interface IO extends BaseProperties {
    * @example middleware: ['validate', 'transform']
    */
   middleware?: string[]
+
+  /** Protection pipeline functions for this action */
+  _protectionPipeline?: ProtectionFunction[]
+
+  /** Flag to bypass debounce protection for internal use */
+  _bypassDebounce?: boolean
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any

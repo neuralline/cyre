@@ -1,4 +1,5 @@
-// src/components/cyre-middleware.ts - Enhanced middleware handling
+// src/components/cyre-middleware.ts
+
 import type {IO, ActionPayload} from '../interfaces/interface'
 import {log} from './cyre-logger'
 import {middlewares} from '../context/state'
@@ -7,11 +8,14 @@ import {middlewares} from '../context/state'
       C.Y.R.E. - M.I.D.D.L.E.W.A.R.E
 */
 
-// Define the middleware function type
+// Define the middleware function type more precisely
 export type MiddlewareFunction = (
   action: IO,
   payload: ActionPayload
-) => Promise<{action: IO; payload: ActionPayload} | null>
+) =>
+  | Promise<{action: IO; payload: ActionPayload} | null>
+  | {action: IO; payload: ActionPayload}
+  | null
 
 /**
  * Register a middleware function
@@ -65,6 +69,13 @@ export const applyMiddleware = async (
 
   let result = {action, payload}
 
+  // Debug logging of middleware chain for troubleshooting
+  log.debug(
+    `Applying middleware chain for ${action.id}: ${action.middleware.join(
+      ', '
+    )}`
+  )
+
   for (const middlewareId of action.middleware) {
     // Get middleware from centralized store
     const middleware = middlewares.get(middlewareId)
@@ -75,6 +86,7 @@ export const applyMiddleware = async (
 
     try {
       // Call middleware function with current state
+      log.debug(`Executing middleware '${middlewareId}'`)
       const middlewareResult = await middleware.fn(
         result.action,
         result.payload
@@ -88,6 +100,7 @@ export const applyMiddleware = async (
 
       // Otherwise, update our result state for the next middleware
       result = middlewareResult
+      log.debug(`Middleware '${middlewareId}' processed successfully`)
     } catch (error) {
       log.error(`Middleware '${middlewareId}' failed: ${error}`)
       return null

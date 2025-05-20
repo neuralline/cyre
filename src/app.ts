@@ -12,7 +12,6 @@ import {
   safeApplyMiddleware,
   registerMiddleware
 } from './components/cyre-middleware'
-import {applyProtectionLayers} from './components/cyre-protection'
 import dataDefinitions from './elements/data-definitions'
 import type {
   ActionId,
@@ -24,6 +23,10 @@ import type {
   SubscriptionResponse,
   TimekeeperMetrics
 } from './interfaces/interface'
+import {
+  buildProtectionPipeline,
+  executeProtectionPipeline
+} from './components/cyre-protection'
 
 /* 
     Neural Line
@@ -373,26 +376,40 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     }
 
     try {
-      // Apply protection layers first (throttle, debounce, change detection)
-      const protectionResult = await applyProtectionLayers(
-        action,
-        payload,
-        executeImmediately,
-        metricsState.get().breathing.isRecuperating
-      )
+      // Use the final payload (passed in or from action)
+      const finalPayload = payload ?? action.payload
 
-      if (protectionResult.protected) {
-        return protectionResult.response! // Early return if any protection prevented execution
+      // Check if the action has a pipeline already
+      if (!action._protectionPipeline) {
+        // Build the pipeline if not already built (backward compatibility)
+        action._protectionPipeline = buildProtectionPipeline(action)
+        // Store the updated action with pipeline
+        io.set(action)
       }
-
-      // Use the potentially modified payload from protection layers
-      const finalPayload = protectionResult.payload ?? payload ?? action.payload
 
       // Route based on timing settings
       if (action.interval || action.delay) {
-        return scheduleTimedExecution(action, finalPayload)
+        // Create a function that handles timing
+        const executeTimed = () => scheduleTimedExecution(action, finalPayload)
+
+        // Execute the pipeline with timed execution as the final step
+        return executeProtectionPipeline(
+          action,
+          finalPayload,
+          action._protectionPipeline,
+          executeTimed
+        )
       } else {
-        return executeImmediately(action, finalPayload)
+        // Create a function that executes immediately
+        const executeNow = () => executeImmediately(action, finalPayload)
+
+        // Execute the pipeline with immediate execution as the final step
+        return executeProtectionPipeline(
+          action,
+          finalPayload,
+          action._protectionPipeline,
+          executeNow
+        )
       }
     } catch (error) {
       return standardErrorResponse('Call failed', error)
@@ -417,17 +434,26 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             dataDefinitions
           )
           if (processedChannel.ok && processedChannel.payload) {
+            // Build protection pipeline for each action
+            const actionWithPipeline = {
+              ...processedChannel.payload,
+              _protectionPipeline: buildProtectionPipeline(
+                processedChannel.payload
+              )
+            }
+
             // Ensure the action is properly stored
-            const payload = processedChannel.payload
-            io.set(payload)
+            io.set(actionWithPipeline)
 
             // Debug log to confirm storage
-            log.debug(`Action registered: ${payload.id}`)
+            log.debug(`Action registered: ${actionWithPipeline.id}`)
 
             // Double-check that action was stored correctly
-            const stored = io.get(payload.id)
+            const stored = io.get(actionWithPipeline.id)
             if (!stored) {
-              log.error(`Failed to retrieve action ${payload.id} after storage`)
+              log.error(
+                `Failed to retrieve action ${actionWithPipeline.id} after storage`
+              )
             }
           } else {
             log.error(`Failed to process action: ${processedChannel.message}`)
@@ -439,17 +465,26 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           dataDefinitions
         )
         if (processedChannel.ok && processedChannel.payload) {
+          // Build protection pipeline for the action
+          const actionWithPipeline = {
+            ...processedChannel.payload,
+            _protectionPipeline: buildProtectionPipeline(
+              processedChannel.payload
+            )
+          }
+
           // Ensure the action is properly stored
-          const payload = processedChannel.payload
-          io.set(payload)
+          io.set(actionWithPipeline)
 
           // Debug log to confirm storage
-          log.debug(`Action registered: ${payload.id}`)
+          log.debug(`Action registered: ${actionWithPipeline.id}`)
 
           // Double-check that action was stored correctly
-          const stored = io.get(payload.id)
+          const stored = io.get(actionWithPipeline.id)
           if (!stored) {
-            log.error(`Failed to retrieve action ${payload.id} after storage`)
+            log.error(
+              `Failed to retrieve action ${actionWithPipeline.id} after storage`
+            )
           }
         } else {
           log.error(`Failed to process action: ${processedChannel.message}`)
