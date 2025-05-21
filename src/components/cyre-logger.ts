@@ -164,7 +164,7 @@ export const log = {
     levelColors[LogLevel.CRITICAL],
     'log'
   ),
-  quantum: baseLogger(LogLevel.QUANTUM, levelColors[LogLevel.QUANTUM], 'log'), // Use the specialized method for quantum headers,
+  sys: baseLogger(LogLevel.QUANTUM, levelColors[LogLevel.QUANTUM], 'log'), // Use the specialized method for quantum headers,
 
   // Method to set log level
   setLevel: setLogLevel,

@@ -5,7 +5,7 @@ import {io, middlewares} from '../context/state'
 import {log} from './cyre-logger'
 import {metricsState} from '../context/metrics-state'
 import timeKeeper from './cyre-time-keeper'
-import {detailedMetrics} from '@/context/detailed-metrics'
+import {metricsReport} from '@/context/metrics-report'
 /* 
 
       C.Y.R.E. - P.R.O.T.E.C.T.I.O.N.
@@ -107,7 +107,7 @@ const throttleProtection = createProtection(
     // Industry standard: First execution always passes (lastExecution === 0)
     if (lastExecution !== 0 && timeSinceLastExecution < action.throttle!) {
       // Add this line to track throttle
-      detailedMetrics.trackThrottle(action.id)
+      metricsReport.trackThrottle(action.id)
 
       log.debug(`[THROTTLE] Throttling ${action.id} - too soon`)
       return {
@@ -144,7 +144,7 @@ const debounceProtection = createProtection(
   async (action, payload, next) => {
     // Skip if this is a debounce-bypass execution
     if (action._bypassDebounce) {
-      detailedMetrics.trackDebounce(action.id)
+      metricsReport.trackDebounce(action.id)
       return next()
     }
 
@@ -230,7 +230,7 @@ const changeDetectionProtection = createProtection(
   'Prevents execution if payload has not changed',
   async (action, payload, next) => {
     if (!io.hasChanged(action.id, payload)) {
-      detailedMetrics.trackChangeDetectionSkip(action.id)
+      metricsReport.trackChangeDetectionSkip(action.id)
       return {
         ok: true,
         payload: null,
@@ -340,7 +340,7 @@ const middlewareProtection = createProtection(
 
         // If middleware returned null, reject the action
         if (result === null) {
-          detailedMetrics.trackMiddlewareRejection(action.id)
+          metricsReport.trackMiddlewareRejection(action.id)
           return {
             ok: false,
             payload: null,

@@ -6,13 +6,13 @@ import {log} from '../components/cyre-logger'
 import {metricsState} from './metrics-state'
 
 /* 
-      C.Y.R.E. - D.E.T.A.I.L.E.D.M.E.T.R.I.C.S
+      C.Y.R.E. - M.E.T.R.I.C.S. - R.E.P.O.R.T.
       
       Enhanced metrics tracking for diagnostics and analysis
       Hybrid approach that integrates with metrics-state
 */
 
-// Types for tracking detailed metrics
+// Types for tracking metrics report
 export interface ActionMetricsData {
   id: string
   calls: number
@@ -151,8 +151,8 @@ const calculateCallRate = (globalMetrics: GlobalMetricsData): number => {
   return callsSinceLastCheck / secondsElapsed
 }
 
-// Export the detailed metrics manager
-export const detailedMetrics = {
+// Export the metrics report manager
+export const metricsReport = {
   // Track a call operation
   trackCall: (id: ActionId, priority: Priority = 'medium'): void => {
     const now = Date.now()
@@ -339,12 +339,12 @@ export const detailedMetrics = {
     }
   },
 
-  // Get detailed metrics for a specific action
+  // Get metrics report for a specific action
   getActionMetrics: (id: StateKey): ActionMetricsData | undefined => {
     return actionMetricsStore.get(id)
   },
 
-  // Get detailed metrics for all actions
+  // Get metrics report for all actions
   getAllActionMetrics: (): ActionMetricsData[] => {
     return actionMetricsStore.getAll()
   },
@@ -416,7 +416,7 @@ export const detailedMetrics = {
       globalMetrics.totalExecutions
     ).toFixed(2)
 
-    let report = `CYRE Detailed Metrics Report\n`
+    let report = `CYRE Metrics Report Report\n`
     report += `=============================\n\n`
     report += `System Uptime: ${uptimeFormatted}\n`
     report += `Total Actions: ${globalMetrics.totalActions}\n\n`
@@ -506,11 +506,11 @@ export const detailedMetrics = {
     return report
   },
 
-  // Log detailed metrics report
+  // Log metrics report
   logReport: (
     filterPredicate?: (metrics: ActionMetricsData) => boolean
   ): void => {
-    log.info(detailedMetrics.generateReport(filterPredicate))
+    log.info(metricsReport.generateReport(filterPredicate))
   },
 
   // Get actionable insights based on metrics
@@ -614,5 +614,5 @@ export const detailedMetrics = {
 
 // Export the initialization function if needed elsewhere
 export const initDetailedMetrics = (): void => {
-  detailedMetrics.reset()
+  metricsReport.reset()
 }

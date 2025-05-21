@@ -1,4 +1,3 @@
-import {detailedMetrics} from './context/detailed-metrics'
 // src/app.ts
 import CyreAction from './components/cyre-actions'
 import CyreChannel from './components/cyre-channels'
@@ -9,10 +8,7 @@ import {BREATHING, MSG} from './config/cyre-config'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
-import {
-  safeApplyMiddleware,
-  registerMiddleware
-} from './components/cyre-middleware'
+import {registerMiddleware} from './components/cyre-middleware'
 import dataDefinitions from './elements/data-definitions'
 import type {
   ActionId,
@@ -28,7 +24,7 @@ import {
   buildProtectionPipeline,
   executeProtectionPipeline
 } from './components/cyre-protection'
-import {detailedMetrics} from './context/detailed-metrics'
+import {metricsReport} from './context/metrics-report'
 
 /* 
     Neural Line
@@ -199,7 +195,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       // Only update metrics if dispatch was successful
       if (dispatchResult.ok) {
         // Add this line to track execution time
-        detailedMetrics.trackExecution(action.id, executionTime)
+        metricsReport.trackExecution(action.id, executionTime)
 
         io.updateMetrics(action.id, {
           lastExecutionTime: Date.now(),
@@ -212,7 +208,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
       return dispatchResult
     } catch (error) {
-      detailedMetrics.trackError(action.id)
+      metricsReport.trackError(action.id)
       return standardErrorResponse('Execution failed', error)
     }
   }
@@ -385,7 +381,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     if (!id?.trim()) {
       return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
     }
-    detailedMetrics.trackCall(id.trim())
+    metricsReport.trackCall(id.trim())
     // Action retrieval from store
     const action = io.get(id.trim())
     if (!action) {
@@ -548,7 +544,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     initializeBreathing()
     timeKeeper.resume()
 
-    log.quantum(
+    log.sys(
       '%c' + MSG.QUANTUM_HEADER,
       'background: rgb(151, 2, 151); color: white; display: block;'
     )
@@ -773,7 +769,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       subscribers.clear()
       io.clear()
       metricsState.reset()
-      detailedMetrics.reset()
+      metricsReport.reset()
       isShutdown = true
 
       if (typeof process !== 'undefined' && process.exit) {
@@ -785,7 +781,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
         process.exit(1)
       }
     }
-    log.quantum('Cyre shutting down')
+    log.sys('Cyre shutting down')
   }
 
   if (typeof window !== 'undefined') {
@@ -820,12 +816,12 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     clearHistory,
     middleware,
     getMetricsReport: () => ({
-      actions: detailedMetrics.getAllActionMetrics(),
-      global: detailedMetrics.getGlobalMetrics(),
-      insights: detailedMetrics.getInsights()
+      actions: metricsReport.getAllActionMetrics(),
+      global: metricsReport.getGlobalMetrics(),
+      insights: metricsReport.getInsights()
     }),
     logMetricsReport: (filter?: (metrics: any) => boolean) =>
-      detailedMetrics.logReport(filter)
+      metricsReport.logReport(filter)
   }
 }
 
