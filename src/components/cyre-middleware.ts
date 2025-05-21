@@ -2,7 +2,8 @@
 
 import type {IO, ActionPayload} from '../interfaces/interface'
 import {log} from './cyre-logger'
-import {middlewares} from '../context/state'
+import {io, middlewares} from '../context/state'
+import {addMiddlewareToAction} from './cyre-protection'
 
 /* 
       C.Y.R.E. - M.I.D.D.L.E.W.A.R.E
@@ -50,7 +51,38 @@ export const registerMiddleware = (id: string, fn: Function): boolean => {
 }
 
 /**
- * Apply middleware chain to an action and payload
+ * Update an action to include a middleware ID in its middleware array
+ * @param actionId The ID of the action to update
+ * @param middlewareId The ID of the middleware to add
+ * @returns boolean indicating success
+ */
+export const attachMiddlewareToAction = (
+  actionId: string,
+  middlewareId: string
+): boolean => {
+  try {
+    const action = io.get(actionId)
+    if (!action) {
+      log.warn(`Cannot attach middleware to non-existent action: ${actionId}`)
+      return false
+    }
+
+    // Use enhanced function to add middleware and rebuild pipeline
+    const updatedAction = addMiddlewareToAction(action, middlewareId)
+
+    // Update the action in the store
+    io.set(updatedAction)
+    log.debug(`Middleware ${middlewareId} attached to action ${actionId}`)
+
+    return true
+  } catch (error) {
+    log.error(`Failed to attach middleware to action: ${error}`)
+    return false
+  }
+}
+
+/**
+ * Apply middleware chain to an action and payload with enhanced error handling
  * @param action The action to process
  * @param payload The action payload
  * @returns Processed action and payload, or null if rejected
@@ -85,11 +117,10 @@ export const applyMiddleware = async (
     }
 
     try {
-      // Call middleware function with current state
+      // Call middleware function with current state - properly handle Promise
       log.debug(`Executing middleware '${middlewareId}'`)
-      const middlewareResult = await middleware.fn(
-        result.action,
-        result.payload
+      const middlewareResult = await Promise.resolve(
+        middleware.fn(result.action, result.payload)
       )
 
       // If middleware returned null, reject the action
@@ -111,7 +142,8 @@ export const applyMiddleware = async (
 }
 
 /**
- * Applies middleware to an action with better error handling
+ * Applies middleware to an action with better error handling - USE THIS DIRECTLY ONLY FOR SPECIAL CASES
+ * In normal operation, middleware should be applied through the protection pipeline
  */
 export const safeApplyMiddleware = async (
   action: IO,
@@ -147,4 +179,11 @@ export const safeApplyMiddleware = async (
     log.error(`Error applying middleware to ${action.id}: ${error}`)
     return null
   }
+}
+
+/**
+ * Testing utility to clear all middleware - USE ONLY IN TESTS
+ */
+export const clearAllMiddleware = (): void => {
+  middlewares.clear()
 }

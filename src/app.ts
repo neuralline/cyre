@@ -1,3 +1,4 @@
+import {detailedMetrics} from './context/detailed-metrics'
 // src/app.ts
 import CyreAction from './components/cyre-actions'
 import CyreChannel from './components/cyre-channels'
@@ -27,6 +28,7 @@ import {
   buildProtectionPipeline,
   executeProtectionPipeline
 } from './components/cyre-protection'
+import {detailedMetrics} from './context/detailed-metrics'
 
 /* 
     Neural Line
@@ -76,6 +78,8 @@ interface CyreInstance {
   getHistory: (actionId?: string) => any
   clearHistory: (actionId?: string) => void
   middleware: (id: string, fn: Function) => void
+  getMetricsReport: (actionId?: string) => any
+  logMetricsReport: (filter?: (metrics: any) => boolean) => void
 }
 
 const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
@@ -179,21 +183,8 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     payload: ActionPayload
   ): Promise<CyreResponse> => {
     try {
-      // Apply middleware if present - do this AFTER other protections
-      if (action.middleware?.length > 0) {
-        const middlewareResult = await safeApplyMiddleware(action, payload)
-        if (!middlewareResult) {
-          return {
-            ok: false,
-            payload: null,
-            message: 'Action rejected by middleware'
-          }
-        }
-
-        // Update with middleware results
-        action = middlewareResult.action
-        payload = middlewareResult.payload
-      }
+      // Track execution start time
+      const startTime = performance.now()
 
       // Dispatch the action
       const dispatchResult = await useDispatch({
@@ -202,18 +193,33 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
         payload
       })
 
+      // Calculate execution time and update metrics
+      const executionTime = performance.now() - startTime
+
+      // Only update metrics if dispatch was successful
+      if (dispatchResult.ok) {
+        // Add this line to track execution time
+        detailedMetrics.trackExecution(action.id, executionTime)
+
+        io.updateMetrics(action.id, {
+          lastExecutionTime: Date.now(),
+          executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
+        })
+      }
+
       // Record metrics
       metricsState.recordCall(action.priority?.level)
 
       return dispatchResult
     } catch (error) {
+      detailedMetrics.trackError(action.id)
       return standardErrorResponse('Execution failed', error)
     }
   }
 
-  /**
-   * Schedules execution with timing modifiers (delay, interval)
-   */
+  // Update scheduleTimedExecution function to ensure metrics are updated
+  // for first execution of timed actions
+
   const scheduleTimedExecution = (
     action: IO,
     payload: ActionPayload
@@ -250,12 +256,27 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       const timerResult = timeKeeper.keep(
         initialWait,
         async () => {
+          // Track execution start time
+          const startTime = performance.now()
+
           // First execution
           const firstResult = await useDispatch({
             ...action,
             timeOfCreation: performance.now(),
             payload
           })
+
+          // Calculate execution time
+          const executionTime = performance.now() - startTime
+
+          // Update metrics if execution was successful
+          if (firstResult.ok) {
+            io.updateMetrics(action.id, {
+              lastExecutionTime: Date.now(),
+              executionCount:
+                (io.getMetrics(action.id)?.executionCount || 0) + 1
+            })
+          }
 
           // Handle repeats if needed
           if (
@@ -364,7 +385,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     if (!id?.trim()) {
       return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
     }
-
+    detailedMetrics.trackCall(id.trim())
     // Action retrieval from store
     const action = io.get(id.trim())
     if (!action) {
@@ -379,12 +400,20 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       // Use the final payload (passed in or from action)
       const finalPayload = payload ?? action.payload
 
-      // Check if the action has a pipeline already
+      // ALWAYS check if the action has a pipeline and rebuild if missing
       if (!action._protectionPipeline) {
-        // Build the pipeline if not already built (backward compatibility)
-        action._protectionPipeline = buildProtectionPipeline(action)
+        // Rebuild the pipeline - this ensures middleware added after action creation works
+        const updatedAction = {
+          ...action,
+          _protectionPipeline: buildProtectionPipeline(action)
+        }
         // Store the updated action with pipeline
-        io.set(action)
+        io.set(updatedAction)
+
+        // Update our reference to use the updated action
+        Object.assign(action, updatedAction)
+
+        log.debug(`Rebuilt protection pipeline for action ${action.id}`)
       }
 
       // Route based on timing settings
@@ -429,12 +458,27 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     try {
       if (Array.isArray(attribute)) {
         attribute.forEach(ioItem => {
-          const processedChannel = CyreChannel(
-            {...ioItem, type: ioItem.type || ioItem.id},
-            dataDefinitions
-          )
+          // Get existing action to preserve middleware
+          const existingAction = io.get(ioItem.id)
+          const existingMiddleware = existingAction?.middleware || []
+
+          // Ensure middleware is preserved/merged in new action
+          const mergedItem = {
+            ...ioItem,
+            type: ioItem.type || ioItem.id,
+            middleware: ioItem.middleware
+              ? [
+                  ...existingMiddleware,
+                  ...ioItem.middleware.filter(
+                    (id: string) => !existingMiddleware.includes(id)
+                  )
+                ]
+              : existingMiddleware
+          }
+
+          const processedChannel = CyreChannel(mergedItem, dataDefinitions)
           if (processedChannel.ok && processedChannel.payload) {
-            // Build protection pipeline for each action
+            // ALWAYS rebuild the protection pipeline when creating or updating an action
             const actionWithPipeline = {
               ...processedChannel.payload,
               _protectionPipeline: buildProtectionPipeline(
@@ -445,27 +489,36 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             // Ensure the action is properly stored
             io.set(actionWithPipeline)
 
-            // Debug log to confirm storage
-            log.debug(`Action registered: ${actionWithPipeline.id}`)
-
-            // Double-check that action was stored correctly
-            const stored = io.get(actionWithPipeline.id)
-            if (!stored) {
-              log.error(
-                `Failed to retrieve action ${actionWithPipeline.id} after storage`
-              )
-            }
+            // Debug log to confirm storage and pipeline rebuilding
+            log.debug(
+              `Action registered with fresh pipeline: ${actionWithPipeline.id}`
+            )
           } else {
             log.error(`Failed to process action: ${processedChannel.message}`)
           }
         })
       } else {
-        const processedChannel = CyreChannel(
-          {...attribute, type: attribute.type || attribute.id},
-          dataDefinitions
-        )
+        // Get existing action to preserve middleware
+        const existingAction = io.get(attribute.id)
+        const existingMiddleware = existingAction?.middleware || []
+
+        // Ensure middleware is preserved/merged in new action
+        const mergedAttribute = {
+          ...attribute,
+          type: attribute.type || attribute.id,
+          middleware: attribute.middleware
+            ? [
+                ...existingMiddleware,
+                ...attribute.middleware.filter(
+                  (id: string) => !existingMiddleware.includes(id)
+                )
+              ]
+            : existingMiddleware
+        }
+
+        const processedChannel = CyreChannel(mergedAttribute, dataDefinitions)
         if (processedChannel.ok && processedChannel.payload) {
-          // Build protection pipeline for the action
+          // ALWAYS rebuild the protection pipeline when creating or updating an action
           const actionWithPipeline = {
             ...processedChannel.payload,
             _protectionPipeline: buildProtectionPipeline(
@@ -476,16 +529,10 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
           // Ensure the action is properly stored
           io.set(actionWithPipeline)
 
-          // Debug log to confirm storage
-          log.debug(`Action registered: ${actionWithPipeline.id}`)
-
-          // Double-check that action was stored correctly
-          const stored = io.get(actionWithPipeline.id)
-          if (!stored) {
-            log.error(
-              `Failed to retrieve action ${actionWithPipeline.id} after storage`
-            )
-          }
+          // Debug log to confirm storage and pipeline rebuilding
+          log.debug(
+            `Action registered with fresh pipeline: ${actionWithPipeline.id}`
+          )
         } else {
           log.error(`Failed to process action: ${processedChannel.message}`)
         }
@@ -726,6 +773,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       subscribers.clear()
       io.clear()
       metricsState.reset()
+      detailedMetrics.reset()
       isShutdown = true
 
       if (typeof process !== 'undefined' && process.exit) {
@@ -770,7 +818,14 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     getMetrics,
     getHistory,
     clearHistory,
-    middleware
+    middleware,
+    getMetricsReport: () => ({
+      actions: detailedMetrics.getAllActionMetrics(),
+      global: detailedMetrics.getGlobalMetrics(),
+      insights: detailedMetrics.getInsights()
+    }),
+    logMetricsReport: (filter?: (metrics: any) => boolean) =>
+      detailedMetrics.logReport(filter)
   }
 }
 

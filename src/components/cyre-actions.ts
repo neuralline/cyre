@@ -100,7 +100,18 @@ const executeAction = (action: ActionResult): ActionResult => {
       throw new Error(`No subscriber found for: ${action.id}`)
     }
 
+    // Track execution start time
+    const startTime = performance.now()
+
     const result = subscriber.fn(action.payload)
+    const endTime = performance.now()
+    const executionTime = endTime - startTime
+
+    // Update metrics with execution time
+    io.updateMetrics(action.id, {
+      lastExecutionTime: Date.now(),
+      executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
+    })
 
     // Handle linked actions
     if (result && typeof result === 'object' && 'id' in result) {

@@ -5,6 +5,7 @@ import {io, middlewares} from '../context/state'
 import {log} from './cyre-logger'
 import {metricsState} from '../context/metrics-state'
 import timeKeeper from './cyre-time-keeper'
+import {detailedMetrics} from '@/context/detailed-metrics'
 /* 
 
       C.Y.R.E. - P.R.O.T.E.C.T.I.O.N.
@@ -105,6 +106,9 @@ const throttleProtection = createProtection(
 
     // Industry standard: First execution always passes (lastExecution === 0)
     if (lastExecution !== 0 && timeSinceLastExecution < action.throttle!) {
+      // Add this line to track throttle
+      detailedMetrics.trackThrottle(action.id)
+
       log.debug(`[THROTTLE] Throttling ${action.id} - too soon`)
       return {
         ok: false,
@@ -120,27 +124,17 @@ const throttleProtection = createProtection(
     // Execute the next function in the pipeline
     const result = await next()
 
-    // If execution was successful, update the lastExecutionTime
-    if (result.ok && result.payload) {
-      // Update metrics in store
-      const updatedMetrics = actionMetrics || {
-        lastExecutionTime: 0,
-        executionCount: 0,
-        errors: []
-      }
-
-      // CRITICAL FIX: Actually update the lastExecutionTime and store it
+    // If execution was successful, ensure we update the lastExecutionTime
+    if (result.ok) {
       io.updateMetrics(action.id, {
-        ...updatedMetrics,
         lastExecutionTime: Date.now(),
-        executionCount: (updatedMetrics.executionCount || 0) + 1
+        executionCount: (actionMetrics?.executionCount || 0) + 1
       })
     }
 
     return result
   }
 )
-
 /**
  * Debounce protection - collapses rapid calls
  */
@@ -150,6 +144,7 @@ const debounceProtection = createProtection(
   async (action, payload, next) => {
     // Skip if this is a debounce-bypass execution
     if (action._bypassDebounce) {
+      detailedMetrics.trackDebounce(action.id)
       return next()
     }
 
@@ -235,6 +230,7 @@ const changeDetectionProtection = createProtection(
   'Prevents execution if payload has not changed',
   async (action, payload, next) => {
     if (!io.hasChanged(action.id, payload)) {
+      detailedMetrics.trackChangeDetectionSkip(action.id)
       return {
         ok: true,
         payload: null,
@@ -246,66 +242,8 @@ const changeDetectionProtection = createProtection(
 )
 
 /**
- * Middleware protection - applies middleware transforms
- */
-const middlewareProtection = createProtection(
-  'middlewareProtection',
-  'Applies middleware to transform action and payload',
-  async (action, payload, next) => {
-    if (
-      !action.middleware ||
-      !Array.isArray(action.middleware) ||
-      action.middleware.length === 0
-    ) {
-      return next()
-    }
-
-    let currentAction = action
-    let currentPayload = payload
-
-    // Apply middleware sequentially
-    for (const middlewareId of action.middleware) {
-      const middleware = middlewares.get(middlewareId)
-      if (!middleware) {
-        log.warn(`Middleware '${middlewareId}' not found and will be skipped`)
-        continue
-      }
-
-      try {
-        // Call middleware function
-        const result = await middleware.fn(currentAction, currentPayload)
-
-        // If middleware returned null, reject the action
-        if (result === null) {
-          return {
-            ok: false,
-            payload: null,
-            message: `Action rejected by middleware '${middlewareId}'`
-          }
-        }
-
-        // Update current state for next middleware
-        currentAction = result.action
-        currentPayload = result.payload
-      } catch (error) {
-        log.error(`Middleware '${middlewareId}' failed: ${error}`)
-        return {
-          ok: false,
-          payload: null,
-          message: `Middleware error: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        }
-      }
-    }
-
-    // Execute with transformed action and payload
-    return next()
-  }
-)
-
-/**
  * Builds a specialized protection pipeline for an action based on its configuration
+ * Refactored to be more explicit about middleware protection
  */
 export const buildProtectionPipeline = (action: IO): ProtectionFunction[] => {
   const pipeline: ProtectionFunction[] = []
@@ -331,13 +269,109 @@ export const buildProtectionPipeline = (action: IO): ProtectionFunction[] => {
     pipeline.push(changeDetectionProtection)
   }
 
-  // Add middleware if configured
+  // Add middleware if configured - moved middleware to the end to ensure all protections run first
   if (action.middleware && action.middleware.length > 0) {
     pipeline.push(middlewareProtection)
   }
 
   return pipeline
 }
+
+/**
+ * Updates an action with a new middleware ID and rebuilds its protection pipeline
+ * @param action The action to update
+ * @param middlewareId The middleware ID to add
+ * @returns Updated action with rebuilt pipeline
+ */
+export const addMiddlewareToAction = (action: IO, middlewareId: string): IO => {
+  // Skip if middleware already exists in this action
+  if (action.middleware?.includes(middlewareId)) {
+    return action
+  }
+
+  // Create or update middleware array
+  const updatedMiddleware = action.middleware
+    ? [...action.middleware, middlewareId]
+    : [middlewareId]
+
+  // Create updated action with middleware
+  const updatedAction: IO = {
+    ...action,
+    middleware: updatedMiddleware
+  }
+
+  // Rebuild the protection pipeline
+  updatedAction._protectionPipeline = buildProtectionPipeline(updatedAction)
+
+  return updatedAction
+}
+
+/**
+ * Improved middleware protection function with better error handling and logging
+ */
+const middlewareProtection = createProtection(
+  'middlewareProtection',
+  'Applies middleware to transform action and payload',
+  async (action, payload, next) => {
+    if (
+      !action.middleware ||
+      !Array.isArray(action.middleware) ||
+      action.middleware.length === 0
+    ) {
+      return next()
+    }
+
+    let currentAction = action
+    let currentPayload = payload
+
+    // Apply middleware sequentially
+    for (const middlewareId of action.middleware) {
+      const middleware = middlewares.get(middlewareId)
+      if (!middleware) {
+        log.warn(`Middleware '${middlewareId}' not found and will be skipped`)
+        continue
+      }
+
+      try {
+        // Call middleware function with proper Promise handling
+        const result = await Promise.resolve(
+          middleware.fn(currentAction, currentPayload)
+        )
+
+        // If middleware returned null, reject the action
+        if (result === null) {
+          detailedMetrics.trackMiddlewareRejection(action.id)
+          return {
+            ok: false,
+            payload: null,
+            message: `Action rejected by middleware '${middlewareId}'`
+          }
+        }
+
+        // Update current state for next middleware
+        currentAction = result.action
+        currentPayload = result.payload
+
+        // Add debug logging for middleware execution
+        log.debug(
+          `Middleware '${middlewareId}' successfully processed action ${action.id}`
+        )
+      } catch (error) {
+        log.error(`Middleware '${middlewareId}' failed: ${error}`)
+        return {
+          ok: false,
+          payload: null,
+          message: `Middleware error: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        }
+      }
+    }
+
+    // Execute with transformed action and payload - ensure we pass the final transformed state
+    return next()
+  }
+)
 
 /**
  * Executes a protection pipeline

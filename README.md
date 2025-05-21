@@ -16,10 +16,6 @@ npm i cyre
 ```
 
 ```sh
-yarn add cyre
-```
-
-```sh
 pnpm add cyre
 ```
 
@@ -354,7 +350,7 @@ console.log(`Current stress levels:
   - Robust timeKeeper
   - better integration with core
   - precision timing
-  - adapted TimeKeepers terminology like Keep and Forget
+  - adapted TimeKeeper's terminology like Keep, Forget and Recuperation
 
 - 3.0.2: Surge
 
@@ -370,7 +366,7 @@ console.log(`Current stress levels:
   - Adaptive timing controls
   - Priority-based execution
 
-- 3.1.6: Cyre lock
+- 3.1.6: Cyre Lock
 
   - Added `cyre.lock()` to prevent runtime modification
   - Enhanced queue management for interval actions
@@ -378,8 +374,8 @@ console.log(`Current stress levels:
   - Improved documentation and examples
   - Fixed detectChanges behavior with debounce
 
-- 4.0.0: Cyre hooks
-  - Introducing `useCyre`
+- 4.0.0: Cyre Hooks
+  - `useCyre`
   - Delay
   - Middleware
   - cyre-compose (batch channel processing)

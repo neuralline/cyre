@@ -64,13 +64,18 @@ export const io = {
       cleanupAction(ioState.id)
       ioStore.set(ioState.id, enhanced)
 
-      // Initialize action metrics - critical fix: initialize lastExecutionTime to 0
-      // This ensures first throttled calls correctly pass through
-      actionMetrics.set(ioState.id, {
-        lastExecutionTime: 0, // Set to 0 instead of now() to fix throttle first-call passing
-        executionCount: 0,
-        errors: []
-      })
+      // Ensure action metrics are initialized with a valid timestamp
+      const currentTime = Date.now()
+      const currentMetrics = actionMetrics.get(ioState.id)
+
+      // Only initialize if metrics don't exist yet or have invalid values
+      if (!currentMetrics || currentMetrics.lastExecutionTime === 0) {
+        actionMetrics.set(ioState.id, {
+          lastExecutionTime: 0, // Keep as 0 until first execution
+          executionCount: 0,
+          errors: []
+        })
+      }
 
       if (ioState.detectChanges) {
         payloadHistory.set(ioState.id, ioState.payload)
@@ -88,13 +93,43 @@ export const io = {
     }
   },
 
+  updateMetrics: (id: StateKey, update: Partial<ActionMetrics>): void => {
+    // Get current metrics or create default if none exist
+    const current = actionMetrics.get(id) || {
+      lastExecutionTime: 0,
+      executionCount: 0,
+      errors: []
+    }
+
+    // Update with new metrics, ensuring values are valid
+    const updatedMetrics = {
+      ...current,
+      ...update,
+      // Ensure lastExecutionTime is a valid number greater than 0
+      lastExecutionTime:
+        update.lastExecutionTime && update.lastExecutionTime > 0
+          ? update.lastExecutionTime
+          : current.lastExecutionTime
+    }
+
+    // Store updated metrics
+    actionMetrics.set(id, updatedMetrics)
+
+    // Log for debugging
+    log.debug(`Updated metrics for ${id}:`, {
+      previous: current,
+      updated: updatedMetrics
+    })
+  },
+
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
+  //remove channel
   forget: (id: StateKey): boolean => {
     cleanupAction(id)
     return ioStore.forget(id)
   },
-
+  //forget all channels and clear all related records
   clear: (): void => {
     ioStore.getAll().forEach(item => {
       if (item.id) cleanupAction(item.id)
@@ -105,6 +140,7 @@ export const io = {
     metricsState.reset()
   },
 
+  //get all io state
   getAll: (): IO[] => ioStore.getAll(),
 
   hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
@@ -126,22 +162,6 @@ export const io = {
     return actionMetrics.get(id)
   },
 
-  updateMetrics: (id: StateKey, update: Partial<ActionMetrics>): void => {
-    const current = actionMetrics.get(id) || {
-      lastExecutionTime: 0,
-      executionCount: 0,
-      errors: []
-    }
-
-    // Create a new object with updated values
-    const updated = {
-      ...current,
-      ...update
-    }
-
-    // Store the updated metrics
-    actionMetrics.set(id, updated)
-  },
   /**
    * Set a timer with proper error handling
    * @returns Object indicating success and optional timerId/message

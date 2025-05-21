@@ -4,6 +4,7 @@ import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-logger'
 import {metricsState, Result} from '../context/metrics-state'
 import {timeline} from '../context/state'
+import {detailedMetrics} from '@/context/detailed-metrics'
 
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
@@ -152,6 +153,7 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     await formation.callback()
 
     const executionTime = performance.now() - startTime
+    detailedMetrics.trackExecution(formation.id, executionTime)
 
     currentFormation.metrics.totalExecutions++
     currentFormation.metrics.successfulExecutions++
@@ -172,6 +174,10 @@ const executeCallback = async (formation: Timer): Promise<void> => {
 
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
+
+    if (currentFormation.executionCount > 1) {
+      detailedMetrics.trackRepeat(formation.id)
+    }
 
     // Decrement repeat count appropriately
     // For numeric repeat values, decrease by 1 after execution
@@ -197,6 +203,7 @@ const executeCallback = async (formation: Timer): Promise<void> => {
       timeline.forget(currentFormation.id)
     }
   } catch (error) {
+    detailedMetrics.trackError(formation.id)
     const updatedFormation = timeline.get(formation.id)
     if (updatedFormation) {
       updatedFormation.metrics.failedExecutions++

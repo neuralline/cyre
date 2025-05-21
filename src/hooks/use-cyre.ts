@@ -112,9 +112,56 @@ export function useCyre<TPayload = ActionPayload>(
     /** The friendly name for this channel */
     name: channelName,
 
-    /** Initialize or update the channel configuration */
+    /**
+     * Initialize or update the channel configuration
+     */
     action: (config: ChannelConfig): Result<boolean, Error> => {
-      return initialize(config)
+      try {
+        if (isInitialized) {
+          debugLog('Channel already initialized, updating configuration')
+        } else {
+          debugLog('Initializing channel')
+        }
+
+        // Get existing action to preserve middleware
+        const existingAction = cyre.get(channelId)
+        const existingMiddleware = existingAction?.middleware || []
+
+        // Ensure middleware is preserved during updates
+        cyre.action({
+          ...config,
+          id: channelId,
+          // Apply protection options
+          throttle: options.protection?.throttle,
+          debounce: options.protection?.debounce,
+          detectChanges: options.protection?.detectChanges,
+          priority: options.priority,
+          payload: config.payload ?? options.initialPayload ?? {},
+          // Preserve existing middleware - this is the key fix
+          middleware: config.middleware
+            ? [...existingMiddleware, ...config.middleware]
+            : existingMiddleware
+        })
+
+        isInitialized = true
+        debugLog(`Initialization complete`)
+        // Log middleware state for debugging
+        const currentAction = cyre.get(channelId)
+        debugLog(
+          `Middleware array: ${JSON.stringify(currentAction?.middleware || [])}`
+        )
+
+        return {success: true, value: true}
+      } catch (error) {
+        debugLog('Initialization failed', error)
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error
+              : new Error('Channel initialization failed')
+        }
+      }
     },
 
     /**
