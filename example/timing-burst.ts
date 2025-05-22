@@ -1,4 +1,4 @@
-import {cyre, CyreLog} from '../src/app'
+import {cyre} from '../src/app'
 
 interface BurstMetrics {
   burstCalls: number
@@ -116,7 +116,7 @@ const monitor = setInterval(() => {
         metrics.responseTime.length
       : 0
 
-  CyreLog.debug({
+  log.debug({
     timestamp: Date.now(),
     runtime: `${runTime.toFixed(1)}s`,
     metrics: {
@@ -136,8 +136,8 @@ const monitor = setInterval(() => {
   if (runTime > 30 || metrics.errors > 100) {
     clearInterval(monitor)
     cyre.shutdown()
-    CyreLog.success('Burst test complete')
-    CyreLog.debug({finalMetrics: metrics})
+    log.success('Burst test complete')
+    log.debug({finalMetrics: metrics})
   }
 }, 1000)
 
@@ -174,6 +174,6 @@ const generateBursts = async () => {
 
 // Start burst test
 generateBursts().catch(error => {
-  CyreLog.error('Burst generation error:', error)
+  log.error('Burst generation error:', error)
   cyre.shutdown()
 })

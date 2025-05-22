@@ -57,7 +57,7 @@ export type CyreMiddleware<TPayload = ActionPayload> = (
  */
 export interface SubscriptionWithCleanup extends SubscriptionResponse {
   /** Function to remove this subscription */
-  unsubscribe: () => void
+  unsubscribe: () => boolean
 }
 
 /**

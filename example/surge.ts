@@ -1,6 +1,6 @@
 //src/test/quantum-surge.ts
 
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 
 /*
 
@@ -64,7 +64,7 @@ cyre.on([
       const totalDelay = Date.now() - payload.timestamp
       const processDelay = Date.now() - payload.processTime
 
-      CyreLog.info(
+      log.info(
         `Reactor [ID: ${payload.id}, Thread: ${payload.thread}, Depth: ${payload.depth}] ` +
           `Total delay: ${totalDelay}ms, Process delay: ${processDelay}ms`
       )
@@ -100,7 +100,7 @@ cyre.call('quantum-initiator')
 const monitor = setInterval(() => {
   const runTime = (Date.now() - startTime) / 1000
 
-  CyreLog.debug({
+  log.debug({
     timestamp: Date.now(),
     runtime: `${runTime.toFixed(1)}s`,
     messagesSent: messageCount,
@@ -114,6 +114,6 @@ const monitor = setInterval(() => {
   if (runTime > 10 || messageCount > 5000) {
     clearInterval(monitor)
     cyre.shutdown()
-    CyreLog.success('Quantum surge test complete')
+    log.success('Quantum surge test complete')
   }
 }, 1000)

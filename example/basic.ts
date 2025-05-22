@@ -1,5 +1,5 @@
 // example/basic.ts
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 //export default cyre
 
 //example use
@@ -10,19 +10,19 @@ cyre.on([
   {
     id: 'userProfile',
     fn: payload => {
-      CyreLog.debug(`Profile updated: ${payload}`)
+      log.debug(`Profile updated: ${payload}`)
     }
   },
   {
     id: 'action1',
     fn: payload => {
-      CyreLog.warn(`Action 1: ${payload}`)
+      log.warn(`Action 1: ${payload}`)
     }
   },
   {
     id: 'action2',
     fn: payload => {
-      CyreLog.info(`Action 2: ${payload}`)
+      log.info(`Action 2: ${payload}`)
     }
   }
 ])

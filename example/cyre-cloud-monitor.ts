@@ -2,8 +2,7 @@
 
 //example cyre usage
 
-import {cyre, CyreLog} from 'cyre'
-import type {ServiceMetrics, AlertConfig, SystemState} from './types'
+import {cyre} from 'cyre'
 
 // Initialize monitoring system
 const initializeMonitoring = () => {
@@ -126,7 +125,7 @@ const initializeMonitoring = () => {
 const getCurrentState = (): SystemState => {
   const state = cyre.get('system-state')?.payload as SystemState
   if (!state) {
-    CyreLog.error('Failed to get system state')
+    log.error('Failed to get system state')
     throw new Error('System state not initialized')
   }
   return state
@@ -193,7 +192,7 @@ const checkCircuitBreaker = async (
 
 const sendAlerts = async (alert: any): Promise<void> => {
   // Implement alert sending logic
-  CyreLog.info(
+  log.info(
     `Sending ${alert.severity} alert for services: ${alert.services.join(', ')}`
   )
 }

@@ -1,9 +1,10 @@
 // src/components/cyre-actions.ts
 import {io, subscribers} from '../context/state'
 import {IO} from '../interfaces/interface'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 import {pipe} from '../libs/utils'
 import {MSG} from '../config/cyre-config'
+import {metricsReport} from '../context/metrics-report'
 
 /*
 
@@ -68,6 +69,7 @@ const validateAction = (action: ActionResult): ActionResult => {
   }
 }
 
+// Note: We keep this but it's typically handled earlier in the pipeline now
 const checkPayloadChanges = (action: ActionResult): ActionResult => {
   if (!action.detectChanges) {
     return action
@@ -99,7 +101,24 @@ const executeAction = (action: ActionResult): ActionResult => {
       throw new Error(`No subscriber found for: ${action.id}`)
     }
 
+    // Track execution start time
+    const startTime = performance.now()
+
     const result = subscriber.fn(action.payload)
+    const endTime = performance.now()
+    const executionTime = endTime - startTime
+
+    // Update metrics with execution time
+    io.updateMetrics(action.id, {
+      lastExecutionTime: Date.now(),
+      executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
+    })
+    if (
+      typeof metricsReport !== 'undefined' &&
+      typeof metricsReport.trackListenerExecution === 'function'
+    ) {
+      metricsReport.trackListenerExecution(action.id, executionTime)
+    }
 
     // Handle linked actions
     if (result && typeof result === 'object' && 'id' in result) {
@@ -122,12 +141,11 @@ const executeAction = (action: ActionResult): ActionResult => {
       status: 'completed'
     }
   } catch (error) {
-    CyreLog.error(
+    log.error(
       `CYRE ACTION ERROR: ${MSG.ACTION_EXECUTE_FAILED} -id ${action.id} ${
         error instanceof Error ? error.message : String(error)
       }`
     )
-    // Return error result and prevent further pipeline execution
     return {
       ...action,
       ok: false,
@@ -141,11 +159,11 @@ const executeAction = (action: ActionResult): ActionResult => {
 const logAction = (action: ActionResult): ActionResult => {
   if (action.log) {
     if (action.status === 'error') {
-      CyreLog.error(action)
+      log.error(action)
     } else if (action.status === 'skipped') {
-      CyreLog.info(action)
+      log.info(action)
     } else {
-      CyreLog.info(action)
+      log.info(action)
     }
   }
   return action
@@ -165,10 +183,10 @@ const updateStore = (action: ActionResult): ActionResult => {
  * CyreAction function - handles single action execution
  * Repeat/interval handling is managed by the call method
  */
-const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
+export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   // Handle null/undefined input before pipe
   if (!initialIO) {
-    CyreLog.error(MSG.ACTION_PREPARE_FAILED)
+    log.error(MSG.ACTION_PREPARE_FAILED)
     return {
       id: 'CYRE-ERROR',
       type: '',
@@ -183,7 +201,6 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
     const result = pipe(
       prepareAction(initialIO),
       validateAction,
-      checkPayloadChanges,
       executeAction,
       (action: ActionResult) =>
         action.status === 'error' ? action : logAction(action),
@@ -192,10 +209,10 @@ const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
     )
     return result
   } catch (error) {
-    CyreLog.error(`Action processing failed: ${error}`)
+    log.error(`Action processing failed: ${error}`)
     return {
-      id: 'CYRE-ERROR',
       ...initialIO,
+      id: 'CYRE-ERROR',
       ok: false,
       done: false,
       status: 'error',

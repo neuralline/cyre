@@ -1,9 +1,10 @@
 // src/components/cyre-time-keeper.ts
 import type {Timer, TimerDuration, TimerRepeat} from '../interfaces/interface'
 import {TIMING} from '../config/cyre-config'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 import {metricsState, Result} from '../context/metrics-state'
 import {timeline} from '../context/state'
+import {metricsReport} from '../context/metrics-report'
 
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
@@ -152,6 +153,7 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     await formation.callback()
 
     const executionTime = performance.now() - startTime
+    metricsReport.trackExecution(formation.id, executionTime)
 
     currentFormation.metrics.totalExecutions++
     currentFormation.metrics.successfulExecutions++
@@ -172,6 +174,10 @@ const executeCallback = async (formation: Timer): Promise<void> => {
 
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
+
+    if (currentFormation.executionCount > 1) {
+      metricsReport.trackRepeat(formation.id)
+    }
 
     // Decrement repeat count appropriately
     // For numeric repeat values, decrease by 1 after execution
@@ -197,12 +203,13 @@ const executeCallback = async (formation: Timer): Promise<void> => {
       timeline.forget(currentFormation.id)
     }
   } catch (error) {
+    metricsReport.trackError(formation.id)
     const updatedFormation = timeline.get(formation.id)
     if (updatedFormation) {
       updatedFormation.metrics.failedExecutions++
       timeline.add(updatedFormation)
     }
-    CyreLog.error(`Timer execution failed: ${error}`)
+    log.error(`Timer execution failed: ${error}`)
   }
 }
 
@@ -268,7 +275,7 @@ const scheduleNext = (formation: Timer): void => {
 
   // Prevent infinite recursion
   if (currentFormation.executionCount > 10000) {
-    CyreLog.error('Maximum execution count exceeded')
+    log.error('Maximum execution count exceeded')
     timeline.forget(currentFormation.id)
     return
   }

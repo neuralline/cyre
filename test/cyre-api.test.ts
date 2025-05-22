@@ -3,7 +3,7 @@
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 // Import the exact same way as the existing tests
 import {cyre} from '../src/app'
-import {CyreLog} from '../src/components/cyre-logger'
+import {log} from '../src/components/cyre-logger'
 
 /*
  * Simplified Cyre API Tests
@@ -16,8 +16,8 @@ describe('Cyre API Tests', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Mock logging
-    vi.spyOn(CyreLog, 'info').mockImplementation(() => {})
-    vi.spyOn(CyreLog, 'error').mockImplementation(() => {})
+    vi.spyOn(log, 'info').mockImplementation(() => {})
+    vi.spyOn(log, 'error').mockImplementation(() => {})
 
     // Initialize cyre
     cyre.initialize()
@@ -145,7 +145,7 @@ describe('Cyre API Tests', () => {
   })
 
   /**
-   * Test for change detection with hasChanged and getPreviousPayload
+   * Test for change detection with hasChanged and getPrevious
    */
   it('should detect payload changes and track previous payloads', async () => {
     // Create unique ID for this test
@@ -179,7 +179,7 @@ describe('Cyre API Tests', () => {
     await cyre.call(actionId, {value: 'changed'})
 
     // Get the previous payload
-    const previousPayload = cyre.getPreviousPayload(actionId)
+    const previousPayload = cyre.getPrevious(actionId)
 
     // Verify the previous payload matches what we last sent
     expect(previousPayload).toBeDefined()

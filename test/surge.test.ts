@@ -1,7 +1,7 @@
 // test/surge.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 
 /*
  * C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E. T.E.S.T
@@ -29,12 +29,12 @@ describe('Quantum Surge Protection System', () => {
   const TEST_DURATION = 1000 // 1 second for faster tests
   const REPORT_INTERVAL = 200 // Report every 200ms
 
-  // Mock CyreLog to avoid console pollution during tests
-  vi.spyOn(CyreLog, 'debug').mockImplementation(() => {})
-  vi.spyOn(CyreLog, 'warn').mockImplementation(() => {})
-  vi.spyOn(CyreLog, 'success').mockImplementation(() => {})
-  vi.spyOn(CyreLog, 'error').mockImplementation(() => {})
-  vi.spyOn(CyreLog, 'info').mockImplementation(() => {})
+  // Mock cyre-log to avoid console pollution during tests
+  vi.spyOn(log, 'debug').mockImplementation(() => {})
+  vi.spyOn(log, 'warn').mockImplementation(() => {})
+  vi.spyOn(log, 'success').mockImplementation(() => {})
+  vi.spyOn(log, 'error').mockImplementation(() => {})
+  vi.spyOn(log, 'info').mockImplementation(() => {})
 
   beforeEach(() => {
     // Prevent process.exit from terminating the test
@@ -138,7 +138,7 @@ describe('Quantum Surge Protection System', () => {
           const processDelay = Date.now() - payload.processTime
 
           if (totalDelay > 500) {
-            CyreLog.warn(
+            log.warn(
               `High latency detected [ID: ${payload.id}] ` +
                 `Total: ${totalDelay}ms, Process: ${processDelay}ms`
             )

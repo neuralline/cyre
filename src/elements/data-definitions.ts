@@ -1,4 +1,6 @@
-// src/elements/data-definitions.ts - Updated to better handle boolean values
+// src/elements/data-definitions.ts
+
+// - Updated to better handle boolean values
 
 const dataDefinitions = {
   id: (attribute: string = '') => {

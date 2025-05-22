@@ -1,4 +1,4 @@
-import {cyre, CyreLog} from '../src/app'
+import {cyre} from '../src/app'
 /*
 
     C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E.
@@ -126,11 +126,11 @@ cyre.action([
 ])
 
 // Add initial logging
-CyreLog.info({message: 'Starting timing surge test...'})
+log.info({message: 'Starting timing surge test...'})
 
 // Modify the monitor interval to show immediate feedback
 const startTime = Date.now()
-CyreLog.info({
+log.info({
   message: 'Test started',
   timestamp: new Date(startTime).toISOString()
 })
@@ -141,7 +141,7 @@ const monitor = setInterval(() => {
 
   // Only log if we have some data
   if (metrics.fastCalls + metrics.mediumCalls + metrics.slowCalls > 0) {
-    CyreLog.info({
+    log.info({
       timestamp: Date.now(),
       runtime: `${runTime.toFixed(1)}s`,
       metrics: {
@@ -172,8 +172,8 @@ const monitor = setInterval(() => {
   // Modify test completion conditions
   if (runTime > 30 || metrics.missedDeadlines > 1000) {
     clearInterval(monitor)
-    CyreLog.info({message: 'Timing test complete', status: 'success'})
-    CyreLog.info({
+    log.info({message: 'Timing test complete', status: 'success'})
+    log.info({
       message: 'Final metrics',
       metrics: {
         totalCalls: metrics.fastCalls + metrics.mediumCalls + metrics.slowCalls,
@@ -218,7 +218,7 @@ const generateLoad = async () => {
       await new Promise(resolve => setTimeout(resolve, Math.random() * 50))
     } catch (error) {
       if (isRunning) {
-        CyreLog.error({message: `Load generation error: ${String(error)}`})
+        log.error({message: `Load generation error: ${String(error)}`})
       }
       break
     }
@@ -228,7 +228,7 @@ const generateLoad = async () => {
 // Handle process termination
 process.on('SIGINT', () => {
   isRunning = false
-  CyreLog.info('Shutting down...')
+  log.info('Shutting down...')
   clearInterval(monitor)
   cyre.shutdown()
   process.exit(0)
@@ -236,7 +236,7 @@ process.on('SIGINT', () => {
 
 // Start the test
 generateLoad().catch(error => {
-  CyreLog.error({message: `Load generation error: ${String(error)}`})
+  log.error({message: `Load generation error: ${String(error)}`})
   isRunning = false
   cyre.shutdown()
   process.exit(1)

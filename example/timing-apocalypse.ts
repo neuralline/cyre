@@ -1,4 +1,4 @@
-import {cyre, CyreLog} from '../app'
+import {cyre} from '../src'
 
 interface ApocalypseMetrics {
   burstCalls: number

@@ -3,7 +3,7 @@ import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
 import {On, Subscriber, SubscriptionResponse} from '../interfaces/interface'
-import {CyreLog} from './cyre-logger'
+import {log} from './cyre-logger'
 
 /* 
 
@@ -69,7 +69,7 @@ const addSingleSubscriber = (
   try {
     const validation = validateSubscriber(type, fn)
     if (!validation.ok || !validation.subscriber) {
-      CyreLog.error(validation.error || validation.message)
+      log.error(validation.error || validation.message)
       return {
         ok: false,
         message: validation.message
@@ -81,20 +81,17 @@ const addSingleSubscriber = (
     // Enhanced duplicate subscriber detection
     const existing = subscribers.get(subscriber.id)
     if (existing) {
-      // Add more prominent warning with both CyreLog and console.warn
+      // Add more prominent warning with both cyre-log and console.warn
       const duplicateMessage = `DUPLICATE LISTENER DETECTED: Channel "${subscriber.id}" already has a listener attached!`
 
       // Use warning level instead of just info
-      CyreLog.warn(duplicateMessage)
+      log.warn(duplicateMessage)
 
       // Also log directly to console for better visibility during development
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn(`🔥 ${duplicateMessage}`)
+        console.warn(duplicateMessage)
         console.warn(
-          'This may cause unexpected behavior if the previous listener is still active.'
-        )
-        console.warn(
-          'Consider using cyre.forget() to remove previous listeners before adding new ones.'
+          'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
         )
       }
     }
@@ -102,14 +99,14 @@ const addSingleSubscriber = (
     // Add or update subscriber
     subscribers.add(subscriber)
 
-    CyreLog.info(`${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`)
+    log.debug(`${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`)
     return {
       ok: true,
       message: `${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    CyreLog.error(`Failed to add subscriber: ${errorMessage}`)
+    log.error(`${MSG.SUBSCRIPTION_FAILED}: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.SUBSCRIPTION_FAILED
@@ -123,9 +120,7 @@ const addMultipleSubscribers = (
   try {
     const results = subscriberList.map(subscriber => {
       if (!subscriber.id || !subscriber.fn) {
-        CyreLog.error(
-          `Invalid subscriber format: ${JSON.stringify(subscriber)}`
-        )
+        log.error(`Invalid subscriber format: ${JSON.stringify(subscriber)}`)
         return false
       }
 
@@ -133,7 +128,7 @@ const addMultipleSubscribers = (
         subscribers.add(subscriber)
         return true
       } catch (error) {
-        CyreLog.error(`Failed to add subscriber ${subscriber.id}: ${error}`)
+        log.error(`Failed to add subscriber ${subscriber.id}: ${error}`)
         return false
       }
     })
@@ -154,7 +149,7 @@ const addMultipleSubscribers = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    CyreLog.error(`Batch subscription failed: ${errorMessage}`)
+    log.error(`Batch subscription failed: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.SUBSCRIPTION_FAILED
@@ -173,7 +168,7 @@ export const subscribe: On = (
 ): SubscriptionResponse => {
   //check if system new registry is locked
   if (metricsState.isSystemLocked()) {
-    CyreLog.error(MSG.SYSTEM_LOCKED_SUBSCRIBERS)
+    log.error(MSG.SYSTEM_LOCKED_SUBSCRIBERS)
     return {
       ok: false,
       message: MSG.SYSTEM_LOCKED_SUBSCRIBERS
@@ -208,7 +203,7 @@ export const subscribe: On = (
     return result
   }
 
-  CyreLog.error(MSG.SUBSCRIPTION_INVALID_PARAMS)
+  log.error(MSG.SUBSCRIPTION_INVALID_PARAMS)
   return {
     ok: false,
     message: MSG.SUBSCRIPTION_INVALID_PARAMS

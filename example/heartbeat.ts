@@ -1,5 +1,5 @@
 // example/repeat.ts
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 // Create an action with infinite repeat
 cyre.action({
   id: 'heartbeat',
@@ -10,7 +10,7 @@ cyre.action({
 
 // Handle the action
 cyre.on('heartbeat', () => {
-  CyreLog.success('Heartbeat at: ' + new Date().toISOString())
+  log.success('Heartbeat at: ' + new Date().toISOString())
 })
 
 // Start the heartbeat

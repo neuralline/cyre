@@ -2,34 +2,34 @@ name: Coverage Report
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
   coverage:
     name: Generate Code Coverage
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
+
       # Setup PNPM with explicit version
       - name: Setup PNPM
         uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 10
           run_install: false
-      
+
       # Setup Node.js with correct caching
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 22
           cache: 'pnpm'
-      
+
       # Now run the install with proper error handling
       - name: Install dependencies
         run: |
@@ -38,29 +38,29 @@ jobs:
             echo "Creating pnpm-lock.yaml"
             pnpm install --lockfile-only
           fi
-          
+
           pnpm install
           pnpm add -D @vitest/coverage-istanbul
-      
+
       # Set NODE_OPTIONS for node.js crypto
       - name: Set Node Options
         run: |
           echo "NODE_OPTIONS=--experimental-global-webcrypto" >> $GITHUB_ENV
-      
+
       - name: Run tests with coverage
         run: pnpm coverage
-      
+
       # Add job summary with coverage results
       - name: Generate coverage summary
         run: |
           echo "## Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
           echo "Coverage reports generated successfully." >> $GITHUB_STEP_SUMMARY
-          
+
           if [ -f "./coverage/coverage-summary.json" ]; then
             TOTAL=$(cat ./coverage/coverage-summary.json | grep -o '"pct": [0-9.]*' | head -1 | grep -o '[0-9.]*')
             echo "Total coverage: ${TOTAL}%" >> $GITHUB_STEP_SUMMARY
           fi
-      
+
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
         with:

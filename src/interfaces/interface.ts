@@ -1,5 +1,6 @@
 // interfaces/interface.ts
 
+import {ProtectionFunction} from '../components/cyre-protection'
 import {BREATHING} from '../config/cyre-config'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
@@ -116,6 +117,12 @@ export interface IO extends BaseProperties {
    * @example middleware: ['validate', 'transform']
    */
   middleware?: string[]
+
+  /** Protection pipeline functions for this action */
+  _protectionPipeline?: ProtectionFunction[]
+
+  /** Flag to bypass debounce protection for internal use */
+  _bypassDebounce?: boolean
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
@@ -265,6 +272,8 @@ export type ActionHandler<T = unknown> = (
 // Add or update the ActionMetrics interface
 export interface ActionMetrics {
   executionTime?: number
+  lastExecutionTime?: number
+  executionCount?: number
   formationId?: string
   status: 'success' | 'error'
   timestamp: number
@@ -351,18 +360,6 @@ export interface SurgeProtectionConfig {
   }
 }
 
-export type ProtectionResult = {
-  delay: number
-  needsProtection: boolean
-  metrics: {
-    channelCalls: number
-    totalCalls: number
-    callsPerSecond: number
-    systemLoad: SystemMetrics
-    protectionFactor: number
-  }
-}
-
 // Enhanced type definitions
 export type ValidationResult = {
   isValid: boolean
@@ -423,4 +420,22 @@ export type BreathingState = {
   pattern: keyof typeof BREATHING.PATTERNS
   nextBreathDue: number
   recuperationInterval?: NodeJS.Timeout
+}
+
+/**
+ * Result of protection layer evaluation
+ */
+export interface ProtectionResult {
+  protected: boolean
+  response?: CyreResponse
+  payload?: ActionPayload
+  action?: IO // Added to allow middleware to modify the action
+}
+
+/**
+ * Result of throttle check
+ */
+export interface ThrottleResult {
+  blocked: boolean
+  response?: CyreResponse
 }

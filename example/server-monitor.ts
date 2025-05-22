@@ -1,6 +1,6 @@
 // real-system-monitor.ts
 
-import {cyre, CyreLog} from '../src/app'
+import {cyre, log} from '../src/app'
 import * as os from 'os' // Built-in Node.js module for system information
 
 /**
@@ -99,7 +99,7 @@ const stressGenerator = {
   // Start CPU stress test
   start: (intensity = 0.5, duration = 60000) => {
     if (stressGenerator.active) {
-      CyreLog.warn('Stress generator already active')
+      log.warn('Stress generator already active')
       return false
     }
 
@@ -110,7 +110,7 @@ const stressGenerator = {
     const cpuCount = os.cpus().length
     const workerCount = Math.max(1, Math.floor(cpuCount * intensity))
 
-    CyreLog.info(
+    log.info(
       `Starting stress test with ${workerCount} workers for ${duration}ms`
     )
 
@@ -141,7 +141,7 @@ const stressGenerator = {
       return false
     }
 
-    CyreLog.info('Stopping stress test')
+    log.info('Stopping stress test')
 
     // Clean up all workers
     stressGenerator.workers.forEach(worker => {
@@ -172,14 +172,14 @@ const memoryLeakSimulator = {
   // Start simulated memory leak
   start: (mbPerSecond = 10, duration = 30000) => {
     if (memoryLeakSimulator.active) {
-      CyreLog.warn('Memory leak simulator already active')
+      log.warn('Memory leak simulator already active')
       return false
     }
 
     memoryLeakSimulator.active = true
     memoryLeakSimulator.leakStorage = []
 
-    CyreLog.info(
+    log.info(
       `Starting memory leak simulation: ${mbPerSecond}MB/sec for ${duration}ms`
     )
 
@@ -191,7 +191,7 @@ const memoryLeakSimulator = {
         memoryLeakSimulator.leakStorage.push(chunk)
       }
 
-      CyreLog.info(
+      log.info(
         `Memory leak simulator: added ${mbPerSecond}MB, total size: ${
           memoryLeakSimulator.leakStorage.length * mbPerSecond
         }MB`
@@ -212,7 +212,7 @@ const memoryLeakSimulator = {
       return false
     }
 
-    CyreLog.info('Stopping memory leak simulation')
+    log.info('Stopping memory leak simulation')
 
     if (memoryLeakSimulator.intervalId) {
       clearInterval(memoryLeakSimulator.intervalId)
@@ -236,7 +236,7 @@ const memoryLeakSimulator = {
 
 // Initialize monitoring system
 const initializeMonitoring = () => {
-  CyreLog.info('Starting Cyre real-time system monitoring')
+  log.info('Starting Cyre real-time system monitoring')
 
   // Register handlers for monitoring actions
   setupQuickHealthCheck()
@@ -295,7 +295,7 @@ const setupQuickHealthCheck = () => {
     }
 
     // Log current state
-    CyreLog.info(
+    log.info(
       `Quick health check: CPU: ${(metrics.cpuUsage * 100).toFixed(
         1
       )}%, Memory: ${(metrics.memoryUsage * 100).toFixed(
@@ -366,21 +366,21 @@ const setupStandardHealthCheck = () => {
     }
 
     // Print summary
-    CyreLog.info(
+    log.info(
       `Standard health check - CPU: ${(metrics.cpuUsage * 100).toFixed(
         1
       )}%, Memory: ${(metrics.memoryUsage * 100).toFixed(
         1
       )}%, Load: ${metrics.loadAverage.toFixed(2)}`
     )
-    CyreLog.info(
+    log.info(
       `Breathing - Rate: ${breathingState.currentRate}ms, Pattern: ${
         breathingState.pattern
       }, Stress: ${(breathingState.stress * 100).toFixed(1)}%`
     )
 
     if (issues.length > 0) {
-      CyreLog.warn(`Health issues detected: ${issues.join(', ')}`)
+      log.warn(`Health issues detected: ${issues.join(', ')}`)
     }
 
     // Store detailed metrics
@@ -434,38 +434,38 @@ const setupDetailedHealthCheck = () => {
     const uptimeHours = metrics.uptime / 3600
 
     // Detailed system health report
-    CyreLog.info('============= DETAILED SYSTEM HEALTH CHECK =============')
-    CyreLog.info(`Time: ${new Date().toISOString()}`)
-    CyreLog.info(`Host: ${metrics.hostname} (${metrics.platform})`)
-    CyreLog.info(`Uptime: ${uptimeHours.toFixed(2)} hours`)
-    CyreLog.info(`System Metrics:`)
-    CyreLog.info(`  CPU Usage: ${(metrics.cpuUsage * 100).toFixed(1)}%`)
-    CyreLog.info(
+    log.info('============= DETAILED SYSTEM HEALTH CHECK =============')
+    log.info(`Time: ${new Date().toISOString()}`)
+    log.info(`Host: ${metrics.hostname} (${metrics.platform})`)
+    log.info(`Uptime: ${uptimeHours.toFixed(2)} hours`)
+    log.info(`System Metrics:`)
+    log.info(`  CPU Usage: ${(metrics.cpuUsage * 100).toFixed(1)}%`)
+    log.info(
       `  Memory Usage: ${memoryUsedGB.toFixed(2)}GB / ${totalMemoryGB.toFixed(
         2
       )}GB (${(metrics.memoryUsage * 100).toFixed(1)}%)`
     )
-    CyreLog.info(`  Load Average (1m): ${metrics.loadAverage.toFixed(2)}`)
+    log.info(`  Load Average (1m): ${metrics.loadAverage.toFixed(2)}`)
 
-    CyreLog.info(`Cyre Breathing State:`)
-    CyreLog.info(`  Breath Count: ${breathingState.breathCount}`)
-    CyreLog.info(`  Current Rate: ${breathingState.currentRate}ms`)
-    CyreLog.info(`  Stress Level: ${(breathingState.stress * 100).toFixed(1)}%`)
-    CyreLog.info(`  Is Recuperating: ${breathingState.isRecuperating}`)
-    CyreLog.info(`  Pattern: ${breathingState.pattern}`)
+    log.info(`Cyre Breathing State:`)
+    log.info(`  Breath Count: ${breathingState.breathCount}`)
+    log.info(`  Current Rate: ${breathingState.currentRate}ms`)
+    log.info(`  Stress Level: ${(breathingState.stress * 100).toFixed(1)}%`)
+    log.info(`  Is Recuperating: ${breathingState.isRecuperating}`)
+    log.info(`  Pattern: ${breathingState.pattern}`)
 
-    CyreLog.info(`Performance Metrics:`)
-    CyreLog.info(
+    log.info(`Performance Metrics:`)
+    log.info(
       `  Total Processing Time: ${performanceState.totalProcessingTime}ms`
     )
-    CyreLog.info(`  Total Call Time: ${performanceState.totalCallTime}ms`)
-    CyreLog.info(`  Stress: ${(performanceState.stress * 100).toFixed(1)}%`)
+    log.info(`  Total Call Time: ${performanceState.totalCallTime}ms`)
+    log.info(`  Stress: ${(performanceState.stress * 100).toFixed(1)}%`)
 
-    CyreLog.info(`Active Formations: ${activeActions.activeFormations}`)
+    log.info(`Active Formations: ${activeActions.activeFormations}`)
 
     // Report on stress test status
     if (stressGenerator.active) {
-      CyreLog.info(
+      log.info(
         `CPU Stress Test: Active at ${
           stressGenerator.intensity * 100
         }% intensity with ${stressGenerator.workers.length} workers`
@@ -474,7 +474,7 @@ const setupDetailedHealthCheck = () => {
 
     if (memoryLeakSimulator.active) {
       const leakStatus = memoryLeakSimulator.getStatus()
-      CyreLog.info(
+      log.info(
         `Memory Leak Simulation: Active with ${
           leakStatus.allocatedChunks
         } chunks, ~${(leakStatus.estimatedSize / (1024 * 1024)).toFixed(
@@ -483,7 +483,7 @@ const setupDetailedHealthCheck = () => {
       )
     }
 
-    CyreLog.info('=========================================================')
+    log.info('=========================================================')
 
     // Store comprehensive metrics history
     storeHistoricalMetrics(
@@ -533,9 +533,9 @@ const setupAlertSystem = () => {
   cyre.on('system-alert', async payload => {
     // Log the alert
     if (payload.level === 'critical') {
-      CyreLog.error(`[CRITICAL ALERT] ${payload.message}`)
+      log.error(`[CRITICAL ALERT] ${payload.message}`)
     } else {
-      CyreLog.warn(`[ALERT] ${payload.message}`)
+      log.warn(`[ALERT] ${payload.message}`)
     }
 
     // In a real system, you might:
@@ -574,7 +574,7 @@ const startAllMonitors = () => {
   cyre.call('monitor-standard-check')
   cyre.call('monitor-detailed-check')
 
-  CyreLog.info('All monitoring actions started')
+  log.info('All monitoring actions started')
 }
 
 // Helper function to pause all monitoring actions
@@ -583,7 +583,7 @@ const pauseAllMonitors = () => {
   cyre.pause('monitor-standard-check')
   cyre.pause('monitor-detailed-check')
 
-  CyreLog.info('All monitoring actions paused')
+  log.info('All monitoring actions paused')
 }
 
 // Helper function to resume all monitoring actions
@@ -592,12 +592,12 @@ const resumeAllMonitors = () => {
   cyre.resume('monitor-standard-check')
   cyre.resume('monitor-detailed-check')
 
-  CyreLog.info('All monitoring actions resumed')
+  log.info('All monitoring actions resumed')
 }
 
 // Run a manual health check
 const runManualHealthCheck = async () => {
-  CyreLog.info('Running manual health check')
+  log.info('Running manual health check')
   return cyre.call('monitor-detailed-check', {manual: true})
 }
 
