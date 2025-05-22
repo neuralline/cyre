@@ -1,4 +1,6 @@
 // src/app.ts
+// Main CYRE application with enhanced response typing and history integration
+
 import CyreAction from './components/cyre-actions'
 import CyreChannel from './components/cyre-channels'
 import {log} from './components/cyre-logger'
@@ -10,15 +12,16 @@ import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {registerMiddleware} from './components/cyre-middleware'
 import dataDefinitions from './elements/data-definitions'
-import type {
-  ActionId,
-  ActionPayload,
-  BreathingMetrics,
-  CyreResponse,
-  IO,
-  Subscriber,
-  SubscriptionResponse,
-  TimekeeperMetrics
+import {
+  toHistoryResponse,
+  type ActionId,
+  type ActionPayload,
+  type BreathingMetrics,
+  type CyreResponse,
+  type IO,
+  type Subscriber,
+  type SubscriptionResponse,
+  type TimekeeperMetrics
 } from './interfaces/interface'
 import {
   buildProtectionPipeline,
@@ -55,7 +58,7 @@ interface CyreInstance {
     ) => void | Promise<void> | {id: string; payload?: unknown}
   ) => SubscriptionResponse
   shutdown: () => void
-  lock: () => void
+  lock: () => CyreResponse
   status: () => boolean
   forget: (id: string) => boolean
   get: (id: string) => IO | undefined
@@ -73,7 +76,7 @@ interface CyreInstance {
   getMetrics: (channelId: string) => TimekeeperMetrics
   getHistory: (actionId?: string) => any
   clearHistory: (actionId?: string) => void
-  middleware: (id: string, fn: Function) => void
+  middleware: (id: string, fn: Function) => CyreResponse
   getMetricsReport: (actionId?: string) => any
   logMetricsReport: (filter?: (metrics: any) => boolean) => void
 }
@@ -97,23 +100,47 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     )
   }
 
+  /**
+   * Helper to create standardized success responses
+   */
+  const createSuccessResponse = <T = unknown>(
+    payload: T,
+    message: string,
+    metadata?: CyreResponse<T>['metadata']
+  ): CyreResponse<T> => ({
+    ok: true,
+    payload,
+    message,
+    timestamp: Date.now(),
+    metadata
+  })
+
+  /**
+   * Helper to create standardized error responses
+   */
+  const createErrorResponse = <T = unknown>(
+    message: string,
+    error?: Error | string,
+    payload?: T,
+    metadata?: CyreResponse<T>['metadata']
+  ): CyreResponse<T> => ({
+    ok: false,
+    payload: payload as T,
+    message,
+    error,
+    timestamp: Date.now(),
+    metadata
+  })
+
   const lock = (): CyreResponse => {
     if (isShutdown) {
-      return {
-        ok: false,
-        message: MSG.CALL_OFFLINE,
-        payload: null
-      }
+      return createErrorResponse(MSG.CALL_OFFLINE, undefined, null)
     }
 
     metricsState.lock()
     log.info('Cyre system locked - no new channels or subscribers can be added')
 
-    return {
-      ok: true,
-      message: 'System locked successfully',
-      payload: null
-    }
+    return createSuccessResponse(null, 'System locked successfully')
   }
 
   /**
@@ -128,9 +155,13 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     const subscriber = subscribers.get(io.id)
     if (!subscriber) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${io.id}`
-      // Record failed dispatch in history
-      historyState.record(io.id, io.payload, {ok: false, message: error})
-      return {ok: false, payload: null, message: error}
+      // Record failed dispatch in history with proper typing
+      historyState.record(
+        io.id,
+        io.payload,
+        toHistoryResponse({ok: false, message: error})
+      )
+      return createErrorResponse(error, undefined, null)
     }
 
     // Execute action
@@ -138,18 +169,41 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     const dispatch = CyreAction({...io}, subscriber.fn)
     const duration = performance.now() - startTime
 
-    // Record history
+    // Create standardized response
+    const response: CyreResponse = dispatch.ok
+      ? createSuccessResponse(dispatch, dispatch.message || MSG.WELCOME, {
+          executionTime: duration,
+          actionId: io.id,
+          priority: io.priority?.level
+        })
+      : createErrorResponse(
+          dispatch.message || 'Action execution failed',
+          dispatch.error,
+          dispatch,
+          {
+            executionTime: duration,
+            actionId: io.id,
+            priority: io.priority?.level
+          }
+        )
+
+    // Record history with proper typing
     historyState.record(
       io.id,
       io.payload,
-      {ok: dispatch.ok, message: dispatch.message, error: dispatch.error},
-      duration
+      toHistoryResponse(response),
+      duration,
+      {
+        source: 'cyre-dispatch',
+        priority: io.priority?.level,
+        correlationId: response.metadata?.correlationId
+      }
     )
 
     // Log if enabled
     if (io.log) {
       log.info({
-        ...dispatch,
+        ...response,
         executionTime: duration,
         timestamp: Date.now()
       })
@@ -163,12 +217,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       })
     }
 
-    // Return standardized response reflecting actual dispatch result
-    return {
-      ok: dispatch.ok,
-      payload: dispatch,
-      message: dispatch.message || MSG.WELCOME
-    }
+    return response
   }
 
   /**
@@ -194,7 +243,6 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
       // Only update metrics if dispatch was successful
       if (dispatchResult.ok) {
-        // Add this line to track execution time
         metricsReport.trackExecution(action.id, executionTime)
 
         io.updateMetrics(action.id, {
@@ -209,12 +257,14 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       return dispatchResult
     } catch (error) {
       metricsReport.trackError(action.id)
-      return standardErrorResponse('Execution failed', error)
+      return createErrorResponse(
+        'Execution failed',
+        error instanceof Error ? error : String(error),
+        null,
+        {actionId: action.id}
+      )
     }
   }
-
-  // Update scheduleTimedExecution function to ensure metrics are updated
-  // for first execution of timed actions
 
   const scheduleTimedExecution = (
     action: IO,
@@ -232,7 +282,7 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
     // Determine initial wait time
     const initialWait = hasDelay
-      ? Math.max(0, action.delay)
+      ? Math.max(0, action.delay || 0)
       : hasInterval
       ? adjustedInterval
       : 0
@@ -283,15 +333,25 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
             setupRepeatingTimer(action, payload, repeatValue)
           }
 
-          resolve({
-            ok: firstResult.ok,
-            payload: firstResult.payload,
-            message: `Action executed with ${
-              hasDelay ? `delay: ${action.delay}ms` : ''
-            }${
-              hasInterval ? `, interval: ${action.interval}ms` : ''
-            }, repeat: ${repeatValue === true ? 'infinite' : repeatValue}`
-          })
+          const responseMessage = `Action executed with ${
+            hasDelay ? `delay: ${action.delay}ms` : ''
+          }${hasInterval ? `, interval: ${action.interval}ms` : ''}, repeat: ${
+            repeatValue === true ? 'infinite' : repeatValue
+          }`
+
+          resolve(
+            firstResult.ok
+              ? createSuccessResponse(firstResult.payload, responseMessage, {
+                  actionId: action.id,
+                  executionTime
+                })
+              : createErrorResponse(
+                  responseMessage,
+                  firstResult.error,
+                  firstResult.payload,
+                  {actionId: action.id, executionTime}
+                )
+          )
         },
         1, // Execute first timer exactly once
         timerId
@@ -299,11 +359,14 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
 
       // Handle timer setup failure
       if (timerResult.kind === 'error') {
-        resolve({
-          ok: false,
-          payload: null,
-          message: `Failed to set up timer: ${timerResult.error.message}`
-        })
+        resolve(
+          createErrorResponse(
+            `Failed to set up timer: ${timerResult.error.message}`,
+            timerResult.error,
+            null,
+            {actionId: action.id}
+          )
+        )
       }
     })
   }
@@ -336,9 +399,6 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       adjustedInterval,
       async () => {
         if (metricsState.isHealthy()) {
-          // Track repeat before execution
-          metricsReport.trackRepeat(action.id)
-
           await useDispatch({
             ...action,
             timeOfCreation: performance.now(),
@@ -352,23 +412,6 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
   }
 
   /**
-   * Standardized error response generator
-   */
-  const standardErrorResponse = (
-    context: string,
-    error: unknown
-  ): CyreResponse => {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`${context}: ${errorMessage}`)
-
-    return {
-      ok: false,
-      payload: null,
-      message: `${context}: ${errorMessage}`
-    }
-  }
-
-  /**
    * Entry point for action execution
    */
   const call = async (
@@ -377,22 +420,25 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
   ): Promise<CyreResponse> => {
     // System shutdown check
     if (isShutdown) {
-      return {ok: false, message: MSG.CALL_OFFLINE, payload: null}
+      return createErrorResponse(MSG.CALL_OFFLINE, undefined, null)
     }
 
     // ID validation
     if (!id?.trim()) {
-      return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
+      return createErrorResponse(MSG.CALL_INVALID_ID, undefined, null)
     }
+
     metricsReport.trackCall(id.trim())
+
     // Action retrieval from store
     const action = io.get(id.trim())
     if (!action) {
-      return {
-        ok: false,
-        payload: null,
-        message: `${MSG.CALL_NOT_RESPONDING}: ${id}`
-      }
+      return createErrorResponse(
+        `${MSG.CALL_NOT_RESPONDING}: ${id}`,
+        undefined,
+        null,
+        {actionId: id}
+      )
     }
 
     try {
@@ -440,7 +486,12 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
         )
       }
     } catch (error) {
-      return standardErrorResponse('Call failed', error)
+      return createErrorResponse(
+        'Call failed',
+        error instanceof Error ? error : String(error),
+        null,
+        {actionId: action.id}
+      )
     }
   }
 
@@ -547,16 +598,9 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
     initializeBreathing()
     timeKeeper.resume()
 
-    log.sys(
-      '%c' + MSG.QUANTUM_HEADER,
-      'background: rgb(151, 2, 151); color: white; display: block;'
-    )
+    log.sys(MSG.QUANTUM_HEADER)
 
-    return {
-      ok: true,
-      payload: 200,
-      message: MSG.WELCOME
-    }
+    return createSuccessResponse(200, MSG.WELCOME)
   }
 
   const status = () => {
@@ -718,42 +762,34 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
    */
   const middleware = (id: string, fn: Function): CyreResponse => {
     if (isShutdown) {
-      return {
-        ok: false,
-        message: MSG.CALL_OFFLINE,
-        payload: null
-      }
+      return createErrorResponse(MSG.CALL_OFFLINE, undefined, null)
     }
 
     if (metricsState.isSystemLocked()) {
-      return {
-        ok: false,
-        message: MSG.SYSTEM_LOCKED_CHANNELS,
-        payload: null
-      }
+      return createErrorResponse(MSG.SYSTEM_LOCKED_CHANNELS, undefined, null)
     }
 
     try {
       // Register the middleware
       const success = registerMiddleware(id, fn)
 
-      return {
-        ok: success,
-        message: success
-          ? `Middleware registered: ${id}`
-          : `Failed to register middleware '${id}'`,
-        payload: null
-      }
+      return success
+        ? createSuccessResponse(null, `Middleware registered: ${id}`)
+        : createErrorResponse(
+            `Failed to register middleware '${id}'`,
+            undefined,
+            null
+          )
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
       log.error(`Failed to register middleware: ${errorMessage}`)
 
-      return {
-        ok: false,
-        message: `Failed to register middleware: ${errorMessage}`,
-        payload: null
-      }
+      return createErrorResponse(
+        `Failed to register middleware: ${errorMessage}`,
+        error instanceof Error ? error : errorMessage,
+        null
+      )
     }
   }
 

@@ -1,39 +1,141 @@
 // src/types/global.d.ts
 
-import type {
-  IO,
-  ActionPayload,
-  CyreResponse,
-  EventHandler,
-  SubscriptionResponse,
-  TimekeeperMetrics,
-  BreathingMetrics,
-  Priority
-} from '../interfaces/interface'
-
-import type {
-  CyreHook,
-  CyreHookOptions,
-  CyreChannel
-} from '../interfaces/hooks-interface'
-
 /**
- * Global CYRE API declarations
+ * Global CYRE API declarations - no imports to avoid conflicts
  */
+
+// Re-declare essential types locally to avoid import conflicts
 declare global {
+  // Core Types
+  type ActionPayload = unknown
+  type ActionId = string
+  type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
+
+  // Event Handler Types
+  type EventHandler = (
+    payload?: unknown
+  ) => void | Promise<void> | {id: string; payload?: unknown}
+
+  // Response Types
+  interface CyreResponse<T = unknown> {
+    ok: boolean
+    payload: T
+    message: string
+    error?: Error
+    timestamp?: number
+  }
+
+  interface SubscriptionResponse {
+    ok: boolean
+    message: string
+    unsubscribe?: () => boolean
+  }
+
+  // Action Configuration
+  interface IO {
+    id: string
+    type?: string
+    payload?: ActionPayload
+    interval?: number
+    repeat?: number | boolean
+    delay?: number
+    throttle?: number
+    debounce?: number
+    detectChanges?: boolean
+    log?: boolean
+    priority?: {level: Priority}
+    middleware?: string[]
+    [key: string]: any
+  }
+
+  // Breathing Metrics
+  interface BreathingMetrics {
+    breathCount: number
+    currentRate: number
+    lastBreath: number
+    stress: number
+    isRecuperating: boolean
+    recuperationDepth: number
+    pattern: string
+    nextBreathDue: number
+  }
+
+  // Timekeeper Metrics
+  interface TimekeeperMetrics {
+    hibernating: boolean
+    activeFormations: number
+    inRecuperation: boolean
+    breathing: BreathingMetrics
+    formations: Array<{
+      id: string
+      duration: number
+      executionCount: number
+      status: 'active' | 'paused'
+      nextExecutionTime: number
+      isInRecuperation: boolean
+      breathingSync: number
+    }>
+  }
+
+  // Hook Types
+  interface CyreHookOptions<TPayload = ActionPayload> {
+    name?: string
+    tag?: string
+    autoInit?: boolean
+    debug?: boolean
+    protection?: {
+      throttle?: number
+      debounce?: number
+      detectChanges?: boolean
+    }
+    priority?: {level: Priority}
+    initialPayload?: TPayload
+    historyLimit?: number
+  }
+
+  interface CyreHook<TPayload = ActionPayload> {
+    id: string
+    name: string
+    action: (
+      config: Omit<IO, 'id'>
+    ) => {success: true; value: boolean} | {success: false; error: Error}
+    on: (handler: EventHandler) => {unsubscribe: () => void}
+    call: (payload?: TPayload) => Promise<CyreResponse>
+    safeCall: (
+      payload?: TPayload
+    ) => Promise<
+      {success: true; value: CyreResponse} | {success: false; error: Error}
+    >
+    get: () => IO | undefined
+    forget: () => boolean
+    pause: () => void
+    resume: () => void
+    hasChanged: (payload: TPayload) => boolean
+    getPrevious: () => TPayload | undefined
+    metrics: () => any
+    getBreathingState: () => BreathingMetrics
+    isInitialized: () => boolean
+    middleware: (middleware: any) => void
+    getHistory: () => ReadonlyArray<any>
+    clearHistory: () => void
+    getSubscriptionCount: () => number
+  }
+
+  type CyreChannel<TPayload = ActionPayload> = CyreHook<TPayload>
+
   /**
    * Main CYRE instance available globally
    */
   interface Window {
     cyre: CyreInstance
-    useCyre: typeof import('../hooks/use-cyre').useCyre
-    cyreCompose: typeof import('../hooks/cyre-compose').cyreCompose
+    useCyre: UseCyreFunction
+    cyreCompose: CyreComposeFunction
   }
 
   /**
    * Node.js global extensions for CYRE
    */
-  declare namespace NodeJS {
+  namespace NodeJS {
     interface Global {
       cyre: CyreInstance
     }
@@ -433,12 +535,12 @@ declare global {
  * Module declarations for CYRE imports
  */
 declare module 'cyre' {
-  export const cyre: CyreInstance
-  export const Cyre: (line?: string) => CyreInstance
-  export const useCyre: UseCyreFunction
-  export const cyreCompose: CyreComposeFunction
-  export const createStream: CreateStreamFunction
-  export const log: {
+  const cyre: CyreInstance
+  const Cyre: (line?: string) => CyreInstance
+  const useCyre: UseCyreFunction
+  const cyreCompose: CyreComposeFunction
+  const createStream: CreateStreamFunction
+  const log: {
     error: (message: unknown, timestamp?: boolean) => void
     warn: (message: unknown, timestamp?: boolean) => void
     info: (message: unknown, timestamp?: boolean) => void
@@ -447,9 +549,10 @@ declare module 'cyre' {
     critical: (message: unknown, timestamp?: boolean) => void
     sys: (message: unknown, timestamp?: boolean) => void
   }
-  export const version: string
+  const version: string
 
   // Export types
+  export {cyre, Cyre, useCyre, cyreCompose, createStream, log, version}
   export type {
     IO,
     ActionPayload,

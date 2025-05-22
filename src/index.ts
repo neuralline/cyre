@@ -1,12 +1,11 @@
 // src/index.ts
 
-import {CyreHook, CyreChannel} from './interfaces/hooks-interface'
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 3+ 2025
+    Version 4 2025
 */
 
 // Export main components
@@ -14,6 +13,7 @@ import {CyreHook, CyreChannel} from './interfaces/hooks-interface'
 import {cyre, Cyre, log} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
+
 // Export everything as both named exports and default export
 export {cyre, Cyre, log, useCyre, cyreCompose}
 
@@ -24,20 +24,25 @@ export default cyre
 export {pipe, memoize, isEqual, tryCatch} from './libs/utils'
 //export {createCyreChannel, type Channel} from './libs/create-cyre-channel'
 
-// Export types
+// Export types with unique names to avoid conflicts
 export type {
-  IO,
-  EventHandler,
-  Subscriber,
-  SubscriptionResponse,
-  ActionPayload,
-  Priority,
-  TimerDuration,
-  BreathingMetrics,
-  SystemMetrics,
-  CyreResponse
+  IO as CyreIO,
+  EventHandler as CyreEventHandler,
+  Subscriber as CyreSubscriber,
+  SubscriptionResponse as CyreSubscriptionResponse,
+  ActionPayload as CyreActionPayload,
+  Priority as CyrePriority,
+  TimerDuration as CyreTimerDuration,
+  BreathingMetrics as CyreBreathingMetrics,
+  SystemMetrics as CyreSystemMetrics,
+  CyreResponse as CyreCoreResponse
 } from './interfaces/interface'
-export type {CyreHook, CyreChannel}
+
+// Export hook types
+export type {
+  CyreHook as CyreHookType,
+  CyreChannel as CyreChannelType
+} from './interfaces/hooks-interface'
 
 // Version information
-export const version = '3.1.7'
+export const version = '4.0.0'

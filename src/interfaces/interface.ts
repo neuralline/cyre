@@ -1,4 +1,5 @@
-// interfaces/interface.ts
+// src/interfaces/interface.ts
+// Main interface definitions with enhanced response typing
 
 import {ProtectionFunction} from '../components/cyre-protection'
 import {BREATHING} from '../config/cyre-config'
@@ -13,6 +14,7 @@ export interface PriorityConfig {
   baseDelay?: number
   maxDelay?: number
 }
+
 // Common Types
 export type ActionPayload = unknown
 export type ActionId = string
@@ -168,8 +170,24 @@ export type On = (
   ) => void | Promise<void> | {id: string; payload?: unknown}
 ) => SubscriptionResponse
 
-// src/interfaces/interface.ts - Add these to your existing interfaces
+// Enhanced CyreResponse with proper typing
+export interface CyreResponse<T = unknown> {
+  ok: boolean
+  payload: T
+  message: string
+  error?: Error | string
+  timestamp?: number
+  metadata?: {
+    executionTime?: number
+    source?: string
+    correlationId?: string
+    retryCount?: number
+    actionId?: string
+    priority?: Priority
+  }
+}
 
+// Timer state and related interfaces
 export type TimerState = {
   inRecuperation: boolean
   hibernating: boolean
@@ -237,6 +255,7 @@ export interface QuantumMetrics {
   successRate: number
   recuperationRate: number
 }
+
 export interface QuantumState {
   system: SystemMetrics
   breathing: BreathingState
@@ -318,14 +337,6 @@ export interface SystemLoadInfo {
   isOverloaded: boolean
   system?: SystemMetrics
   queues: Record<Priority, number>
-}
-
-export interface CyreResponse<T = unknown> {
-  ok: boolean
-  payload: T
-  message: string
-  error?: Error
-  timestamp?: number
 }
 
 export type SystemMetrics = {
@@ -438,4 +449,195 @@ export interface ProtectionResult {
 export interface ThrottleResult {
   blocked: boolean
   response?: CyreResponse
+}
+
+/**
+ * Enhanced history interfaces integrated into main interface
+ */
+export interface HistoryResponse {
+  ok: boolean
+  message?: string
+  error?: string
+  payload?: unknown
+  timestamp?: number
+}
+
+export interface HistoryEntry {
+  actionId: string
+  timestamp: number
+  payload: ActionPayload
+  response: HistoryResponse
+  duration?: number
+  executionId?: string
+  priority?: Priority
+  metadata?: {
+    retry?: number
+    source?: string
+    tags?: string[]
+    correlationId?: string
+    userId?: string
+    sessionId?: string
+    traceId?: string
+    spanId?: string
+  }
+}
+
+export interface HistoryStats {
+  totalCalls: number
+  successRate: number
+  averageDuration?: number
+  lastCall?: HistoryEntry
+  errorCount: number
+  recentErrors: HistoryEntry[]
+  performanceTrend: {
+    improving: boolean
+    degrading: boolean
+    stable: boolean
+  }
+  percentiles?: {
+    p50?: number
+    p90?: number
+    p95?: number
+    p99?: number
+  }
+}
+
+export interface HistoryQuery {
+  actionId?: string
+  success?: boolean
+  timeRange?: {
+    start: number
+    end: number
+  }
+  limit?: number
+  offset?: number
+  sortBy?: 'timestamp' | 'duration' | 'actionId' | 'success'
+  sortOrder?: 'asc' | 'desc'
+  priority?: Priority
+  minDuration?: number
+  maxDuration?: number
+  errorType?: string
+  tags?: string[]
+}
+
+/**
+ * Type guards for runtime validation
+ */
+export const isHistoryEntry = (obj: unknown): obj is HistoryEntry => {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as HistoryEntry).actionId === 'string' &&
+    typeof (obj as HistoryEntry).timestamp === 'number' &&
+    typeof (obj as HistoryEntry).response === 'object' &&
+    typeof (obj as HistoryEntry).response.ok === 'boolean'
+  )
+}
+
+export const isHistoryResponse = (obj: unknown): obj is HistoryResponse => {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as HistoryResponse).ok === 'boolean'
+  )
+}
+
+export const isCyreResponse = <T = unknown>(
+  obj: unknown
+): obj is CyreResponse<T> => {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as CyreResponse).ok === 'boolean' &&
+    typeof (obj as CyreResponse).message === 'string' &&
+    'payload' in (obj as CyreResponse)
+  )
+}
+
+/**
+ * Result type for operations that might fail
+ */
+export type Result<T, E = Error> =
+  | {kind: 'ok'; value: T}
+  | {kind: 'error'; error: E}
+
+/**
+ * Factory function for creating standardized responses
+ */
+export const createCyreResponse = <T = unknown>(
+  ok: boolean,
+  payload: T,
+  message: string,
+  options?: {
+    error?: Error | string
+    metadata?: CyreResponse<T>['metadata']
+  }
+): CyreResponse<T> => ({
+  ok,
+  payload,
+  message,
+  error: options?.error,
+  timestamp: Date.now(),
+  metadata: options?.metadata
+})
+
+/**
+ * Factory function for creating history responses
+ */
+export const createHistoryResponse = (
+  ok: boolean,
+  options?: {
+    message?: string
+    error?: string
+    payload?: unknown
+  }
+): HistoryResponse => ({
+  ok,
+  message: options?.message,
+  error: options?.error,
+  payload: options?.payload,
+  timestamp: Date.now()
+})
+
+/**
+ * Utility function to convert any response to HistoryResponse
+ */
+export const toHistoryResponse = (
+  response:
+    | CyreResponse
+    | {ok: boolean; message?: string; error?: string}
+    | unknown
+): HistoryResponse => {
+  if (isCyreResponse(response)) {
+    return {
+      ok: response.ok,
+      message: response.message,
+      error: response.error ? String(response.error) : undefined,
+      payload: response.payload,
+      timestamp: response.timestamp || Date.now()
+    }
+  }
+
+  if (isHistoryResponse(response)) {
+    return response
+  }
+
+  // Fallback for unknown response types
+  if (typeof response === 'object' && response !== null && 'ok' in response) {
+    return {
+      ok: Boolean((response as any).ok),
+      message: (response as any).message || undefined,
+      error: (response as any).error || undefined,
+      payload: (response as any).payload,
+      timestamp: Date.now()
+    }
+  }
+
+  // Default error response for unrecognized types
+  return {
+    ok: false,
+    message: 'Invalid response format',
+    error: 'Response could not be normalized',
+    timestamp: Date.now()
+  }
 }

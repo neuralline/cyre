@@ -1,13 +1,10 @@
+// vite.config.ts
 import {defineConfig} from 'vitest/config'
-import * as path from 'path'
-import {fileURLToPath} from 'url'
-import {dirname} from 'path'
-
-// Get the directory name from the current module URL
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
+import {resolve} from 'path'
+import {fileURLToPath, URL} from 'node:url'
 
 export default defineConfig({
+  // Test configuration
   test: {
     globals: true,
     environment: 'node',
@@ -17,68 +14,125 @@ export default defineConfig({
       'test/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}'
     ],
     coverage: {
-      provider: 'istanbul', // Use istanbul instead of v8
+      provider: 'v8', // v8 is faster and more accurate than istanbul
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
-      exclude: ['**/*.{test,spec}.ts']
+      exclude: [
+        '**/*.{test,spec}.ts',
+        '**/types/**',
+        '**/interfaces/**',
+        '**/*.d.ts'
+      ],
+      thresholds: {
+        global: {
+          branches: 80,
+          functions: 80,
+          lines: 80,
+          statements: 80
+        }
+      }
     },
     deps: {
       inline: [/^(?!.*node_modules).*$/]
-    },
-    root: '.',
-    alias: {
-      '@': path.resolve(__dirname, './src')
     }
   },
+
+  // Build configuration
   build: {
-    outDir: 'dist',
     lib: {
-      entry: path.resolve(__dirname, 'src/index.ts'),
-      name: 'cyre',
+      entry: resolve(__dirname, 'src/index.ts'),
+      name: 'Cyre',
       formats: ['es', 'cjs', 'umd'],
       fileName: format => {
         switch (format) {
           case 'es':
-            return 'es/index.js'
+            return 'index.esm.js'
           case 'cjs':
-            return 'cjs/index.cjs' // Use .cjs extension for CommonJS
+            return 'index.cjs'
           case 'umd':
-            return 'umd/cyre.js'
+            return 'index.umd.js'
           default:
-            return `${format}/index.js`
+            return `index.${format}.js`
         }
       }
     },
+
     rollupOptions: {
+      // Externalize deps that shouldn't be bundled
       external: [],
-      output: {
-        globals: {},
-        exports: 'named',
-        extend: true,
-        // Ensure UMD format works in all environments
-        format: 'umd',
-        name: 'cyre',
-        // Force CommonJS output to be compatible with ES modules
-        interop: 'auto',
-        // Generate minified UMD version
-        manualChunks: undefined
-      }
+
+      output: [
+        // ESM build
+        {
+          format: 'es',
+          entryFileNames: 'index.esm.js',
+          exports: 'named',
+          preserveModules: false
+        },
+        // CommonJS build
+        {
+          format: 'cjs',
+          entryFileNames: 'index.cjs',
+          exports: 'named',
+          interop: 'auto'
+        },
+        // UMD build for browsers
+        {
+          format: 'umd',
+          name: 'Cyre',
+          entryFileNames: 'index.umd.js',
+          exports: 'named',
+          globals: {}
+        }
+      ]
     },
-    // Make CommonJS format work with "type": "module" in package.json
-    commonjsOptions: {
-      requireReturnsDefault: 'auto',
-      transformMixedEsModules: true,
-      esmExternals: true
-    },
-    sourcemap: true,
+
+    // Optimization
     minify: 'terser',
-    target: 'es2020',
     terserOptions: {
       compress: {
-        drop_console: false,
-        pure_funcs: []
+        drop_console: true, // Remove console.log in production
+        drop_debugger: true,
+        pure_funcs: ['console.log', 'console.debug'], // Remove specific console methods
+        passes: 2 // Multiple passes for better compression
+      },
+      mangle: {
+        properties: false // Don't mangle property names to avoid breaking APIs
+      },
+      format: {
+        comments: false // Remove comments
       }
     },
-    emptyOutDir: true
+
+    // Modern target for better tree-shaking
+    target: 'es2020',
+
+    // Generate source maps for debugging
+    sourcemap: true,
+
+    // Clean output directory
+    emptyOutDir: true,
+
+    // Output directory
+    outDir: 'dist',
+
+    // Chunk size warnings
+    chunkSizeWarningLimit: 500,
+
+    // Ensure reproducible builds
+    reportCompressedSize: true
+  },
+
+  // Resolve configuration
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+
+  // Define global constants
+  define: {
+    __VERSION__: JSON.stringify(process.env.npm_package_version || '0.0.0'),
+    __DEV__: JSON.stringify(process.env.NODE_ENV !== 'production')
   }
 })

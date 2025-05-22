@@ -51,7 +51,7 @@ const levelColors: Record<LogLevel, (keyof typeof Colors)[]> = {
   [LogLevel.INFO]: ['cyan', 'bold'],
   [LogLevel.WARN]: ['yellowBright', 'bold'],
   [LogLevel.ERROR]: ['redBright', 'bold'],
-  [LogLevel.SUCCESS]: ['greenBright', 'bold'],
+  [LogLevel.SUCCESS]: ['greenBright', 'bold', 'dim'],
   [LogLevel.CRITICAL]: ['bgRed', 'whiteBright', 'bold'],
   [LogLevel.SYS]: ['bgMagenta', 'white'] // System log
 }
@@ -103,18 +103,42 @@ type LogFunction = (
   useConsole?: boolean
 ) => void
 
+// Console method type for type safety
+type ConsoleMethod = 'log' | 'error' | 'warn' | 'debug' | 'info'
+
+// Helper function to safely call console methods
+const safeConsoleCall = (
+  method: ConsoleMethod | string,
+  message: string,
+  style?: string
+) => {
+  if (typeof console === 'undefined') return
+
+  // Handle known console methods
+  const knownMethods: Record<string, ConsoleMethod> = {
+    log: 'log',
+    error: 'error',
+    warn: 'warn',
+    debug: 'debug',
+    info: 'info',
+    sys: 'log', // Map quantum to log
+    critical: 'error' // Map critical to error
+  }
+
+  const consoleMethod = knownMethods[method] || 'log'
+
+  if (style && isBrowser) {
+    console[consoleMethod](`%c${message}`, style)
+  } else {
+    console[consoleMethod](message)
+  }
+}
+
 // Updated baseLogger to handle multiple color modifiers
 const baseLogger = (
   level: LogLevel,
   colors: (keyof typeof Colors)[],
-  consoleMethod:
-    | 'log'
-    | 'error'
-    | 'warn'
-    | 'debug'
-    | 'info'
-    | 'sys'
-    | 'critical'
+  consoleMethod: ConsoleMethod | string
 ): LogFunction => {
   return (message: unknown, timestamp = true, useConsole = false) => {
     if (logLevelPriority[level] < logLevelPriority[currentLogLevel]) {
@@ -138,7 +162,7 @@ const baseLogger = (
           ? 'color: blue'
           : 'color: gray'
 
-      console[consoleMethod](`%c${logMessage}`, style)
+      safeConsoleCall(consoleMethod, logMessage, style)
       return
     }
 
@@ -162,9 +186,9 @@ export const log = {
   critical: baseLogger(
     LogLevel.CRITICAL,
     levelColors[LogLevel.CRITICAL],
-    'log'
+    'critical'
   ),
-  sys: baseLogger(LogLevel.SYS, levelColors[LogLevel.SYS], 'log'), // Use the specialized method for quantum headers,
+  sys: baseLogger(LogLevel.SYS, levelColors[LogLevel.SYS], 'system'), // Use the specialized method for quantum headers,
 
   // Method to set log level
   setLevel: setLogLevel,

@@ -6,7 +6,7 @@ import {io, middlewares} from '../context/state'
 import {addMiddlewareToAction} from './cyre-protection'
 
 /* 
-      C.Y.R.E. - M.I.D.D.L.E.W.A.R.E
+      C.Y.R.E. - M.I.D.D.L.E.W.A.R.E.
 */
 
 // Define the middleware function type more precisely

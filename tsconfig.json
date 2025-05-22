@@ -1,40 +1,83 @@
 {
   "compilerOptions": {
-    "types": ["node", "vitest/globals"],
-    "target": "es2020",
-    "useDefineForClassFields": true,
+    /* Language and Environment */
+    "target": "ES2020",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "esnext",
-    "skipLibCheck": true,
+    "useDefineForClassFields": true,
+
+    /* Modules */
+    "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "declaration": true,
+    "verbatimModuleSyntax": false,
+
+    /* JavaScript Support */
+    "allowJs": false,
+    "checkJs": false,
+
+    /* Emit */
+    "declaration": false,
+    "declarationMap": false,
+    "emitDeclarationOnly": false,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "removeComments": false,
+    "noEmit": true,
+    "importHelpers": false,
+    "downlevelIteration": false,
+    "sourceMap": true,
+    "inlineSourceMap": false,
     "declarationDir": "./dist/types",
-    "emitDeclarationOnly": true,
-    "jsx": "react-jsx",
+
+    /* Interop Constraints */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* Type Checking */
     "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "useUnknownInCatchVariables": true,
+    "alwaysStrict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": false,
+
+    /* Completeness */
+    "skipLibCheck": true,
+
+    /* Path Mapping */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     },
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-    "rootDir": "src",
-    "outDir": "dist"
+
+    /* Advanced */
+    "jsx": "react-jsx",
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*"],
   "exclude": [
     "node_modules",
     "dist",
-    "src/streams",
+    "coverage",
     "**/*.test.ts",
-    "**/*.spec.ts"
-  ],
-  "references": [{"path": "./tsconfig.node.json"}]
+    "**/*.spec.ts",
+    "**/*.test.tsx",
+    "**/*.spec.tsx",
+    "test/**/*",
+    "examples/**/*"
+  ]
 }

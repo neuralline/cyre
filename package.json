@@ -14,7 +14,9 @@
     "prepublishOnly": "npm run test && npm run build",
     "version": "npm run build && git add -A dist",
     "postversion": "git push && git push --tags",
-    "publish:github": "npm publish --registry=https://npm.pkg.github.com --scope=@neuralline"
+    "publish:github": "npm publish --registry=https://npm.pkg.github.com --scope=@neuralline",
+    "clean": "rimraf dist coverage .vite",
+    "example": "tsx examples/basic-usage.ts"
   },
   "author": "Darik.",
   "license": "MIT",
@@ -60,26 +62,27 @@
     "redux alternative"
   ],
   "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.esm.js",
+  "browser": "./dist/index.umd.js",
   "types": "./dist/types/index.d.ts",
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/es/index.js",
-  "browser": "dist/umd/cyre.js",
-  "unpkg": "dist/umd/cyre.min.js",
   "files": [
     "dist",
     "docs",
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "package.json"
   ],
-  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "browser": "./dist/umd/cyre.js",
-      "import": "./dist/es/index.js",
-      "require": "./dist/cjs/index.cjs"
-    }
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs",
+      "browser": "./dist/index.umd.js"
+    },
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=22.0.0"
