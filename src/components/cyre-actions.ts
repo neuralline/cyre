@@ -4,6 +4,7 @@ import {IO} from '../interfaces/interface'
 import {log} from './cyre-logger'
 import {pipe} from '../libs/utils'
 import {MSG} from '../config/cyre-config'
+import {metricsReport} from '../context/metrics-report'
 
 /*
 
@@ -112,6 +113,12 @@ const executeAction = (action: ActionResult): ActionResult => {
       lastExecutionTime: Date.now(),
       executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
     })
+    if (
+      typeof metricsReport !== 'undefined' &&
+      typeof metricsReport.trackListenerExecution === 'function'
+    ) {
+      metricsReport.trackListenerExecution(action.id, executionTime)
+    }
 
     // Handle linked actions
     if (result && typeof result === 'object' && 'id' in result) {

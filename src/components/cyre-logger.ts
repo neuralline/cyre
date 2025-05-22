@@ -8,11 +8,11 @@ export enum LogLevel {
   ERROR = 'ERROR',
   SUCCESS = 'SUCCESS',
   CRITICAL = 'CRITICAL',
-  QUANTUM = 'QUANTUM' // New level specifically for quantum headers
+  SYS = 'SYS' // System LOG
 }
 /* 
 
-      C.Y.R.E. - L.O.G.G.E.R.
+      C.Y.R.E. - L.O.G.
       
 
 */
@@ -48,12 +48,12 @@ export const Colors = {
 // Define log level colors
 const levelColors: Record<LogLevel, (keyof typeof Colors)[]> = {
   [LogLevel.DEBUG]: ['dim', 'cyan'],
-  [LogLevel.INFO]: ['blue', 'bold'],
+  [LogLevel.INFO]: ['cyan', 'bold'],
   [LogLevel.WARN]: ['yellowBright', 'bold'],
   [LogLevel.ERROR]: ['redBright', 'bold'],
-  [LogLevel.SUCCESS]: ['greenBright', 'bold', 'dim'],
+  [LogLevel.SUCCESS]: ['greenBright', 'bold'],
   [LogLevel.CRITICAL]: ['bgRed', 'whiteBright', 'bold'],
-  [LogLevel.QUANTUM]: ['bgMagenta', 'white'] // Styling for quantum header
+  [LogLevel.SYS]: ['bgMagenta', 'white'] // System log
 }
 
 // Add environment detection
@@ -75,7 +75,7 @@ const logLevelPriority: Record<LogLevel, number> = {
   [LogLevel.ERROR]: 3,
   [LogLevel.SUCCESS]: 1,
   [LogLevel.CRITICAL]: 1,
-  [LogLevel.QUANTUM]: 1
+  [LogLevel.SYS]: 1
 }
 
 // Base logging function to reduce duplication
@@ -113,7 +113,7 @@ const baseLogger = (
     | 'warn'
     | 'debug'
     | 'info'
-    | 'quantum'
+    | 'sys'
     | 'critical'
 ): LogFunction => {
   return (message: unknown, timestamp = true, useConsole = false) => {
@@ -164,7 +164,7 @@ export const log = {
     levelColors[LogLevel.CRITICAL],
     'log'
   ),
-  sys: baseLogger(LogLevel.QUANTUM, levelColors[LogLevel.QUANTUM], 'log'), // Use the specialized method for quantum headers,
+  sys: baseLogger(LogLevel.SYS, levelColors[LogLevel.SYS], 'log'), // Use the specialized method for quantum headers,
 
   // Method to set log level
   setLevel: setLogLevel,

@@ -5,7 +5,7 @@ import {io, middlewares} from '../context/state'
 import {log} from './cyre-logger'
 import {metricsState} from '../context/metrics-state'
 import timeKeeper from './cyre-time-keeper'
-import {metricsReport} from '@/context/metrics-report'
+import {metricsReport} from '../context/metrics-report'
 /* 
 
       C.Y.R.E. - P.R.O.T.E.C.T.I.O.N.
@@ -99,17 +99,17 @@ const throttleProtection = createProtection(
     const lastExecution = actionMetrics?.lastExecutionTime || 0
     const timeSinceLastExecution = now - lastExecution
 
-    log.debug(`[THROTTLE] Checking throttle for ${action.id}:`)
-    log.debug(`  - Last execution time: ${lastExecution}`)
-    log.debug(`  - Time since last execution: ${timeSinceLastExecution}ms`)
-    log.debug(`  - Throttle setting: ${action.throttle}ms`)
+    // log.debug(`[THROTTLE] Checking throttle for ${action.id}:`)
+    // log.debug(`  - Last execution time: ${lastExecution}`)
+    // log.debug(`  - Time since last execution: ${timeSinceLastExecution}ms`)
+    // log.debug(`  - Throttle setting: ${action.throttle}ms`)
 
     // Industry standard: First execution always passes (lastExecution === 0)
     if (lastExecution !== 0 && timeSinceLastExecution < action.throttle!) {
       // Add this line to track throttle
       metricsReport.trackThrottle(action.id)
 
-      log.debug(`[THROTTLE] Throttling ${action.id} - too soon`)
+      //log.debug(`[THROTTLE] Throttling ${action.id} - too soon`)
       return {
         ok: false,
         payload: null,
@@ -119,7 +119,7 @@ const throttleProtection = createProtection(
       }
     }
 
-    log.debug(`[THROTTLE] Allowing ${action.id} to proceed`)
+    //log.debug(`[THROTTLE] Allowing ${action.id} to proceed`)
 
     // Execute the next function in the pipeline
     const result = await next()
@@ -144,10 +144,9 @@ const debounceProtection = createProtection(
   async (action, payload, next) => {
     // Skip if this is a debounce-bypass execution
     if (action._bypassDebounce) {
-      metricsReport.trackDebounce(action.id)
       return next()
     }
-
+    metricsReport.trackDebounce(action.id)
     // Cancel any existing debounce timer
     if (action.debounceTimerId) {
       timeKeeper.forget(action.debounceTimerId)
@@ -169,10 +168,6 @@ const debounceProtection = createProtection(
         async () => {
           try {
             // Create a copy of the action that bypasses debounce to prevent recursion
-            const debounceBypassAction = {
-              ...action,
-              _bypassDebounce: true
-            }
 
             // Execute with debounce bypassed but keeping all other protections
             const result = await next()

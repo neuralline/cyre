@@ -89,7 +89,7 @@ const addSingleSubscriber = (
 
       // Also log directly to console for better visibility during development
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn(`🔥 ${duplicateMessage}`)
+        console.warn(duplicateMessage)
         console.warn(
           'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
         )

@@ -24,7 +24,10 @@ export type MiddlewareFunction = (
  * @param fn Middleware function
  * @returns boolean indicating success
  */
-export const registerMiddleware = (id: string, fn: Function): boolean => {
+export const registerMiddleware = (
+  id: string,
+  fn: MiddlewareFunction
+): boolean => {
   try {
     if (!id || typeof id !== 'string') {
       log.error('Invalid middleware ID')

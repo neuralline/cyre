@@ -336,6 +336,9 @@ const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
       adjustedInterval,
       async () => {
         if (metricsState.isHealthy()) {
+          // Track repeat before execution
+          metricsReport.trackRepeat(action.id)
+
           await useDispatch({
             ...action,
             timeOfCreation: performance.now(),

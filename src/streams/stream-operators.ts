@@ -36,7 +36,7 @@ export function debounceOperator<T>(stream: Stream<T>, ms: number): Stream<T> {
       if (hasValue && latestValue !== undefined) {
         log.debug(
           `[Stream ${debounceId}] Debounce timeout elapsed, emitting:`,
-          latestValue
+          latestValue !== null ? latestValue : 'No value'
         )
         debounceStream
           .next(latestValue)
@@ -102,7 +102,7 @@ export function throttleOperator<T>(stream: Stream<T>, ms: number): Stream<T> {
         if (hasValue && latestValue !== undefined) {
           log.debug(
             `[Stream ${throttleId}] Throttle timeout elapsed, emitting:`,
-            latestValue
+            latestValue !== null ? latestValue : 'No value'
           )
           throttleStream
             .next(latestValue)

@@ -4,7 +4,7 @@ import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-logger'
 import {metricsState, Result} from '../context/metrics-state'
 import {timeline} from '../context/state'
-import {metricsReport} from '@/context/metrics-report'
+import {metricsReport} from '../context/metrics-report'
 
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.

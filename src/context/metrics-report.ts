@@ -1,4 +1,4 @@
-// src/context/detailed-metrics.ts
+// src/context/metrics-report.ts
 
 import {createStore} from './create-store'
 import type {ActionId, Priority, StateKey} from '../interfaces/interface'
@@ -16,6 +16,7 @@ import {metricsState} from './metrics-state'
 export interface ActionMetricsData {
   id: string
   calls: number
+  executionCount: number // Add this missing property
   debounces: number
   throttles: number
   repeats: number
@@ -30,6 +31,15 @@ export interface ActionMetricsData {
   priority: Priority
   errorCount: number
   middlewareRejections: number
+  // Listener execution time tracking
+  listenerExecutionTimes: number[]
+  totalListenerExecutionTime: number
+  avgListenerExecutionTime: number
+  minListenerExecutionTime: number
+  maxListenerExecutionTime: number
+  slowListenerCount: number
+  // Performance ratio analysis
+  pipelineOverheadRatio: number
 }
 
 export interface GlobalMetricsData {
@@ -48,11 +58,17 @@ export interface GlobalMetricsData {
   currentCallRate: number
   callRateTimestamp: number
   callsPerPriority: Record<Priority, number>
+  // Listener metrics
+  totalListenerExecutions: number
+  totalListenerExecutionTime: number
+  totalSlowListeners: number
+  avgListenerExecutionTime: number
 }
 
 // Constants for metrics management
 const MAX_EXECUTION_TIMES_HISTORY = 100
 const RATE_CALCULATION_WINDOW = 10000 // 10 seconds for rate calculations
+const SLOW_LISTENER_THRESHOLD = 20 // ms, threshold for marking a listener as slow
 
 // Create the stores
 const actionMetricsStore = createStore<ActionMetricsData>()
@@ -80,7 +96,12 @@ const initGlobalMetrics = (): GlobalMetricsData => ({
     medium: 0,
     low: 0,
     background: 0
-  }
+  },
+  // Initialize listener metrics
+  totalListenerExecutions: 0,
+  totalListenerExecutionTime: 0,
+  totalSlowListeners: 0,
+  avgListenerExecutionTime: 0
 })
 
 // Initialize an action metrics record
@@ -90,6 +111,7 @@ const initActionMetrics = (
 ): ActionMetricsData => ({
   id,
   calls: 0,
+  executionCount: 0, // Initialize executionCount
   debounces: 0,
   throttles: 0,
   repeats: 0,
@@ -103,7 +125,15 @@ const initActionMetrics = (
   lastExecution: 0,
   priority,
   errorCount: 0,
-  middlewareRejections: 0
+  middlewareRejections: 0,
+  // Initialize listener metrics
+  listenerExecutionTimes: [],
+  totalListenerExecutionTime: 0,
+  avgListenerExecutionTime: 0,
+  minListenerExecutionTime: Infinity,
+  maxListenerExecutionTime: 0,
+  slowListenerCount: 0,
+  pipelineOverheadRatio: 0
 })
 
 // Initialize the global metrics store
@@ -140,15 +170,35 @@ const getActionMetrics = (
 // Calculate call rate
 const calculateCallRate = (globalMetrics: GlobalMetricsData): number => {
   const now = Date.now()
-  const callsSinceLastCheck =
-    globalMetrics.totalCalls -
-    globalMetrics.currentCallRate *
-      ((now - globalMetrics.callRateTimestamp) / 1000)
-  const secondsElapsed = Math.max(
-    0.001,
-    (now - globalMetrics.callRateTimestamp) / 1000
+  // Use a fixed time window for more stable rate calculation
+  const timeWindow = Math.min(
+    now - globalMetrics.callRateTimestamp,
+    RATE_CALCULATION_WINDOW
   )
-  return callsSinceLastCheck / secondsElapsed
+
+  // Avoid division by zero
+  if (timeWindow <= 0) return 0
+
+  const callsPerSecond =
+    (globalMetrics.totalCalls -
+      globalMetrics.currentCallRate *
+        (globalMetrics.callRateTimestamp / 1000)) /
+    (timeWindow / 1000)
+
+  return Math.max(0, callsPerSecond)
+}
+
+// Sort metrics by array for presentation
+const sortActionMetrics = (
+  metrics: ActionMetricsData[]
+): ActionMetricsData[] => {
+  return [...metrics].sort((a, b) => {
+    // Primary sort by call count (desc)
+    if (b.calls !== a.calls) return b.calls - a.calls
+
+    // Secondary sort by execution time (desc)
+    return b.avgExecutionTime - a.avgExecutionTime
+  })
 }
 
 // Export the metrics report manager
@@ -185,25 +235,26 @@ export const metricsReport = {
     // Log high call rates for potential issues
     if (callRate > 100) {
       // Arbitrary threshold - adjust based on your needs
-      log.debug(`High call rate detected: ${callRate.toFixed(2)} calls/second`)
+      // log.debug(`High call rate detected: ${callRate.toFixed(2)} calls/second`)
     }
   },
 
-  // Track a debounce operation
   trackDebounce: (id: ActionId): void => {
-    // Update action metrics
-    const actionMetrics = getActionMetrics(id)
-    actionMetricsStore.set(id, {
-      ...actionMetrics,
-      debounces: actionMetrics.debounces + 1
-    })
+    // Use local variables to minimize object lookups and writes
+    const actionMetrics = actionMetricsStore.get(id) || initActionMetrics(id)
 
-    // Update global metrics
+    // Just increment the debounces counter
+    actionMetrics.debounces++
+
+    // Only update the store if we created a new record or changed values
+    actionMetricsStore.set(id, actionMetrics)
+
+    // Update global metrics with minimal writes - use local variables
     const globalMetrics = getGlobalMetrics()
-    globalMetricsStore.set('global', {
-      ...globalMetrics,
-      totalDebounces: globalMetrics.totalDebounces + 1
-    })
+    globalMetrics.totalDebounces++
+
+    // Batch updates to reduce store writes
+    globalMetricsStore.set('global', globalMetrics)
   },
 
   // Track a throttle operation
@@ -292,59 +343,181 @@ export const metricsReport = {
   },
 
   // Track execution time and success
+  // Optimize trackExecution to better handle pipeline overhead calculation
   trackExecution: (id: ActionId, executionTime: number): void => {
     const now = Date.now()
 
-    // Update action metrics
+    // Get action metrics with minimal lookups
     const actionMetrics = getActionMetrics(id)
-    const newExecutionTimes = [
-      ...actionMetrics.executionTimes,
-      executionTime
-    ].slice(-MAX_EXECUTION_TIMES_HISTORY) // Keep only the most recent executions
 
-    const totalExecutionTime = actionMetrics.totalExecutionTime + executionTime
+    // Update execution times with minimal array operations
+    const newExecutionTimes = actionMetrics.executionTimes
+    if (newExecutionTimes.length >= MAX_EXECUTION_TIMES_HISTORY) {
+      // Shift array instead of creating a new one
+      newExecutionTimes.shift()
+    }
+    newExecutionTimes.push(executionTime)
+
+    // Update totals with minimal calculations
+    const newTotal = actionMetrics.totalExecutionTime + executionTime
     const executionCount = newExecutionTimes.length
 
+    // Calculate pipeline overhead ratio more efficiently
+    // Check if this execution corresponds to a listener execution
+    let lastListenerTime = 0
+    let pipelineOverheadRatio = actionMetrics.pipelineOverheadRatio
+
+    if (actionMetrics.listenerExecutionTimes.length > 0) {
+      // Get the last listener execution time
+      lastListenerTime =
+        actionMetrics.listenerExecutionTimes[
+          actionMetrics.listenerExecutionTimes.length - 1
+        ] || 0
+
+      // Only recalculate if we have useful data
+      if (lastListenerTime > 0 && executionTime > 0) {
+        const overhead = Math.max(0, executionTime - lastListenerTime)
+        // Use a weighted average to smooth out fluctuations
+        pipelineOverheadRatio =
+          0.8 * pipelineOverheadRatio + 0.2 * (overhead / executionTime)
+      }
+    }
+
+    // Batch updates to action metrics - increment executionCount
     actionMetricsStore.set(id, {
       ...actionMetrics,
+      executionCount: actionMetrics.executionCount + 1, // Increment execution count
       executionTimes: newExecutionTimes,
-      totalExecutionTime,
-      avgExecutionTime: totalExecutionTime / executionCount,
-      minExecutionTime: Math.min(actionMetrics.minExecutionTime, executionTime),
+      totalExecutionTime: newTotal,
+      avgExecutionTime: newTotal / executionCount,
+      minExecutionTime: Math.min(
+        actionMetrics.minExecutionTime === Infinity
+          ? executionTime
+          : actionMetrics.minExecutionTime,
+        executionTime
+      ),
       maxExecutionTime: Math.max(actionMetrics.maxExecutionTime, executionTime),
-      lastExecution: now
+      lastExecution: now,
+      pipelineOverheadRatio
+    })
+
+    // Optimize global metrics updates
+    const globalMetrics = getGlobalMetrics()
+    globalMetrics.totalExecutions++
+    globalMetrics.totalExecutionTime += executionTime
+    globalMetricsStore.set('global', globalMetrics)
+
+    // Only update breathing metrics for significant executions
+    if (executionTime > 100) {
+      try {
+        const {system} = metricsState.get()
+        // Reduce frequency of breathing updates
+        if (Math.random() < 0.25) {
+          // Sample only 25% of events
+          metricsState.updateBreath({
+            ...system,
+            eventLoop: Math.max(system.eventLoop, executionTime / 10)
+          })
+        }
+      } catch (error) {
+        // Silently ignore errors in breathing updates
+      }
+    }
+  },
+
+  // Add a special method for accurately measuring debounce overhead
+  trackDebounceOverhead: (id: ActionId, setupTime: number): void => {
+    const actionMetrics = getActionMetrics(id)
+
+    // Track setup time separately from execution time
+    if (!(actionMetrics as any)._debounceOverheadTimes) {
+      ;(actionMetrics as any)._debounceOverheadTimes = []
+      ;(actionMetrics as any)._totalDebounceOverhead = 0
+    }
+
+    // Add to overhead tracking
+    if ((actionMetrics as any)._debounceOverheadTimes.length >= 10) {
+      ;(actionMetrics as any)._debounceOverheadTimes.shift()
+    }
+    ;(actionMetrics as any)._debounceOverheadTimes.push(setupTime)
+    ;(actionMetrics as any)._totalDebounceOverhead += setupTime
+
+    // Save the updated metrics
+    actionMetricsStore.set(id, actionMetrics)
+  },
+
+  // Track listener execution time specifically
+  trackListenerExecution: (id: ActionId, executionTime: number): void => {
+    // Get existing metrics
+    const actionMetrics = getActionMetrics(id)
+
+    // Add the execution time to history
+    const newExecutionTimes = [
+      ...actionMetrics.listenerExecutionTimes,
+      executionTime
+    ].slice(-MAX_EXECUTION_TIMES_HISTORY)
+
+    // Calculate new metrics
+    const totalTime = actionMetrics.totalListenerExecutionTime + executionTime
+    const executionCount = newExecutionTimes.length
+    const avgTime = totalTime / executionCount
+
+    // Check if this is a slow listener
+    const isSlowExecution = executionTime > SLOW_LISTENER_THRESHOLD
+
+    // Update action metrics
+    actionMetricsStore.set(id, {
+      ...actionMetrics,
+      listenerExecutionTimes: newExecutionTimes,
+      totalListenerExecutionTime: totalTime,
+      avgListenerExecutionTime: avgTime,
+      minListenerExecutionTime: Math.min(
+        actionMetrics.minListenerExecutionTime === Infinity
+          ? executionTime
+          : actionMetrics.minListenerExecutionTime,
+        executionTime
+      ),
+      maxListenerExecutionTime: Math.max(
+        actionMetrics.maxListenerExecutionTime || 0,
+        executionTime
+      ),
+      slowListenerCount: isSlowExecution
+        ? actionMetrics.slowListenerCount + 1
+        : actionMetrics.slowListenerCount
     })
 
     // Update global metrics
     const globalMetrics = getGlobalMetrics()
+    const newTotalTime =
+      globalMetrics.totalListenerExecutionTime + executionTime
+    const newTotalCount = globalMetrics.totalListenerExecutions + 1
+
     globalMetricsStore.set('global', {
       ...globalMetrics,
-      totalExecutions: globalMetrics.totalExecutions + 1,
-      totalExecutionTime: globalMetrics.totalExecutionTime + executionTime
+      totalListenerExecutions: newTotalCount,
+      totalListenerExecutionTime: newTotalTime,
+      avgListenerExecutionTime: newTotalTime / newTotalCount,
+      totalSlowListeners: isSlowExecution
+        ? globalMetrics.totalSlowListeners + 1
+        : globalMetrics.totalSlowListeners
     })
 
-    // Optionally integrate with metrics-state for breathing
-    try {
-      // Only trigger a metrics update if execution time is significant
-      if (executionTime > 100) {
-        // Adjust threshold as needed
-        const {system} = metricsState.get()
-        metricsState.updateBreath({
-          ...system,
-          eventLoop: Math.max(system.eventLoop, executionTime / 10) // Factor down execution time for eventLoop impact
-        })
-      }
-    } catch (error) {
-      log.debug('Failed to update metrics-state breathing with execution time')
+    // Log warning for slow listeners
+    if (isSlowExecution) {
+      log.warn(
+        `Slow listener detected for action "${id}": ${executionTime.toFixed(
+          2
+        )}ms (threshold: ${SLOW_LISTENER_THRESHOLD}ms)`
+      )
     }
   },
 
-  // Get metrics report for a specific action
+  // Get detailed metrics for a specific action
   getActionMetrics: (id: StateKey): ActionMetricsData | undefined => {
     return actionMetricsStore.get(id)
   },
 
-  // Get metrics report for all actions
+  // Get detailed metrics for all actions
   getAllActionMetrics: (): ActionMetricsData[] => {
     return actionMetricsStore.getAll()
   },
@@ -384,6 +557,23 @@ export const metricsReport = {
     return sortedTimes[Math.min(index, sortedTimes.length - 1)]
   },
 
+  // Get percentile listener execution time for an action
+  getListenerExecutionTimePercentile: (
+    id: StateKey,
+    percentile: number
+  ): number | undefined => {
+    const actionMetrics = actionMetricsStore.get(id)
+    if (!actionMetrics || actionMetrics.listenerExecutionTimes.length === 0)
+      return undefined
+
+    // Sort the execution times
+    const sortedTimes = [...actionMetrics.listenerExecutionTimes].sort(
+      (a, b) => a - b
+    )
+    const index = Math.floor(sortedTimes.length * (percentile / 100))
+    return sortedTimes[Math.min(index, sortedTimes.length - 1)]
+  },
+
   // Generate a comprehensive metrics report
   generateReport: (
     filterPredicate?: (metrics: ActionMetricsData) => boolean
@@ -391,13 +581,24 @@ export const metricsReport = {
     const globalMetrics = getGlobalMetrics()
     let allActionMetrics = actionMetricsStore.getAll()
 
-    // Apply filter if provided
+    // Filter out internal ids and system actions
+    allActionMetrics = allActionMetrics.filter(metrics => {
+      // Filter out internal IDs, timer IDs, and actions with zero calls
+      const isInternalId =
+        metrics.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}/) || // UUID format
+        metrics.id.includes('-debounce-') || // Debounce timer
+        metrics.id.endsWith('-timer') || // Generic timer
+        metrics.calls === 0 // Unused actions
+      return !isInternalId
+    })
+
+    // Apply additional filter if provided
     if (filterPredicate) {
       allActionMetrics = allActionMetrics.filter(filterPredicate)
     }
 
     // Sort by call count (highest first)
-    allActionMetrics.sort((a, b) => b.calls - a.calls)
+    allActionMetrics = sortActionMetrics(allActionMetrics)
 
     const uptime = Math.floor((Date.now() - globalMetrics.startTime) / 1000)
     const uptimeFormatted = (() => {
@@ -416,10 +617,15 @@ export const metricsReport = {
       globalMetrics.totalExecutions
     ).toFixed(2)
 
-    let report = `CYRE Metrics Report Report\n`
+    const avgListenerTime = avoidDivByZero(
+      globalMetrics.totalListenerExecutionTime,
+      globalMetrics.totalListenerExecutions
+    ).toFixed(2)
+
+    let report = `CYRE Metrics Report\n`
     report += `=============================\n\n`
     report += `System Uptime: ${uptimeFormatted}\n`
-    report += `Total Actions: ${globalMetrics.totalActions}\n\n`
+    report += `Total Actions: ${allActionMetrics.length}\n\n`
 
     report += `Activity Summary:\n`
     report += `----------------\n`
@@ -435,6 +641,15 @@ export const metricsReport = {
     report += `Performance Metrics:\n`
     report += `------------------\n`
     report += `Avg Execution Time: ${avgExecTime}ms\n`
+    if (globalMetrics.totalListenerExecutions > 0) {
+      report += `Avg Listener Time: ${avgListenerTime}ms\n`
+      report += `Pipeline Overhead: ${(
+        ((globalMetrics.totalExecutionTime -
+          globalMetrics.totalListenerExecutionTime) /
+          globalMetrics.totalExecutionTime) *
+        100
+      ).toFixed(1)}%\n`
+    }
     report += `Current Call Rate: ${globalMetrics.currentCallRate.toFixed(
       2
     )} calls/sec\n`
@@ -470,10 +685,43 @@ export const metricsReport = {
       report += `   Calls: ${metrics.calls}\n`
 
       if (metrics.executionTimes.length > 0) {
-        report += `   Avg Execution: ${metrics.avgExecutionTime.toFixed(2)}ms\n`
-        report += `   Min/Max Execution: ${metrics.minExecutionTime.toFixed(
+        report += `   Execution Time: ${metrics.avgExecutionTime.toFixed(
           2
-        )}ms / ${metrics.maxExecutionTime.toFixed(2)}ms\n`
+        )}ms avg (range: ${metrics.minExecutionTime.toFixed(
+          2
+        )}ms - ${metrics.maxExecutionTime.toFixed(2)}ms)\n`
+
+        // Show 95th percentile if we have enough data
+        if (metrics.executionTimes.length >= 10) {
+          const p95 = metricsReport.getExecutionTimePercentile(metrics.id, 95)
+          if (p95 !== undefined) {
+            report += `   95th Percentile: ${p95.toFixed(2)}ms\n`
+          }
+        }
+      }
+
+      // Add listener execution times if available
+      if (metrics.listenerExecutionTimes?.length > 0) {
+        report += `   Listener Time: ${metrics.avgListenerExecutionTime.toFixed(
+          2
+        )}ms avg (range: ${metrics.minListenerExecutionTime.toFixed(
+          2
+        )}ms - ${metrics.maxListenerExecutionTime.toFixed(2)}ms)\n`
+
+        // Show overhead ratio if available
+        if (
+          metrics.executionTimes.length > 0 &&
+          metrics.pipelineOverheadRatio > 0
+        ) {
+          report += `   Pipeline Overhead: ${(
+            metrics.pipelineOverheadRatio * 100
+          ).toFixed(1)}%\n`
+        }
+
+        // Show slow listener count if any
+        if (metrics.slowListenerCount > 0) {
+          report += `   Slow Listeners: ${metrics.slowListenerCount}\n`
+        }
       }
 
       const throttleRate = avoidDivByZero(
@@ -484,16 +732,17 @@ export const metricsReport = {
         metrics.debounces * 100,
         metrics.calls
       ).toFixed(1)
-      const skipRate = avoidDivByZero(
-        metrics.changeDetectionSkips * 100,
-        metrics.calls
-      ).toFixed(1)
-
       report += `   Throttles: ${metrics.throttles} (${throttleRate}%)\n`
       report += `   Debounces: ${metrics.debounces} (${debounceRate}%)\n`
+
       if (metrics.changeDetectionSkips > 0) {
+        const skipRate = avoidDivByZero(
+          metrics.changeDetectionSkips * 100,
+          metrics.calls
+        ).toFixed(1)
         report += `   Change Skips: ${metrics.changeDetectionSkips} (${skipRate}%)\n`
       }
+
       if (metrics.errorCount > 0) {
         report += `   Errors: ${metrics.errorCount}\n`
       }
@@ -517,11 +766,13 @@ export const metricsReport = {
   getInsights: (): string[] => {
     const insights: string[] = []
     const globalMetrics = getGlobalMetrics()
-    const allActionMetrics = actionMetricsStore.getAll()
+    const allActionMetrics = actionMetricsStore
+      .getAll()
+      .filter(m => m.calls > 0) // Only analyze actions that were called
 
     // Look for frequently throttled actions
     const highThrottleActions = allActionMetrics.filter(
-      m => m.calls > 10 && m.throttles / m.calls > 0.3
+      m => m.calls > 5 && m.throttles / m.calls > 0.3
     )
 
     if (highThrottleActions.length > 0) {
@@ -537,13 +788,18 @@ export const metricsReport = {
 
     // Look for actions with high debounce rates
     const highDebounceActions = allActionMetrics.filter(
-      m => m.calls > 10 && m.debounces / m.calls > 0.5
+      m => m.calls > 5 && m.debounces / m.calls > 0.7
     )
 
     if (highDebounceActions.length > 0) {
       insights.push(
-        `${highDebounceActions.length} actions have high debounce rates (>50%). Consider reviewing the call patterns.`
+        `${highDebounceActions.length} actions have high debounce rates (>70%). Consider reviewing the call patterns.`
       )
+
+      highDebounceActions.slice(0, 3).forEach(m => {
+        const rate = ((m.debounces / m.calls) * 100).toFixed(1)
+        insights.push(`  - "${m.id}" is debounced ${rate}% of the time`)
+      })
     }
 
     // Look for actions with high error rates
@@ -564,12 +820,12 @@ export const metricsReport = {
 
     // Look for slow actions
     const slowActions = allActionMetrics.filter(
-      m => m.executionTimes.length > 0 && m.avgExecutionTime > 100 // Adjust threshold as needed
+      m => m.executionTimes.length > 0 && m.avgExecutionTime > 20 // Adjust threshold as needed
     )
 
     if (slowActions.length > 0) {
       insights.push(
-        `${slowActions.length} actions have average execution times >100ms. Consider optimizing:`
+        `${slowActions.length} actions have average execution times >20ms. Consider optimizing:`
       )
 
       slowActions
@@ -584,13 +840,73 @@ export const metricsReport = {
         })
     }
 
+    // Look for slow listeners
+    const slowListenerActions = allActionMetrics.filter(
+      m => m.listenerExecutionTimes?.length > 0 && m.slowListenerCount > 0
+    )
+
+    if (slowListenerActions.length > 0) {
+      insights.push(
+        `${slowListenerActions.length} actions have slow listeners exceeding ${SLOW_LISTENER_THRESHOLD}ms:`
+      )
+
+      slowListenerActions
+        .sort((a, b) => b.maxListenerExecutionTime - a.maxListenerExecutionTime)
+        .slice(0, 3)
+        .forEach(m => {
+          insights.push(
+            `  - "${
+              m.id
+            }" has slow listener: max ${m.maxListenerExecutionTime.toFixed(
+              1
+            )}ms`
+          )
+        })
+    }
+
+    // Look for inefficient pipeline overhead
+    const highOverheadActions = allActionMetrics.filter(
+      m =>
+        m.executionTimes.length > 0 &&
+        m.listenerExecutionTimes?.length > 0 &&
+        m.pipelineOverheadRatio > 0.5
+    )
+
+    if (highOverheadActions.length > 0) {
+      insights.push(
+        `${highOverheadActions.length} actions have high pipeline overhead (>50% of execution time):`
+      )
+
+      highOverheadActions
+        .sort((a, b) => b.pipelineOverheadRatio - a.pipelineOverheadRatio)
+        .slice(0, 3)
+        .forEach(m => {
+          insights.push(
+            `  - "${m.id}" spends ${(m.pipelineOverheadRatio * 100).toFixed(
+              1
+            )}% of time in pipeline overhead`
+          )
+        })
+    }
+
     // Add call rate insights
-    if (globalMetrics.currentCallRate > 50) {
+    if (globalMetrics.currentCallRate > 100) {
       // Adjust threshold as needed
       insights.push(
         `Current call rate (${globalMetrics.currentCallRate.toFixed(
           1
         )} calls/sec) is high. Check for call optimization opportunities.`
+      )
+    }
+
+    // Add insights on change detection effectiveness
+    const ineffectiveChangeDetection = allActionMetrics.filter(
+      m => m.calls > 10 && m.changeDetectionSkips === 0
+    )
+
+    if (ineffectiveChangeDetection.length > 0) {
+      insights.push(
+        `${ineffectiveChangeDetection.length} actions have change detection enabled but no skips recorded. Consider removing detectChanges.`
       )
     }
 
@@ -613,6 +929,6 @@ export const metricsReport = {
 }
 
 // Export the initialization function if needed elsewhere
-export const initDetailedMetrics = (): void => {
+export const initMetricsReport = (): void => {
   metricsReport.reset()
 }

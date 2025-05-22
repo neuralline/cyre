@@ -114,12 +114,6 @@ export const io = {
 
     // Store updated metrics
     actionMetrics.set(id, updatedMetrics)
-
-    // Log for debugging
-    log.debug(`Updated metrics for ${id}:`, {
-      previous: current,
-      updated: updatedMetrics
-    })
   },
 
   get: (id: StateKey): IO | undefined => ioStore.get(id),
@@ -217,7 +211,7 @@ export const subscribers = {
 }
 
 export const middlewares = {
-  add: (middleware: ISubscriber): void => {
+  add: (middleware: IMiddleware): void => {
     if (!middleware?.id || typeof middleware.fn !== 'function') {
       throw new Error('Invalid middleware format')
     }
@@ -225,7 +219,7 @@ export const middlewares = {
     // Store middleware in the central store
     middlewareStore.set(middleware.id, middleware)
   },
-  get: (id: StateKey): ISubscriber | undefined => {
+  get: (id: StateKey): IMiddleware | undefined => {
     return middlewareStore.get(id)
   },
   forget: (id: StateKey): boolean => {
@@ -234,7 +228,7 @@ export const middlewares = {
   clear: (): void => {
     middlewareStore.clear()
   },
-  getAll: (): ISubscriber[] => {
+  getAll: (): IMiddleware[] => {
     return middlewareStore.getAll()
   }
 }

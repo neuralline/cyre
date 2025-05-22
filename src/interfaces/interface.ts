@@ -1,6 +1,6 @@
 // interfaces/interface.ts
 
-import {ProtectionFunction} from '@/components/cyre-protection-pipeline'
+import {ProtectionFunction} from '../components/cyre-protection'
 import {BREATHING} from '../config/cyre-config'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
@@ -272,6 +272,8 @@ export type ActionHandler<T = unknown> = (
 // Add or update the ActionMetrics interface
 export interface ActionMetrics {
   executionTime?: number
+  lastExecutionTime?: number
+  executionCount?: number
   formationId?: string
   status: 'success' | 'error'
   timestamp: number
