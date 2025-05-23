@@ -1,4 +1,4 @@
-// src/interface/hooks.ts
+// src/types/hooks.ts
 
 import type {
   IO,

@@ -1,18 +1,18 @@
 // src/context/state.ts - Update with timer utilities
-import {log} from '../components/cyre-logger'
+import {log} from '../components/cyre-log'
 import type {
   ActionMetrics,
   ActionPayload,
   IO,
   ISubscriber,
   Timer
-} from '../interfaces/interface'
+} from '../types/interface'
 import {isEqual} from '../libs/utils'
 import {metricsState, type QuantumState} from './metrics-state'
 
-import type {StateKey} from '../interfaces/interface'
+import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
-import timeKeeper from '../components/cyre-time-keeper'
+import timeKeeper from '../components/cyre-timekeeper'
 
 // Update to include proper middleware typing
 import type {MiddlewareFunction} from '../components/cyre-middleware'

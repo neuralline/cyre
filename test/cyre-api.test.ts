@@ -3,7 +3,7 @@
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 // Import the exact same way as the existing tests
 import {cyre} from '../src/app'
-import {log} from '../src/components/cyre-logger'
+import {log} from '../src/components/cyre-log'
 
 /*
  * Simplified Cyre API Tests

@@ -6,7 +6,7 @@ import type {
   EventHandler,
   ActionPayload,
   CyreResponse
-} from '../interfaces/interface'
+} from '../types/interface'
 
 import {
   CyreHook,
@@ -16,7 +16,7 @@ import {
   HistoryEntry,
   Result,
   SubscriptionWithCleanup
-} from '../interfaces/hooks-interface'
+} from '../types/hooks-interface'
 import {
   registerMiddleware,
   MiddlewareFunction

@@ -1,4 +1,4 @@
-// src/interfaces/interface.ts
+// src/types/interface.ts
 // Main interface definitions with enhanced response typing
 
 import {ProtectionFunction} from '../components/cyre-protection'

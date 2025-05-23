@@ -36,13 +36,13 @@ export type {
   BreathingMetrics as CyreBreathingMetrics,
   SystemMetrics as CyreSystemMetrics,
   CyreResponse as CyreCoreResponse
-} from './interfaces/interface'
+} from './types/interface'
 
 // Export hook types
 export type {
   CyreHook as CyreHookType,
   CyreChannel as CyreChannelType
-} from './interfaces/hooks-interface'
+} from './types/hooks-interface'
 
 // Version information
 export const version = '4.0.0'

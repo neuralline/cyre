@@ -1,6 +1,6 @@
 // src/context/create-store.ts
 
-import {StateKey} from '../interfaces/interface'
+import {StateKey} from '../types/interface'
 
 export interface StateStore<T> {
   get: (key: StateKey) => T | undefined

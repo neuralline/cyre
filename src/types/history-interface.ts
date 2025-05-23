@@ -1,4 +1,4 @@
-// src/interfaces/history-interface.ts
+// src/types/history-interface.ts
 // Enhanced type definitions for history and response handling
 
 import type {ActionPayload, Priority} from './interface'

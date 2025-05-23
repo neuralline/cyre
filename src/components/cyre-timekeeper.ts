@@ -1,7 +1,7 @@
 // src/components/cyre-time-keeper.ts
-import type {Timer, TimerDuration, TimerRepeat} from '../interfaces/interface'
+import type {Timer, TimerDuration, TimerRepeat} from '../types/interface'
 import {TIMING} from '../config/cyre-config'
-import {log} from './cyre-logger'
+import {log} from './cyre-log'
 import {metricsState, Result} from '../context/metrics-state'
 import {timeline} from '../context/state'
 import {metricsReport} from '../context/metrics-report'

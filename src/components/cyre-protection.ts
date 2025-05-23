@@ -1,10 +1,10 @@
 // src/components/cyre-protection.ts
 
-import type {IO, ActionPayload, CyreResponse} from '../interfaces/interface'
+import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io, middlewares} from '../context/state'
-import {log} from './cyre-logger'
+import {log} from './cyre-log'
 import {metricsState} from '../context/metrics-state'
-import timeKeeper from './cyre-time-keeper'
+import timeKeeper from './cyre-timekeeper'
 import {metricsReport} from '../context/metrics-report'
 /* 
 

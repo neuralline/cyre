@@ -9,7 +9,7 @@ import type {
   StateKey,
   SystemMetrics,
   SystemStress
-} from '../interfaces/interface'
+} from '../types/interface'
 import {memoize} from '../libs/utils'
 import {createStore} from './create-store'
 

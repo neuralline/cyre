@@ -1,7 +1,7 @@
 // src/components/cyre-middleware.ts
 
-import type {IO, ActionPayload} from '../interfaces/interface'
-import {log} from './cyre-logger'
+import type {IO, ActionPayload} from '../types/interface'
+import {log} from './cyre-log'
 import {io, middlewares} from '../context/state'
 import {addMiddlewareToAction} from './cyre-protection'
 

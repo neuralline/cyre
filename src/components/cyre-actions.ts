@@ -1,14 +1,14 @@
 // src/components/cyre-actions.ts
 import {io, subscribers} from '../context/state'
-import {IO} from '../interfaces/interface'
-import {log} from './cyre-logger'
+import {IO} from '../types/interface'
+import {log} from './cyre-log'
 import {pipe} from '../libs/utils'
 import {MSG} from '../config/cyre-config'
 import {metricsReport} from '../context/metrics-report'
 
 /*
 
-      C.Y.R.E. - A.C.T.I.O.N.S
+      C.Y.R.E. - A.C.T.I.O.N.S.
       
       
 */
@@ -101,24 +101,33 @@ const executeAction = (action: ActionResult): ActionResult => {
       throw new Error(`No subscriber found for: ${action.id}`)
     }
 
-    // Track execution start time
-    const startTime = performance.now()
+    // FIXED: Track listener execution start time with high precision
+    const listenerStartTime = performance.now()
 
     const result = subscriber.fn(action.payload)
-    const endTime = performance.now()
-    const executionTime = endTime - startTime
+
+    // FIXED: Calculate listener execution time immediately after completion
+    const listenerEndTime = performance.now()
+    const listenerExecutionTime = listenerEndTime - listenerStartTime
+
+    // FIXED: Track listener execution time BEFORE other processing
+    metricsReport.trackListenerExecution(action.id, listenerExecutionTime)
+
+    // Track execution metrics with total execution time
+    const totalStartTime = performance.now()
 
     // Update metrics with execution time
     io.updateMetrics(action.id, {
       lastExecutionTime: Date.now(),
       executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
     })
-    if (
-      typeof metricsReport !== 'undefined' &&
-      typeof metricsReport.trackListenerExecution === 'function'
-    ) {
-      metricsReport.trackListenerExecution(action.id, executionTime)
-    }
+
+    const totalEndTime = performance.now()
+    const totalExecutionTime =
+      totalEndTime - totalStartTime + listenerExecutionTime
+
+    // FIXED: Track total execution time separately
+    metricsReport.trackExecution(action.id, totalExecutionTime)
 
     // Handle linked actions
     if (result && typeof result === 'object' && 'id' in result) {
@@ -141,6 +150,9 @@ const executeAction = (action: ActionResult): ActionResult => {
       status: 'completed'
     }
   } catch (error) {
+    // FIXED: Track errors properly
+    metricsReport.trackError(action.id)
+
     log.error(
       `CYRE ACTION ERROR: ${MSG.ACTION_EXECUTE_FAILED} -id ${action.id} ${
         error instanceof Error ? error.message : String(error)
@@ -181,7 +193,7 @@ const updateStore = (action: ActionResult): ActionResult => {
 
 /**
  * CyreAction function - handles single action execution
- * Repeat/interval handling is managed by the call method
+ * FIXED: Proper timing measurement and error tracking
  */
 export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   // Handle null/undefined input before pipe
@@ -220,5 +232,3 @@ export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
     }
   }
 }
-
-export default CyreAction

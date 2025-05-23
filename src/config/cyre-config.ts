@@ -1,6 +1,6 @@
 // src/config/cyre-config.ts
 
-import {Priority, QuantumState} from '../interfaces/interface'
+import {Priority, QuantumState} from '../types/interface'
 
 /*
 

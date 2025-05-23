@@ -1,8 +1,8 @@
 // src/ssr/cyre-ssr.ts
 
 import {cyre} from '../app'
-import {log} from '../components/cyre-logger'
-import type {IO} from '../interfaces/interface'
+import {log} from '../components/cyre-log'
+import type {IO} from '../types/interface'
 import {SSRResult, SSROptions, HydrationOptions} from './types'
 import {
   createSSRContext,

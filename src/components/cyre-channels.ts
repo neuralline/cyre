@@ -1,12 +1,12 @@
 // src/components/cyre-channels.ts
 import {MSG} from '../config/cyre-config'
-import {IO} from '../interfaces/interface'
+import {IO} from '../types/interface'
 import {memoize} from '../libs/utils'
-import {log} from './cyre-logger'
+import {log} from './cyre-log'
 
 /* 
 
-      C.Y.R.E. - C.H.A.N.N.E.L.S
+      C.Y.R.E. - C.H.A.N.N.E.L.S.
 
 
 */

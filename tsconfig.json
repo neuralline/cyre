@@ -68,7 +68,7 @@
     "jsx": "react-jsx",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "test/refactor-validation.test.ts"],
   "exclude": [
     "node_modules",
     "dist",

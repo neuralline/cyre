@@ -1,8 +1,8 @@
 // src/context/metrics-report.ts
 
 import {createStore} from './create-store'
-import type {ActionId, Priority, StateKey} from '../interfaces/interface'
-import {log} from '../components/cyre-logger'
+import type {ActionId, Priority, StateKey} from '../types/interface'
+import {log} from '../components/cyre-log'
 import {metricsState} from './metrics-state'
 
 /* 
@@ -353,7 +353,6 @@ export const metricsReport = {
     // Update execution times with minimal array operations
     const newExecutionTimes = actionMetrics.executionTimes
     if (newExecutionTimes.length >= MAX_EXECUTION_TIMES_HISTORY) {
-      // Shift array instead of creating a new one
       newExecutionTimes.shift()
     }
     newExecutionTimes.push(executionTime)
@@ -362,31 +361,32 @@ export const metricsReport = {
     const newTotal = actionMetrics.totalExecutionTime + executionTime
     const executionCount = newExecutionTimes.length
 
-    // Calculate pipeline overhead ratio more efficiently
-    // Check if this execution corresponds to a listener execution
-    let lastListenerTime = 0
-    let pipelineOverheadRatio = actionMetrics.pipelineOverheadRatio
+    // FIXED: Calculate pipeline overhead ratio more accurately
+    let pipelineOverheadRatio = 0
 
-    if (actionMetrics.listenerExecutionTimes.length > 0) {
-      // Get the last listener execution time
-      lastListenerTime =
-        actionMetrics.listenerExecutionTimes[
-          actionMetrics.listenerExecutionTimes.length - 1
-        ] || 0
+    // Only calculate overhead if we have both execution and listener times
+    if (actionMetrics.listenerExecutionTimes.length > 0 && executionTime > 0) {
+      // Get the most recent listener execution time
+      const recentListenerTimes =
+        actionMetrics.listenerExecutionTimes.slice(-10) // Last 10
+      const avgRecentListenerTime =
+        recentListenerTimes.reduce((sum, time) => sum + time, 0) /
+        recentListenerTimes.length
 
-      // Only recalculate if we have useful data
-      if (lastListenerTime > 0 && executionTime > 0) {
-        const overhead = Math.max(0, executionTime - lastListenerTime)
-        // Use a weighted average to smooth out fluctuations
-        pipelineOverheadRatio =
-          0.8 * pipelineOverheadRatio + 0.2 * (overhead / executionTime)
+      if (avgRecentListenerTime > 0) {
+        // Pipeline overhead = (Total - Listener) / Total
+        const overhead = Math.max(0, executionTime - avgRecentListenerTime)
+        pipelineOverheadRatio = overhead / executionTime
+
+        // Ensure ratio is between 0 and 1
+        pipelineOverheadRatio = Math.min(Math.max(pipelineOverheadRatio, 0), 1)
       }
     }
 
     // Batch updates to action metrics - increment executionCount
     actionMetricsStore.set(id, {
       ...actionMetrics,
-      executionCount: actionMetrics.executionCount + 1, // Increment execution count
+      executionCount: actionMetrics.executionCount + 1,
       executionTimes: newExecutionTimes,
       totalExecutionTime: newTotal,
       avgExecutionTime: newTotal / executionCount,
@@ -396,7 +396,7 @@ export const metricsReport = {
           : actionMetrics.minExecutionTime,
         executionTime
       ),
-      maxExecutionTime: Math.max(actionMetrics.maxExecutionTime, executionTime),
+      maxExecutionTime: Math.max(actionMetrics.maxExecution, executionTime),
       lastExecution: now,
       pipelineOverheadRatio
     })
@@ -422,6 +422,87 @@ export const metricsReport = {
       } catch (error) {
         // Silently ignore errors in breathing updates
       }
+    }
+  },
+
+  // FIXED: Track listener execution time with better precision
+  trackListenerExecution: (id: ActionId, executionTime: number): void => {
+    // Validate input
+    if (typeof executionTime !== 'number' || executionTime < 0) {
+      console.warn(
+        `Invalid listener execution time for ${id}: ${executionTime}`
+      )
+      return
+    }
+
+    // Get existing metrics
+    const actionMetrics = getActionMetrics(id)
+
+    // Add the execution time to history
+    const newExecutionTimes = [
+      ...actionMetrics.listenerExecutionTimes,
+      executionTime
+    ].slice(-MAX_EXECUTION_TIMES_HISTORY)
+
+    // Calculate new metrics
+    const totalTime = actionMetrics.totalListenerExecutionTime + executionTime
+    const executionCount = newExecutionTimes.length
+    const avgTime = totalTime / executionCount
+
+    // Check if this is a slow listener
+    const isSlowExecution = executionTime > SLOW_LISTENER_THRESHOLD
+
+    // Update action metrics
+    actionMetricsStore.set(id, {
+      ...actionMetrics,
+      listenerExecutionTimes: newExecutionTimes,
+      totalListenerExecutionTime: totalTime,
+      avgListenerExecutionTime: avgTime,
+      minListenerExecutionTime: Math.min(
+        actionMetrics.minListenerExecutionTime === Infinity
+          ? executionTime
+          : actionMetrics.minListenerExecutionTime,
+        executionTime
+      ),
+      maxListenerExecutionTime: Math.max(
+        actionMetrics.maxListenerExecutionTime || 0,
+        executionTime
+      ),
+      slowListenerCount: isSlowExecution
+        ? actionMetrics.slowListenerCount + 1
+        : actionMetrics.slowListenerCount
+    })
+
+    // Update global metrics
+    const globalMetrics = getGlobalMetrics()
+    const newTotalTime =
+      globalMetrics.totalListenerExecutionTime + executionTime
+    const newTotalCount = globalMetrics.totalListenerExecutions + 1
+
+    globalMetricsStore.set('global', {
+      ...globalMetrics,
+      totalListenerExecutions: newTotalCount,
+      totalListenerExecutionTime: newTotalTime,
+      avgListenerExecutionTime: newTotalTime / newTotalCount,
+      totalSlowListeners: isSlowExecution
+        ? globalMetrics.totalSlowListeners + 1
+        : globalMetrics.totalSlowListeners
+    })
+
+    // Log warning for slow listeners
+    if (isSlowExecution) {
+      log.warn(
+        `Slow listener detected for action "${id}": ${executionTime.toFixed(
+          2
+        )}ms (threshold: ${SLOW_LISTENER_THRESHOLD}ms)`
+      )
+    }
+
+    // Debug logging for tracking
+    if (process.env.NODE_ENV === 'development') {
+      console.debug(
+        `Listener execution tracked: ${id} - ${executionTime.toFixed(2)}ms`
+      )
     }
   },
 

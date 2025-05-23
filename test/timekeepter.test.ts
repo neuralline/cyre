@@ -1,7 +1,7 @@
 // test/timekeeper.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import timeKeeper from '../src/components/cyre-time-keeper'
+import timeKeeper from '../src/components/cyre-timekeeper'
 import {cyre} from '../src/app'
 
 /*

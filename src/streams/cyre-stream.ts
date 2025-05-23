@@ -2,7 +2,7 @@
 // Streams implementation using Cyre for reactive programming patterns
 
 import {cyre} from '../app'
-import {log} from '../components/cyre-logger'
+import {log} from '../components/cyre-log'
 import {
   Stream,
   Observer,

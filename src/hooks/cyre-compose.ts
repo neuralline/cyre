@@ -4,8 +4,8 @@ import type {
   EventHandler,
   ActionPayload,
   CyreResponse
-} from '../interfaces/interface'
-import type {CyreChannel} from '../interfaces/hooks-interface'
+} from '../types/interface'
+import type {CyreChannel} from '../types/hooks-interface'
 
 /**
  * Options for composed channels

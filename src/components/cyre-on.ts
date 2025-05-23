@@ -2,8 +2,8 @@
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
-import {On, Subscriber, SubscriptionResponse} from '../interfaces/interface'
-import {log} from './cyre-logger'
+import {On, Subscriber, SubscriptionResponse} from '../types/interface'
+import {log} from './cyre-log'
 
 /* 
 

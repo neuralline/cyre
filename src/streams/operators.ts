@@ -1,7 +1,7 @@
 // src/streams/operators.ts
 
 import {cyre} from '../app'
-import {log} from '../components/cyre-logger'
+import {log} from '../components/cyre-log'
 import {Stream, StreamSubscription} from './types'
 import {createStream} from './cyre-stream'
 

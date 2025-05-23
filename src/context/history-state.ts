@@ -1,7 +1,7 @@
 // src/context/history-state.ts
 
 import {createStore} from './create-store'
-import type {ActionPayload, IO, StateKey} from '../interfaces/interface'
+import type {ActionPayload, IO, StateKey} from '../types/interface'
 
 export interface HistoryEntry {
   actionId: string
