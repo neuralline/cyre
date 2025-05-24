@@ -1,14 +1,15 @@
 // src/types/hooks.ts
+// Hooks and Channel related types
 
-import type {
+import {
   IO,
   EventHandler,
   ActionPayload,
   SubscriptionResponse,
   CyreResponse,
-  PriorityConfig,
-  BreathingMetrics
-} from './interface'
+  PriorityConfig
+} from './core'
+import {BreathingMetrics} from './system'
 
 /**
  * Protection options for channel
@@ -63,7 +64,7 @@ export interface SubscriptionWithCleanup extends SubscriptionResponse {
 /**
  * History entry for tracking channel calls
  */
-export interface HistoryEntry<TPayload = ActionPayload> {
+export interface ChannelHistoryEntry<TPayload = ActionPayload> {
   /** Timestamp when call was made */
   timestamp: number
   /** Payload used for the call */
@@ -75,7 +76,7 @@ export interface HistoryEntry<TPayload = ActionPayload> {
 /**
  * Result type for operations that might fail
  */
-export type Result<T, E = Error> =
+export type HookResult<T, E = Error> =
   | {success: true; value: T}
   | {success: false; error: E}
 
@@ -95,7 +96,7 @@ export interface CyreHook<TPayload = ActionPayload> {
   name: string
 
   /** Initialize or update channel configuration */
-  action: (config: ChannelConfig) => Result<boolean, Error>
+  action: (config: ChannelConfig) => HookResult<boolean, Error>
 
   /** Subscribe to channel events */
   on: (handler: EventHandler) => SubscriptionWithCleanup
@@ -104,7 +105,7 @@ export interface CyreHook<TPayload = ActionPayload> {
   call: (payload?: TPayload) => Promise<CyreResponse>
 
   /** Safely call with error handling */
-  safeCall: (payload?: TPayload) => Promise<Result<CyreResponse, Error>>
+  safeCall: (payload?: TPayload) => Promise<HookResult<CyreResponse, Error>>
 
   /** Get current channel configuration */
   get: () => IO | undefined
@@ -137,7 +138,7 @@ export interface CyreHook<TPayload = ActionPayload> {
   middleware: (middleware: CyreMiddleware<TPayload>) => void
 
   /** Get execution history */
-  getHistory: () => ReadonlyArray<HistoryEntry<TPayload>>
+  getHistory: () => ReadonlyArray<ChannelHistoryEntry<TPayload>>
 
   /** Clear execution history */
   clearHistory: () => void

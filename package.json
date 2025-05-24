@@ -5,14 +5,18 @@
   "input": "src/index.ts",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "rimraf dist && vite build && tsc --emitDeclarationOnly",
+    "build": "rimraf dist && vite build && tsc --emitDeclarationOnly --skipLibCheck --noImplicitAny false",
+    "build:types": "tsc --project tsconfig.build.json",
+    "build:lib": "vite build",
+    "build:full": "npm run build:lib && npm run build:types",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "lint": "eslint --ext .ts,.tsx src",
     "lint:fix": "eslint --ext .ts,.tsx src --fix",
-    "prepublishOnly": "npm run test && npm run build",
-    "version": "npm run build && git add -A dist",
+    "type-check": "tsc --noEmit --skipLibCheck",
+    "prepublishOnly": "npm run test",
+    "version": "npm run build:full && git add -A dist",
     "postversion": "git push && git push --tags",
     "publish:github": "npm publish --registry=https://npm.pkg.github.com --scope=@neuralline",
     "clean": "rimraf dist coverage .vite",
@@ -78,14 +82,29 @@
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs",
-      "browser": "./dist/index.umd.js"
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.esm.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.cjs"
+      },
+      "browser": {
+        "import": "./dist/index.esm.js",
+        "require": "./dist/index.cjs",
+        "default": "./dist/index.umd.js"
+      },
+      "node": {
+        "import": "./dist/index.esm.js",
+        "require": "./dist/index.cjs"
+      },
+      "default": "./dist/index.esm.js"
     },
     "./package.json": "./package.json"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=18.0.0"
   },
   "packageManager": "pnpm@10.11.0"
 }

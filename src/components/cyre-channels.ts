@@ -183,10 +183,10 @@ export const CyreChannel = (
     // Validate basic channel structure
     const validation = validateChannel(channel)
     if (!validation.isValid) {
-      log.error(validation.error!)
+      log.error(validation.error || 'Unknown validation error')
       return {
         ok: false,
-        message: validation.error
+        message: validation.error || 'Unknown validation error'
       }
     }
 

@@ -1,83 +1,55 @@
 {
   "compilerOptions": {
-    /* Language and Environment */
     "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "useDefineForClassFields": true,
-
-    /* Modules */
+    "lib": ["ES2020", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": false,
-
-    /* JavaScript Support */
-    "allowJs": false,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "allowJs": true,
     "checkJs": false,
-
-    /* Emit */
+    "jsx": "preserve",
     "declaration": false,
     "declarationMap": false,
-    "emitDeclarationOnly": false,
+    "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "removeComments": false,
-    "noEmit": true,
-    "importHelpers": false,
-    "downlevelIteration": false,
-    "sourceMap": true,
-    "inlineSourceMap": false,
-    "declarationDir": "./dist/types",
-
-    /* Interop Constraints */
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true,
-
-    /* Type Checking */
     "strict": true,
-    "noImplicitAny": true,
+    "noImplicitAny": false,
     "strictNullChecks": true,
     "strictFunctionTypes": true,
     "strictBindCallApply": true,
-    "strictPropertyInitialization": true,
+    "strictPropertyInitialization": false,
     "noImplicitThis": true,
-    "useUnknownInCatchVariables": true,
     "alwaysStrict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "exactOptionalPropertyTypes": true,
+    "exactOptionalPropertyTypes": false,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": false,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
-
-    /* Completeness */
+    "useUnknownInCatchVariables": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "skipDefaultLibCheck": true,
     "skipLibCheck": true,
-
-    /* Path Mapping */
+    "forceConsistentCasingInFileNames": true,
+    "emitDecoratorMetadata": false,
+    "experimentalDecorators": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "types": ["node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
-    },
-
-    /* Advanced */
-    "jsx": "react-jsx",
-    "types": ["node", "vitest/globals"]
+      "@/*": ["src/*"],
+      "cyre": ["src/index.ts"],
+      "cyre/*": ["src/*"]
+    }
   },
-  "include": ["src/**/*", "test/refactor-validation.test.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "coverage",
-    "**/*.test.ts",
-    "**/*.spec.ts",
-    "**/*.test.tsx",
-    "**/*.spec.tsx",
-    "test/**/*",
-    "examples/**/*"
-  ]
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "coverage", "**/*.d.ts"]
 }

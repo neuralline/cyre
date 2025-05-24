@@ -109,7 +109,7 @@ const initializeFormation = (
     duration: isLongDuration ? TIMING.MAX_TIMEOUT : rawDuration * stressFactor,
     originalDuration: rawDuration,
     callback,
-    repeat: repeat, // Store the original repeat value exactly as provided
+    repeat: repeat ?? 0, // Provide a default value (e.g., 0) if repeat is undefined
     executionCount: 0,
     lastExecutionTime: 0,
     nextExecutionTime:

@@ -391,12 +391,12 @@ const analyzePerformance = (
 
   // Check action pipeline overhead
   if (totals.pipelineOverhead > getPipelineThreshold()) {
-    log.warn(
-      `${
-        MSG.HIGH_PIPELINE_OVERHEAD
-      } for "${id}": ${totals.pipelineOverhead.toFixed(2)}ms ` +
-        `(${(ratios.overheadRatio * 100).toFixed(1)}% of total time)`
-    )
+    // log.warn(
+    //   `${
+    //     MSG.HIGH_PIPELINE_OVERHEAD
+    //   } for "${id}": ${totals.pipelineOverhead.toFixed(2)}ms ` +
+    //     `(${(ratios.overheadRatio * 100).toFixed(1)}% of total time)`
+    // )
   }
 
   // Check listener execution with priority-based thresholds

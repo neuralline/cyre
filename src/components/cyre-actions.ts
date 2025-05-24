@@ -1,6 +1,5 @@
 // src/components/cyre-actions.ts
-// Action processing pipeline with enhanced timing measurement for action pipeline vs listener execution
-// FIXED: Added proper intraLink (chain reaction) processing
+// FIXED: Chain reaction processing with proper history recording
 
 import {io, subscribers, middlewares} from '../context/state'
 import {IO, ActionPayload, CyreResponse} from '../types/interface'
@@ -18,7 +17,7 @@ import {historyState} from '../context/history-state'
       
       Complete action processing pipeline with enhanced timing measurement
       Proper separation of Action Pipeline overhead vs Listener execution time
-      FIXED: Added proper chain reaction (intraLink) processing
+      FIXED: Chain reaction (intraLink) processing with proper history recording
       
 */
 
@@ -535,7 +534,7 @@ const updateStore = (action: ActionResult): ActionResult => {
 }
 
 /**
- * FIXED: Process intraLinks (chain reactions) synchronously
+ * FIXED: Process intraLinks (chain reactions) with proper history recording
  */
 const processIntraLinks = (action: ActionResult): ActionResult => {
   if (!action.intraLink || !action.intraLink.id) {
@@ -565,21 +564,55 @@ const processIntraLinks = (action: ActionResult): ActionResult => {
       return action
     }
 
-    // Execute the linked action directly with the subscriber
+    // FIXED: Execute the linked action with proper timing and history recording
     try {
       const chainPayload = action.intraLink.payload || linkedAction.payload
+
+      // Create timer for chain execution
+      const chainTimer = metricsReport.createTimer()
+      chainTimer.start()
+
+      // Mark listener execution stage
+      chainTimer.markStage('listener')
+      const listenerStartTime = performance.now()
+
+      // Execute the chain handler
       const chainResult = subscriber.fn(chainPayload)
+
+      // Calculate timing
+      const listenerExecutionTime = performance.now() - listenerStartTime
+
+      // Mark metrics stage
+      chainTimer.markStage('metrics')
+
+      // Create detailed timing for chain execution
+      const timing = chainTimer.createDetailedTiming()
+      metricsReport.trackDetailedExecution(action.intraLink.id, timing)
 
       log.debug(
         `Chain reaction executed: ${action.id} -> ${action.intraLink.id}`
       )
 
-      // Update metrics for the chained action
+      // FIXED: Update metrics for the chained action
+      const currentTime = Date.now()
+      const chainMetrics = io.getMetrics(action.intraLink.id)
+
       io.updateMetrics(action.intraLink.id, {
-        lastExecutionTime: Date.now(),
-        executionCount:
-          (io.getMetrics(action.intraLink.id)?.executionCount || 0) + 1
+        lastExecutionTime: currentTime,
+        executionCount: (chainMetrics?.executionCount || 0) + 1
       })
+
+      // FIXED: Record history for the chained action
+      historyState.record(
+        action.intraLink.id,
+        chainPayload,
+        {
+          ok: true,
+          message: `Chain execution from ${action.id}`,
+          error: undefined
+        },
+        chainTimer.getTotalTime()
+      )
 
       // If the chained action also returns an intraLink, process it recursively
       if (
@@ -604,6 +637,17 @@ const processIntraLinks = (action: ActionResult): ActionResult => {
       }
     } catch (error) {
       log.error(`Chain reaction execution failed: ${error}`)
+
+      // FIXED: Record history for failed chain execution
+      historyState.record(
+        action.intraLink.id,
+        action.intraLink.payload || linkedAction.payload,
+        {
+          ok: false,
+          message: `Chain execution failed from ${action.id}`,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      )
     }
 
     return {
@@ -619,7 +663,7 @@ const processIntraLinks = (action: ActionResult): ActionResult => {
 /**
  * Enhanced CyreAction function with detailed timing measurement and chain processing
  * Properly separates action pipeline overhead from listener execution
- * FIXED: Added proper intraLink processing for chain reactions
+ * FIXED: Added proper intraLink processing for chain reactions with history recording
  */
 export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
   // Handle null/undefined input before pipe
@@ -649,7 +693,7 @@ export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
         action.status === 'error' ? action : logAction(action),
       (action: ActionResult) =>
         action.status === 'error' ? action : updateStore(action),
-      // FIXED: Process chain reactions as part of the main pipeline
+      // FIXED: Process chain reactions as part of the main pipeline with proper history
       (action: ActionResult) =>
         action.status === 'error' || !action.intraLink
           ? action

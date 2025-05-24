@@ -1,5 +1,5 @@
-// src/app.ts - FIXED payload updates for interval actions
-// Main CYRE application entry point with enhanced action pipeline timing
+// src/app.ts
+// Main CYRE application entry point with proper exports for library usage
 
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
@@ -32,17 +32,13 @@ import type {
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.0.3+ 2025
+    Version 4.0.0 2025
 
     Enhanced with detailed action pipeline timing measurement:
     - Proper separation of action pipeline overhead vs listener execution
     - Industry-aligned performance thresholds  
     - Detailed timing breakdowns and optimization suggestions
     - Real-time performance monitoring and warnings
-    
-    FIXED: Payload updates for interval actions
-    - Most recent payload is used for subsequent executions
-    - Proper payload tracking and updating for repeated actions
 
     Example use:
       cyre.action({id: 'uber', payload: 44085648634})
@@ -56,11 +52,6 @@ import type {
     - Listener Execution: pure user handler execution time  
     - Total Execution: pipeline overhead + listener execution
 */
-
-/**
- * FIXED: Store for tracking latest payloads for interval actions
- */
-const intervalPayloads = new Map<string, ActionPayload>()
 
 /**
  * Initialize the breathing system
@@ -84,7 +75,7 @@ const initializeBreathing = (): void => {
 /**
  * Enhanced dispatcher with detailed timing measurement
  */
-const useDispatch = async (io: IO): Promise<CyreResponse> => {
+const useEnhancedDispatch = async (io: IO): Promise<CyreResponse> => {
   if (!io?.id) {
     throw new Error('Invalid IO object')
   }
@@ -106,7 +97,7 @@ const useDispatch = async (io: IO): Promise<CyreResponse> => {
     timer.markStage('dispatch')
 
     // Execute action through enhanced pipeline
-    const dispatch = await CyreAction({...io}, subscriber.fn)
+    const dispatch = CyreAction({...io}, subscriber.fn)
 
     // Mark metrics recording stage
     timer.markStage('metrics')
@@ -194,11 +185,6 @@ const executeAction = async (
   try {
     const finalPayload = payload ?? action.payload
 
-    // FIXED: Store the latest payload for interval actions
-    if (action.interval || action.delay) {
-      intervalPayloads.set(trimmedId, finalPayload)
-    }
-
     // Ensure action pipeline exists
     if (!action._protectionPipeline) {
       action._protectionPipeline = buildActionPipeline(action)
@@ -221,7 +207,7 @@ const executeAction = async (
         finalPayload,
         action._protectionPipeline,
         timer,
-        () => useDispatch({...action, payload: finalPayload})
+        () => useEnhancedDispatch({...action, payload: finalPayload})
       )
     }
   } catch (error) {
@@ -236,7 +222,7 @@ const executeAction = async (
 }
 
 /**
- * FIXED: Handle timed execution with proper payload updates for repeats
+ * Handle timed execution (intervals, delays, repeats) with enhanced timing
  */
 const handleTimedExecution = async (
   action: IO,
@@ -264,9 +250,6 @@ const handleTimedExecution = async (
     const timerResult = timeKeeper.keep(
       initialWait,
       async () => {
-        // FIXED: Use the most recent payload for execution
-        const currentPayload = intervalPayloads.get(action.id) || payload
-
         // Create timer for timed execution
         const timer = metricsReport.createTimer()
         timer.start()
@@ -274,13 +257,13 @@ const handleTimedExecution = async (
         // Execute with enhanced pipeline timing
         const result = await executeActionPipeline(
           action,
-          currentPayload, // Use the most recent payload
+          payload,
           action._protectionPipeline || buildActionPipeline(action),
           timer,
-          () => useDispatch({...action, payload: currentPayload})
+          () => useEnhancedDispatch({...action, payload})
         )
 
-        // FIXED: Handle repeats with most recent payload
+        // Handle repeats if needed
         if (
           (hasInterval && repeatValue === true) ||
           (typeof repeatValue === 'number' && repeatValue > 1)
@@ -288,46 +271,25 @@ const handleTimedExecution = async (
           const remainingRepeats = repeatValue === true ? true : repeatValue - 1
 
           if (remainingRepeats) {
-            // Create a recurring timer that checks for the latest payload each time
-            const createRepeatTimer = (
-              remainingCount: typeof remainingRepeats
-            ) => {
-              timeKeeper.keep(
-                adjustedInterval,
-                async () => {
-                  if (metricsState.isHealthy()) {
-                    // FIXED: Always use the most recent payload for each repeat
-                    const latestPayload =
-                      intervalPayloads.get(action.id) || payload
+            timeKeeper.keep(
+              adjustedInterval,
+              async () => {
+                if (metricsState.isHealthy()) {
+                  const repeatTimer = metricsReport.createTimer()
+                  repeatTimer.start()
 
-                    const repeatTimer = metricsReport.createTimer()
-                    repeatTimer.start()
-
-                    await executeActionPipeline(
-                      action,
-                      latestPayload, // Use the latest payload for this execution
-                      action._protectionPipeline || buildActionPipeline(action),
-                      repeatTimer,
-                      () => useDispatch({...action, payload: latestPayload})
-                    )
-
-                    // Continue with remaining repeats
-                    if (
-                      typeof remainingCount === 'number' &&
-                      remainingCount > 1
-                    ) {
-                      createRepeatTimer(remainingCount - 1)
-                    } else if (remainingCount === true) {
-                      createRepeatTimer(true) // Continue indefinitely
-                    }
-                  }
-                },
-                1, // Execute once per timer
-                `${action.id}-repeat-${Date.now()}`
-              )
-            }
-
-            createRepeatTimer(remainingRepeats)
+                  await executeActionPipeline(
+                    action,
+                    payload,
+                    action._protectionPipeline || buildActionPipeline(action),
+                    repeatTimer,
+                    () => useEnhancedDispatch({...action, payload})
+                  )
+                }
+              },
+              remainingRepeats,
+              action.id
+            )
           }
         }
 
@@ -356,7 +318,7 @@ const handleTimedExecution = async (
 }
 
 /**
- * Main CYRE instance with enhanced timing capabilities and fixed payload handling
+ * Main CYRE instance with enhanced timing capabilities
  */
 const cyre = {
   /**
@@ -368,7 +330,7 @@ const cyre = {
       timeKeeper.resume()
       log.sys(MSG.QUANTUM_HEADER)
       log.info(
-        'CYRE system initialized successfully with enhanced action pipeline timing and payload updates'
+        'CYRE system initialized successfully with enhanced action pipeline timing'
       )
 
       return {
@@ -452,7 +414,7 @@ const cyre = {
   on: subscribe,
 
   /**
-   * Call an action by ID with optional payload (enhanced with timing and payload updates)
+   * Call an action by ID with optional payload (enhanced with timing)
    */
   call: (id?: ActionId, payload?: ActionPayload): Promise<CyreResponse> => {
     return executeAction(id, payload, false)
@@ -463,8 +425,6 @@ const cyre = {
    */
   forget: (id: string): boolean => {
     timeKeeper.pause(id)
-    // FIXED: Clean up interval payload tracking
-    intervalPayloads.delete(id)
     return io.forget(id)
   },
 
@@ -558,9 +518,6 @@ const cyre = {
       subscribers.clear()
       io.clear()
 
-      // FIXED: Clear interval payload tracking
-      intervalPayloads.clear()
-
       // Reset metrics
       metricsState.reset()
       metricsReport.reset()
@@ -577,7 +534,6 @@ const cyre = {
   clear: (): void => {
     io.clear()
     subscribers.clear()
-    intervalPayloads.clear() // FIXED: Clear payload tracking
     metricsState.reset()
   },
 
@@ -711,6 +667,11 @@ const cyre = {
 // Initialize the system
 cyre.initialize()
 
-// Export the instance and utilities
-export {cyre, log}
+// Create Cyre class for alternative usage patterns (backwards compatibility)
+const Cyre = cyre
+
+// Export the main instance and utilities
+export {cyre, Cyre, log}
+
+// Export as default for compatibility
 export default cyre

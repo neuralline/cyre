@@ -13,9 +13,8 @@ import {metricsState, type QuantumState} from './metrics-state'
 import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
 import timeKeeper from '../components/cyre-timekeeper'
-
+export type MiddlewareFunction = (action: IO) => Promise<void>
 // Update to include proper middleware typing
-import type {MiddlewareFunction} from '../components/cyre-middleware'
 
 // Define a middleware type that works with the ISubscriber interface
 export interface IMiddleware extends ISubscriber {
@@ -76,7 +75,7 @@ export const io = {
           executionCount: 0,
           errors: []
         })
-        log.debug(`Initialized metrics for ${ioState.id}`)
+        //log.debug(`Initialized metrics for ${ioState.id}`)
       }
 
       if (ioState.detectChanges) {
@@ -129,9 +128,9 @@ export const io = {
         // Store updated metrics
         actionMetrics.set(id, updatedMetrics)
 
-        log.debug(
-          `Updated metrics for ${id}: lastExecution=${updatedMetrics.lastExecutionTime}, count=${updatedMetrics.executionCount}`
-        )
+        // log.debug(
+        //  `Updated metrics for ${id}: lastExecution=${updatedMetrics.lastExecutionTime}, count=${updatedMetrics.executionCount}`
+        //)
 
         // FIXED: Synchronize with enhanced metrics system
         // Import here to avoid circular dependency
@@ -191,12 +190,12 @@ export const io = {
 
       // If no previous payload, consider it changed
       if (previousPayload === undefined) {
-        log.debug(`No previous payload for ${id}, considering changed`)
+        // log.debug(`No previous payload for ${id}, considering changed`)
         return true
       }
 
       const hasChanged = !isEqual(newPayload, previousPayload)
-      log.debug(`Change detection for ${id}: ${hasChanged}`)
+      // log.debug(`Change detection for ${id}: ${hasChanged}`)
 
       return hasChanged
     } catch (error) {
@@ -213,9 +212,9 @@ export const io = {
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
     const metrics = actionMetrics.get(id)
     if (metrics) {
-      log.debug(
-        `Retrieved metrics for ${id}: lastExecution=${metrics.lastExecutionTime}, count=${metrics.executionCount}`
-      )
+      // log.debug(
+      //   `Retrieved metrics for ${id}: lastExecution=${metrics.lastExecutionTime}, count=${metrics.executionCount}`
+      // )
     } else {
       log.debug(`No metrics found for ${id}`)
 
@@ -228,7 +227,7 @@ export const io = {
           errors: []
         }
         actionMetrics.set(id, newMetrics)
-        log.debug(`Created minimal metrics for existing action ${id}`)
+        //log.debug(`Created minimal metrics for existing action ${id}`)
         return newMetrics
       }
     }
@@ -256,11 +255,11 @@ export const io = {
 
       actionMetrics.set(id, updatedMetrics)
 
-      log.debug(
-        `Tracked execution for ${id}: time=${
-          executionTime || 'unknown'
-        }ms, count=${updatedMetrics.executionCount}`
-      )
+      // log.debug(
+      //   `Tracked execution for ${id}: time=${
+      //     executionTime || 'unknown'
+      //   }ms, count=${updatedMetrics.executionCount}`
+      // )
 
       // Sync with enhanced metrics if execution time is provided
       if (executionTime !== undefined) {
@@ -269,7 +268,7 @@ export const io = {
             metricsReport.trackExecution(id, executionTime)
           })
           .catch(err => {
-            log.debug(`Could not sync execution with enhanced metrics: ${err}`)
+            log.error(`Could not sync execution with enhanced metrics: ${err}`)
           })
       }
     } catch (error) {
@@ -324,7 +323,7 @@ export const subscribers = {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
-    log.debug(`Added subscriber: ${subscriber.id}`)
+    // log.debug(`Added subscriber: ${subscriber.id}`)
   },
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
   forget: (id: StateKey): boolean => {
@@ -336,7 +335,7 @@ export const subscribers = {
   },
   clear: (): void => {
     subscriberStore.clear()
-    log.debug('Cleared all subscribers')
+    // log.debug('Cleared all subscribers')
   },
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
@@ -349,7 +348,7 @@ export const middlewares = {
 
     // Store middleware in the central store
     middlewareStore.set(middleware.id, middleware)
-    log.debug(`Added middleware: ${middleware.id}`)
+    // log.debug(`Added middleware: ${middleware.id}`)
   },
   get: (id: StateKey): IMiddleware | undefined => {
     return middlewareStore.get(id)
@@ -357,13 +356,13 @@ export const middlewares = {
   forget: (id: StateKey): boolean => {
     const result = middlewareStore.forget(id)
     if (result) {
-      log.debug(`Removed middleware: ${id}`)
+      // log.debug(`Removed middleware: ${id}`)
     }
     return result
   },
   clear: (): void => {
     middlewareStore.clear()
-    log.debug('Cleared all middleware')
+    // log.debug('Cleared all middleware')
   },
   getAll: (): IMiddleware[] => {
     return middlewareStore.getAll()

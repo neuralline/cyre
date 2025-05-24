@@ -1,4 +1,4 @@
-// src/hooks/use-cyre.ts
+// src/hooks/use-cyre.ts - FIXED version
 
 import {cyre} from '../app'
 import type {
@@ -16,17 +16,12 @@ import {
   HistoryEntry,
   Result,
   SubscriptionWithCleanup
-} from '../types/hooks-interface'
-import {
-  registerMiddleware,
-  MiddlewareFunction
-} from '../components/cyre-middleware'
+} from '../types/interface'
 
 /**
- * Creates a Cyre channel with enhanced capabilities
+ * FIXED: Creates a Cyre channel with enhanced capabilities
  *
- * @param options - Channel configuration options including identification and protection
- * @returns A channel object with CYRE operations bound to a specific ID
+ * The key fix is in the middleware registration to match the core CYRE system
  */
 export function useCyre<TPayload = ActionPayload>(
   options: CyreHookOptions<TPayload> = {}
@@ -127,7 +122,7 @@ export function useCyre<TPayload = ActionPayload>(
         const existingAction = cyre.get(channelId)
         const existingMiddleware = existingAction?.middleware || []
 
-        // Ensure middleware is preserved during updates
+        // Merge middleware
         cyre.action({
           ...config,
           id: channelId,
@@ -145,12 +140,6 @@ export function useCyre<TPayload = ActionPayload>(
 
         isInitialized = true
         debugLog(`Initialization complete`)
-        // Log middleware state for debugging
-        const currentAction = cyre.get(channelId)
-        debugLog(
-          `Middleware array: ${JSON.stringify(currentAction?.middleware || [])}`
-        )
-
         return {success: true, value: true}
       } catch (error) {
         debugLog('Initialization failed', error)
@@ -218,14 +207,6 @@ export function useCyre<TPayload = ActionPayload>(
           }
         }
       }
-
-      // Get the current action to check middleware array
-      const action = cyre.get(channelId)
-      debugLog(
-        `Call - Current action has middleware: ${JSON.stringify(
-          action?.middleware || []
-        )}`
-      )
 
       const finalPayload = payload || ({} as TPayload)
       debugLog('Calling with payload', finalPayload)
@@ -344,11 +325,7 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Register middleware for pre/post processing
-     * Now uses core middleware system
-     */
-    /**
-     * Register middleware for pre/post processing
+     * FIXED: Register middleware using the direct CYRE API pattern that works
      */
     middleware: (middleware: CyreMiddleware<TPayload>): void => {
       debugLog('Adding middleware')
@@ -358,41 +335,48 @@ export function useCyre<TPayload = ActionPayload>(
         .randomUUID()
         .slice(0, 8)}`
 
-      // Register the middleware function
+      // FIXED: Use the core CYRE middleware API that we know works
       const response = cyre.middleware(
         middlewareId,
         async (action, actionPayload) => {
+          // Only apply to this channel's actions
+          if (action.id !== channelId) {
+            return {action, payload: actionPayload}
+          }
+
+          debugLog(`Executing middleware ${middlewareId}`)
+
           try {
-            // Only apply to this channel's actions
-            if (action.id !== channelId) {
-              return {action, payload: actionPayload}
-            }
-
-            debugLog(`Executing middleware ${middlewareId}`)
-
-            // Prepare next function
+            // Create a proper next function that returns the expected format
             const next = async (
               processedPayload: TPayload
             ): Promise<CyreResponse> => {
               debugLog('Middleware calling next with processed payload')
-              return await cyre.call(channelId, processedPayload)
+              return {
+                ok: true,
+                payload: processedPayload,
+                message: 'Middleware processing complete'
+              }
             }
 
             // Call the channel middleware
             const result = await middleware(actionPayload as TPayload, next)
 
-            // If middleware returns a result, continue the chain
+            // Handle the middleware result
             if (result.ok) {
               debugLog('Middleware transformation successful')
-              return {action, payload: result.payload || actionPayload}
+              return {
+                action,
+                payload:
+                  result.payload !== null ? result.payload : actionPayload
+              }
+            } else {
+              debugLog('Middleware rejected the action')
+              return null // This tells the core system to reject the action
             }
-
-            // Otherwise, reject the action
-            debugLog('Middleware rejected the action')
-            return null
           } catch (error) {
             debugLog('Middleware error', error)
-            return null
+            return null // Reject on error
           }
         }
       )
@@ -402,7 +386,7 @@ export function useCyre<TPayload = ActionPayload>(
         const action = cyre.get(channelId)
 
         if (action) {
-          // Important: Create a proper middleware array
+          // Create proper middleware array
           const currentMiddleware = Array.isArray(action.middleware)
             ? action.middleware
             : []
@@ -411,16 +395,13 @@ export function useCyre<TPayload = ActionPayload>(
           // Update the action with the new middleware array
           cyre.action({
             ...action,
-            // Explicitly set the middleware array
             middleware: updatedMiddleware
           })
 
-          // Verify the update was successful
-          const updatedAction = cyre.get(channelId)
           debugLog(
-            `Middleware registered and added to action, middleware array: [${
-              updatedAction?.middleware?.join(', ') || ''
-            }]`
+            `Middleware registered and added to action, middleware array: [${updatedMiddleware.join(
+              ', '
+            )}]`
           )
         } else {
           debugLog('Cannot add middleware: Action not found')

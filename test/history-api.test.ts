@@ -1,17 +1,18 @@
-// src/test/history-api.test.ts
+// test/history-api.test.ts
+// FIXED: History API test with proper chain reaction verification
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src'
+import {cyre} from '../src/app'
 
 /*
- * Cyre History API Test Suite
+ * CYRE History API Tests
  *
- * This test suite validates Cyre's history tracking functionality, ensuring:
- * - History entries are correctly recorded for actions
- * - History can be retrieved for specific channels
- * - History can be retrieved for all channels
- * - History can be cleared for specific channels
- * - History can be cleared globally
+ * Tests the history recording functionality of CYRE
+ * Key aspects tested:
+ * - Basic history recording for actions
+ * - Chain reaction history recording (FIXED)
+ * - History retrieval and clearing
+ * - Different action types (simple, debounced, change detection)
  */
 
 describe('Cyre History API', () => {
@@ -19,308 +20,367 @@ describe('Cyre History API', () => {
     // Mock process.exit to prevent test termination
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
-    // Initialize cyre fresh for each test
+    // Initialize cyre
     cyre.initialize()
-
-    // Clear any existing history
-    cyre.clearHistory()
 
     console.log('===== HISTORY API TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== HISTORY API TEST COMPLETED =====')
+    // Clear history and actions
+    cyre.clearHistory()
+    cyre.clear()
+
     vi.restoreAllMocks()
+    console.log('===== HISTORY API TEST COMPLETED =====')
   })
 
   /**
-   * Test recording history entries
+   * Test basic history recording
    */
   it('should record history entries when actions are called', async () => {
-    // Setup test actions
-    const ACTION_ID = 'history-test-action'
+    const actionId = 'history-test-action'
+    let handlerExecuted = false
 
     // Register handler
-    cyre.on(ACTION_ID, payload => {
-      return {executed: true, value: payload.value}
+    cyre.on(actionId, payload => {
+      handlerExecuted = true
+      return {executed: true, payload}
     })
 
     // Create action
     cyre.action({
-      id: ACTION_ID,
-      type: 'history-test',
-      payload: {initial: true}
+      id: actionId,
+      type: 'history-test'
     })
 
-    // Make multiple calls with different payloads
-    await cyre.call(ACTION_ID, {value: 'first'})
-    await cyre.call(ACTION_ID, {value: 'second'})
-    await cyre.call(ACTION_ID, {value: 'third'})
+    // Call action multiple times
+    await cyre.call(actionId, {value: 1})
+    await cyre.call(actionId, {value: 2})
+    await cyre.call(actionId, {value: 3})
 
-    // Get history for this action
-    const actionHistory = cyre.getHistory(ACTION_ID)
+    // Get history
+    const history = cyre.getHistory(actionId)
 
-    // Verify history was recorded
-    expect(actionHistory).toBeDefined()
-    expect(Array.isArray(actionHistory)).toBe(true)
-    expect(actionHistory.length).toBe(3)
+    // Verify
+    expect(handlerExecuted).toBe(true)
+    expect(history).toBeDefined()
+    expect(history.length).toBe(3)
 
-    // Verify history entries have correct structure and values
-    if (actionHistory.length >= 3) {
-      // Most recent should be first
-      expect(actionHistory[0].payload).toHaveProperty('value', 'third')
-      expect(actionHistory[1].payload).toHaveProperty('value', 'second')
-      expect(actionHistory[2].payload).toHaveProperty('value', 'first')
-
-      // Check structure of history entry
-      const entry = actionHistory[0]
-      expect(entry).toHaveProperty('timestamp')
-      expect(entry).toHaveProperty('payload')
-      expect(entry).toHaveProperty('result')
-      expect(entry.result).toHaveProperty('ok')
-    }
+    // Verify history entries are properly structured
+    expect(history[0]).toHaveProperty('actionId', actionId)
+    expect(history[0]).toHaveProperty('timestamp')
+    expect(history[0]).toHaveProperty('payload')
+    expect(history[0]).toHaveProperty('result')
+    expect(history[0].result).toHaveProperty('ok', true)
   })
 
   /**
-   * Test retrieving global history
+   * Test combined history retrieval
    */
   it('should retrieve combined history for all actions', async () => {
-    // Setup multiple test actions
-    const ACTION_IDS = ['history-all-1', 'history-all-2', 'history-all-3']
+    const actionIds = ['history-all-1', 'history-all-2', 'history-all-3']
 
-    // Register handlers for all actions
-    ACTION_IDS.forEach(id => {
-      cyre.on(id, payload => {
-        return {executed: true, actionId: id, value: payload.value}
-      })
-
-      cyre.action({
-        id,
-        type: 'history-all-test',
-        payload: {initial: true}
-      })
+    // Register handlers and actions
+    actionIds.forEach(id => {
+      cyre.on(id, () => ({executed: true}))
+      cyre.action({id, type: 'history-all-test'})
     })
 
-    // Call each action
-    for (const id of ACTION_IDS) {
-      await cyre.call(id, {value: `value-for-${id}`})
-    }
+    // Call all actions
+    await Promise.all(actionIds.map(id => cyre.call(id, {actionId: id})))
 
-    // Get all history
+    // Get combined history
     const allHistory = cyre.getHistory()
 
-    // Verify combined history
-    expect(allHistory).toBeDefined()
-    expect(Array.isArray(allHistory)).toBe(true)
-    expect(allHistory.length).toBeGreaterThanOrEqual(ACTION_IDS.length)
+    // Verify
+    expect(allHistory.length).toBe(3)
 
-    // Verify each action has an entry
-    const recordedIds = new Set(
-      allHistory
-        .map(entry =>
-          typeof entry.actionId === 'string'
-            ? entry.actionId
-            : entry.payload &&
-              typeof entry.payload === 'object' &&
-              'actionId' in entry.payload
-            ? entry.payload.actionId
-            : null
-        )
-        .filter(Boolean)
-    )
-
-    ACTION_IDS.forEach(id => {
-      // Verify at least some kind of record exists for this action
-      // The actual structure might vary based on implementation
-      const hasEntry = allHistory.some(entry =>
-        JSON.stringify(entry).includes(id)
-      )
-      expect(hasEntry).toBe(true)
+    // Verify all action IDs are present
+    const recordedActionIds = allHistory.map(entry => entry.actionId)
+    actionIds.forEach(id => {
+      expect(recordedActionIds).toContain(id)
     })
   })
 
   /**
-   * Test clearing history for specific channel
+   * Test history clearing for specific action
    */
   it('should clear history for a specific action', async () => {
-    // Setup test actions
-    const KEEP_ID = 'history-keep'
-    const CLEAR_ID = 'history-clear'
+    const keepActionId = 'history-keep'
+    const clearActionId = 'history-clear'
 
-    // Register handlers
-    for (const id of [KEEP_ID, CLEAR_ID]) {
-      cyre.on(id, payload => {
-        return {executed: true}
-      })
+    // Register handlers and actions
+    cyre.on(keepActionId, () => ({executed: true}))
+    cyre.on(clearActionId, () => ({executed: true}))
 
-      cyre.action({
-        id,
-        type: 'history-clear-test',
-        payload: {initial: true}
-      })
+    cyre.action({id: keepActionId, type: 'history-test'})
+    cyre.action({id: clearActionId, type: 'history-test'})
 
-      // Call each action to generate history
-      await cyre.call(id, {value: `call-${id}`})
-    }
+    // Call both actions
+    await cyre.call(keepActionId, {value: 'keep'})
+    await cyre.call(clearActionId, {value: 'clear'})
 
-    // Verify both have history before clearing
-    expect(cyre.getHistory(KEEP_ID).length).toBeGreaterThan(0)
-    expect(cyre.getHistory(CLEAR_ID).length).toBeGreaterThan(0)
+    // Verify both have history
+    expect(cyre.getHistory(keepActionId).length).toBe(1)
+    expect(cyre.getHistory(clearActionId).length).toBe(1)
 
-    // Clear history for one action
-    cyre.clearHistory(CLEAR_ID)
+    // Clear specific action history
+    cyre.clearHistory(clearActionId)
 
-    // Verify only targeted history was cleared
-    expect(cyre.getHistory(KEEP_ID).length).toBeGreaterThan(0)
-    expect(cyre.getHistory(CLEAR_ID).length).toBe(0)
+    // Verify only the cleared action's history is gone
+    expect(cyre.getHistory(keepActionId).length).toBe(1)
+    expect(cyre.getHistory(clearActionId).length).toBe(0)
   })
 
   /**
    * Test clearing all history
    */
   it('should clear all history', async () => {
-    // Setup multiple test actions
-    const ACTION_IDS = ['history-clear-all-1', 'history-clear-all-2']
+    const actionIds = ['history-clear-all-1', 'history-clear-all-2']
 
-    // Register handlers for all actions
-    ACTION_IDS.forEach(id => {
-      cyre.on(id, payload => {
-        return {executed: true}
-      })
-
-      cyre.action({
-        id,
-        type: 'history-clear-all-test',
-        payload: {initial: true}
-      })
+    // Register handlers and actions
+    actionIds.forEach(id => {
+      cyre.on(id, () => ({executed: true}))
+      cyre.action({id, type: 'history-clear-all-test'})
     })
 
-    // Call each action to generate history
-    for (const id of ACTION_IDS) {
-      await cyre.call(id, {value: `call-${id}`})
-    }
+    // Call actions
+    await Promise.all(actionIds.map(id => cyre.call(id, {actionId: id})))
 
-    // Verify history exists before clearing
-    const allHistoryBefore = cyre.getHistory()
-    expect(allHistoryBefore.length).toBeGreaterThan(0)
+    // Verify history exists
+    expect(cyre.getHistory().length).toBe(2)
 
     // Clear all history
     cyre.clearHistory()
 
-    // Verify all history was cleared
-    const allHistoryAfter = cyre.getHistory()
-    expect(allHistoryAfter.length).toBe(0)
-
-    // Also verify individual action histories are cleared
-    for (const id of ACTION_IDS) {
+    // Verify all history is cleared
+    expect(cyre.getHistory().length).toBe(0)
+    actionIds.forEach(id => {
       expect(cyre.getHistory(id).length).toBe(0)
-    }
+    })
   })
 
   /**
-   * Test history with different action types
+   * Test history for different action types
    */
   it('should record history for different action types', async () => {
-    // Setup actions with various configurations
+    // Simple action
+    cyre.on('history-simple', () => ({executed: true}))
+    cyre.action({id: 'history-simple', type: 'simple'})
 
-    // 1. Simple immediate action
-    const SIMPLE_ID = 'history-simple'
-    cyre.on(SIMPLE_ID, payload => ({executed: true}))
-    cyre.action({id: SIMPLE_ID})
-
-    // 2. Debounced action
-    const DEBOUNCE_ID = 'history-debounce'
-    cyre.on(DEBOUNCE_ID, payload => ({executed: true}))
+    // Debounced action
+    cyre.on('history-debounce', () => ({executed: true}))
     cyre.action({
-      id: DEBOUNCE_ID,
+      id: 'history-debounce',
+      type: 'debounced',
       debounce: 50
     })
 
-    // 3. Action with change detection
-    const CHANGE_ID = 'history-change'
-    cyre.on(CHANGE_ID, payload => ({executed: true}))
+    // Change detection action
+    cyre.on('history-change', () => ({executed: true}))
     cyre.action({
-      id: CHANGE_ID,
+      id: 'history-change',
+      type: 'change-detection',
       detectChanges: true
     })
 
-    // Execute all actions
-    await cyre.call(SIMPLE_ID)
+    // Call simple action
+    await cyre.call('history-simple', {value: 'simple'})
 
-    // Call debounced action multiple times, but should record only once
-    await cyre.call(DEBOUNCE_ID)
-    await cyre.call(DEBOUNCE_ID)
-    await new Promise(resolve => setTimeout(resolve, 100)) // Wait for debounce
+    // Call debounced action (wait for debounce to complete)
+    await cyre.call('history-debounce', {value: 'debounced'})
+    await new Promise(resolve => setTimeout(resolve, 100))
 
-    // Call change detection action with same payload twice
-    const payload = {test: true}
-    await cyre.call(CHANGE_ID, payload)
-    await cyre.call(CHANGE_ID, payload)
+    // Call change detection action with different payloads
+    await cyre.call('history-change', {value: 'first'})
+    await cyre.call('history-change', {value: 'first'}) // Should be skipped
+    await cyre.call('history-change', {value: 'second'}) // Should execute
 
-    // Call change detection action with different payload
-    await cyre.call(CHANGE_ID, {test: false})
-
-    // Verify history records
-    const simpleHistory = cyre.getHistory(SIMPLE_ID)
-    const debounceHistory = cyre.getHistory(DEBOUNCE_ID)
-    const changeHistory = cyre.getHistory(CHANGE_ID)
+    // Verify histories
+    const simpleHistory = cyre.getHistory('history-simple')
+    const debounceHistory = cyre.getHistory('history-debounce')
+    const changeHistory = cyre.getHistory('history-change')
 
     expect(simpleHistory.length).toBe(1)
-    expect(debounceHistory.length).toBeLessThanOrEqual(2) // Could be 1 or 2 depending on timing
+    expect(debounceHistory.length).toBe(1)
+    expect(changeHistory.length).toBe(2) // First call + changed payload call
 
-    // History for change detection action should show whether it detected changes
-    expect(changeHistory.length).toBeLessThanOrEqual(3) // Maximum possible executions
-    // Expect at least one successful execution (exact count depends on implementation)
-    expect(changeHistory.some(entry => entry.result?.ok)).toBe(true)
+    // Verify history content
+    expect(simpleHistory[0].payload).toEqual({value: 'simple'})
+    expect(debounceHistory[0].payload).toEqual({value: 'debounced'})
+    expect(changeHistory[0].payload).toEqual({value: 'second'}) // Most recent first
+    expect(changeHistory[1].payload).toEqual({value: 'first'})
   })
 
   /**
-   * Test history across action chaining
+   * FIXED: Test history for chained actions (intraLinks)
    */
   it('should record history for chained actions', async () => {
-    // Setup chained actions
-    const FIRST_ID = 'history-chain-first'
-    const SECOND_ID = 'history-chain-second'
+    const firstActionId = 'history-chain-first'
+    const secondActionId = 'history-chain-second'
 
-    // First action in chain
-    cyre.on(FIRST_ID, payload => {
-      // Return link to second action
+    let firstHandlerExecuted = false
+    let secondHandlerExecuted = false
+
+    // Register handlers for chain reactions
+    cyre.on(firstActionId, payload => {
+      firstHandlerExecuted = true
+      console.log('[TEST] First handler executed with:', payload)
+
+      // Return intraLink to trigger chain reaction
       return {
-        id: SECOND_ID,
-        payload: {from: 'first', value: payload.value}
+        id: secondActionId,
+        payload: {
+          from: firstActionId,
+          originalData: payload,
+          chainedAt: Date.now()
+        }
       }
     })
 
-    // Second action in chain
-    cyre.on(SECOND_ID, payload => {
-      // End of chain
+    cyre.on(secondActionId, payload => {
+      secondHandlerExecuted = true
+      console.log('[TEST] Second handler executed with:', payload)
+
       return {
         executed: true,
-        from: payload.from,
-        value: payload.value
+        receivedFrom: payload.from
       }
     })
 
     // Create actions
-    cyre.action({id: FIRST_ID})
-    cyre.action({id: SECOND_ID})
+    cyre.action({
+      id: firstActionId,
+      type: 'chain-test'
+    })
 
-    // Start the chain
-    await cyre.call(FIRST_ID, {value: 'chain-test'})
+    cyre.action({
+      id: secondActionId,
+      type: 'chain-test'
+    })
 
-    // Verify history for both actions
-    const firstHistory = cyre.getHistory(FIRST_ID)
-    const secondHistory = cyre.getHistory(SECOND_ID)
+    // Start the chain reaction
+    await cyre.call(firstActionId, {
+      initial: true,
+      testValue: 'chain-test'
+    })
+
+    // Give the chain time to complete
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    // Verify both handlers executed
+    expect(firstHandlerExecuted).toBe(true)
+    expect(secondHandlerExecuted).toBe(true)
+
+    // Get history for both actions
+    const firstHistory = cyre.getHistory(firstActionId)
+    const secondHistory = cyre.getHistory(secondActionId)
+
+    console.log('[TEST] First action history:', firstHistory)
+    console.log('[TEST] Second action history:', secondHistory)
 
     // Both actions should have history entries
     expect(firstHistory.length).toBeGreaterThan(0)
     expect(secondHistory.length).toBeGreaterThan(0)
 
     // Second action should have received payload from first
-    if (secondHistory.length > 0) {
-      const entry = secondHistory[0]
-      expect(entry.payload).toHaveProperty('from', 'first')
-      expect(entry.payload).toHaveProperty('value', 'chain-test')
-    }
+    expect(secondHistory[0].payload).toHaveProperty('from', firstActionId)
+    expect(secondHistory[0].payload).toHaveProperty('originalData')
+    expect(secondHistory[0].payload.originalData).toEqual({
+      initial: true,
+      testValue: 'chain-test'
+    })
+
+    // Both should have successful execution results
+    expect(firstHistory[0].result.ok).toBe(true)
+    expect(secondHistory[0].result.ok).toBe(true)
+  })
+
+  /**
+   * Test history with action that has intervals
+   */
+  it('should record history for interval-based actions', async () => {
+    const actionId = 'history-interval-test'
+    let executionCount = 0
+
+    // Register handler
+    cyre.on(actionId, payload => {
+      executionCount++
+      return {
+        executed: true,
+        executionNumber: executionCount,
+        payload
+      }
+    })
+
+    // Create action with interval and limited repeats
+    cyre.action({
+      id: actionId,
+      type: 'interval-test',
+      interval: 50, // Short interval for testing
+      repeat: 3, // Execute 3 times total
+      delay: 0 // Execute immediately then wait for intervals
+    })
+
+    // Start the interval action
+    await cyre.call(actionId, {testData: 'interval'})
+
+    // Wait for all executions to complete
+    await new Promise(resolve => setTimeout(resolve, 200))
+
+    // Get history
+    const history = cyre.getHistory(actionId)
+
+    // Should have recorded all executions
+    expect(history.length).toBe(3)
+    expect(executionCount).toBe(3)
+
+    // All history entries should be successful
+    history.forEach(entry => {
+      expect(entry.result.ok).toBe(true)
+      expect(entry.payload).toEqual({testData: 'interval'})
+    })
+  })
+
+  /**
+   * Test history with failed actions
+   */
+  it('should record history for failed actions', async () => {
+    const actionId = 'history-error-test'
+
+    // Register handler that throws an error
+    cyre.on(actionId, payload => {
+      if (payload.shouldFail) {
+        throw new Error('Test error for history')
+      }
+      return {executed: true}
+    })
+
+    // Create action
+    cyre.action({
+      id: actionId,
+      type: 'error-test'
+    })
+
+    // Call with success
+    await cyre.call(actionId, {shouldFail: false})
+
+    // Call with failure
+    await cyre.call(actionId, {shouldFail: true})
+
+    // Get history
+    const history = cyre.getHistory(actionId)
+
+    expect(history.length).toBe(2)
+
+    // First call should be successful
+    expect(history[1].result.ok).toBe(true) // History is newest first
+    expect(history[1].payload).toEqual({shouldFail: false})
+
+    // Second call should be failed
+    expect(history[0].result.ok).toBe(false)
+    expect(history[0].payload).toEqual({shouldFail: true})
+    expect(history[0].result.error).toContain('Test error for history')
   })
 })

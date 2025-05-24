@@ -8,27 +8,22 @@
     Version 4 2025
 */
 
-// Export main components
 // Import the cyre instance and related utilities from app.ts
-import {cyre, log} from './app'
+import {cyre, Cyre, log} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
 
-// Export everything as both named exports and default export
-export {cyre, log, useCyre, cyreCompose}
-
-// Also export cyre as the default export for compatibility
-export default cyre
+// Main exports - ensure these are properly exported
+export {cyre, Cyre, log, useCyre, cyreCompose}
 
 // Export utility components
-export {pipe, memoize, isEqual, tryCatch} from './libs/utils'
-//export {createCyreChannel, type Channel} from './libs/create-cyre-channel'
+//export {pipe, memoize, isEqual, tryCatch} from './libs/utils'
 
 // Export types with unique names to avoid conflicts
 export type {
   IO as CyreIO,
   EventHandler as CyreEventHandler,
-  Subscriber as CyreSubscriber,
+  ISubscriber as CyreSubscriber,
   SubscriptionResponse as CyreSubscriptionResponse,
   ActionPayload as CyreActionPayload,
   Priority as CyrePriority,
@@ -44,5 +39,31 @@ export type {
   CyreChannel as CyreChannelType
 } from './types/hooks-interface'
 
+// Export history types
+export type {HistoryEntry, HistoryStats, HistoryQuery} from './types/history'
+
+// Export composition types
+export type {
+  CompositionOptions,
+  CyreComposedResponse
+} from './hooks/cyre-compose'
+
 // Version information
 export const version = '4.0.0'
+
+// Also export cyre as the default export for maximum compatibility
+export default cyre
+
+// Ensure global availability for UMD builds (browser environments)
+if (typeof globalThis !== 'undefined') {
+  globalThis.cyre = cyre
+  globalThis.useCyre = useCyre
+  globalThis.cyreCompose = cyreCompose
+}
+
+// For browser environments that don't have globalThis
+if (typeof window !== 'undefined') {
+  ;(window as any).cyre = cyre
+  ;(window as any).useCyre = useCyre
+  ;(window as any).cyreCompose = cyreCompose
+}
