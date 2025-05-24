@@ -5,6 +5,7 @@ import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io} from '../context/state'
 import {metricsReport} from '../context/metrics-report'
 import timeKeeper from '../components/cyre-timekeeper'
+import {log} from '../components/cyre-log'
 
 /*
 

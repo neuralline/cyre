@@ -1,4 +1,4 @@
-// src/context/state.ts - Update with timer utilities
+// src/context/state.ts - FIXED: Proper metrics tracking and synchronization
 import {log} from '../components/cyre-log'
 import type {
   ActionMetrics,
@@ -40,7 +40,6 @@ const timelineStore = createStore<Timer>()
 const payloadHistory = createStore<ActionPayload>()
 const actionMetrics = createStore<StateActionMetrics>()
 
-// Export IO operations
 // Utility functions for state management
 const cleanupAction = (id: StateKey): void => {
   const metrics = actionMetrics.get(id)
@@ -50,6 +49,8 @@ const cleanupAction = (id: StateKey): void => {
   actionMetrics.forget(id)
   payloadHistory.forget(id)
 }
+
+// Export IO operations with FIXED metrics tracking and synchronization
 export const io = {
   set: (ioState: IO): void => {
     if (!ioState?.id) throw new Error('IO must have an id')
@@ -64,17 +65,18 @@ export const io = {
       cleanupAction(ioState.id)
       ioStore.set(ioState.id, enhanced)
 
-      // Ensure action metrics are initialized with a valid timestamp
+      // FIXED: Ensure action metrics are initialized properly with current timestamp
       const currentTime = Date.now()
       const currentMetrics = actionMetrics.get(ioState.id)
 
-      // Only initialize if metrics don't exist yet or have invalid values
-      if (!currentMetrics || currentMetrics.lastExecutionTime === 0) {
+      // Initialize metrics if they don't exist or are invalid
+      if (!currentMetrics) {
         actionMetrics.set(ioState.id, {
           lastExecutionTime: 0, // Keep as 0 until first execution
           executionCount: 0,
           errors: []
         })
+        log.debug(`Initialized metrics for ${ioState.id}`)
       }
 
       if (ioState.detectChanges) {
@@ -93,37 +95,82 @@ export const io = {
     }
   },
 
-  updateMetrics: (id: StateKey, update: Partial<ActionMetrics>): void => {
-    // Get current metrics or create default if none exist
-    const current = actionMetrics.get(id) || {
-      lastExecutionTime: 0,
-      executionCount: 0,
-      errors: []
-    }
+  // FIXED: Improved metrics update with proper validation and synchronization
+  updateMetrics: (id: StateKey, update: Partial<StateActionMetrics>): void => {
+    try {
+      // Get current metrics or create default if none exist
+      const current = actionMetrics.get(id) || {
+        lastExecutionTime: 0,
+        executionCount: 0,
+        errors: []
+      }
 
-    // Update with new metrics, ensuring values are valid
-    const updatedMetrics = {
-      ...current,
-      ...update,
-      // Ensure lastExecutionTime is a valid number greater than 0
-      lastExecutionTime:
-        update.lastExecutionTime && update.lastExecutionTime > 0
-          ? update.lastExecutionTime
-          : current.lastExecutionTime
-    }
+      // Merge updates with validation
+      const updatedMetrics: StateActionMetrics = {
+        ...current,
+        lastExecutionTime:
+          update.lastExecutionTime !== undefined
+            ? Math.max(0, update.lastExecutionTime)
+            : current.lastExecutionTime,
+        executionCount:
+          update.executionCount !== undefined
+            ? Math.max(0, update.executionCount)
+            : current.executionCount,
+        errors: update.errors || current.errors
+      }
 
-    // Store updated metrics
-    actionMetrics.set(id, updatedMetrics)
+      // Only update if there are actual changes
+      const hasChanges =
+        updatedMetrics.lastExecutionTime !== current.lastExecutionTime ||
+        updatedMetrics.executionCount !== current.executionCount ||
+        updatedMetrics.errors.length !== current.errors.length
+
+      if (hasChanges) {
+        // Store updated metrics
+        actionMetrics.set(id, updatedMetrics)
+
+        log.debug(
+          `Updated metrics for ${id}: lastExecution=${updatedMetrics.lastExecutionTime}, count=${updatedMetrics.executionCount}`
+        )
+
+        // FIXED: Synchronize with enhanced metrics system
+        // Import here to avoid circular dependency
+        import('../context/metrics-report')
+          .then(({metricsReport}) => {
+            // Ensure enhanced metrics system is also tracking this execution
+            if (
+              update.lastExecutionTime &&
+              update.lastExecutionTime > current.lastExecutionTime
+            ) {
+              // This indicates a new execution, so track it in enhanced system if not already tracked
+              const enhancedMetrics = metricsReport.getActionMetrics(id)
+              if (
+                !enhancedMetrics ||
+                enhancedMetrics.lastExecution < update.lastExecutionTime
+              ) {
+                // Track a basic execution to keep systems in sync
+                metricsReport.trackExecution(id, 1) // Minimal time to indicate execution occurred
+              }
+            }
+          })
+          .catch(err => {
+            log.debug(`Could not sync with enhanced metrics: ${err}`)
+          })
+      }
+    } catch (error) {
+      log.error(`Failed to update metrics for ${id}: ${error}`)
+    }
   },
 
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
-  //remove channel
+  // Remove channel
   forget: (id: StateKey): boolean => {
     cleanupAction(id)
     return ioStore.forget(id)
   },
-  //forget all channels and clear all related records
+
+  // Forget all channels and clear all related records
   clear: (): void => {
     ioStore.getAll().forEach(item => {
       if (item.id) cleanupAction(item.id)
@@ -134,26 +181,100 @@ export const io = {
     metricsState.reset()
   },
 
-  //get all io state
+  // Get all io state
   getAll: (): IO[] => ioStore.getAll(),
 
+  // FIXED: Improved change detection with better logging
   hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
-    const previousPayload = payloadHistory.get(id)
+    try {
+      const previousPayload = payloadHistory.get(id)
 
-    // If no previous payload, consider it changed
-    if (previousPayload === undefined) {
-      return true
+      // If no previous payload, consider it changed
+      if (previousPayload === undefined) {
+        log.debug(`No previous payload for ${id}, considering changed`)
+        return true
+      }
+
+      const hasChanged = !isEqual(newPayload, previousPayload)
+      log.debug(`Change detection for ${id}: ${hasChanged}`)
+
+      return hasChanged
+    } catch (error) {
+      log.error(`Error in change detection for ${id}: ${error}`)
+      return true // Default to changed on error
     }
-
-    return !isEqual(newPayload, previousPayload)
   },
 
   getPrevious: (id: StateKey): ActionPayload | undefined => {
     return payloadHistory.get(id)
   },
 
+  // FIXED: Proper metrics retrieval with better logging and fallback
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
-    return actionMetrics.get(id)
+    const metrics = actionMetrics.get(id)
+    if (metrics) {
+      log.debug(
+        `Retrieved metrics for ${id}: lastExecution=${metrics.lastExecutionTime}, count=${metrics.executionCount}`
+      )
+    } else {
+      log.debug(`No metrics found for ${id}`)
+
+      // FIXED: If no legacy metrics exist but action exists, create minimal metrics
+      const action = ioStore.get(id)
+      if (action) {
+        const newMetrics: StateActionMetrics = {
+          lastExecutionTime: 0,
+          executionCount: 0,
+          errors: []
+        }
+        actionMetrics.set(id, newMetrics)
+        log.debug(`Created minimal metrics for existing action ${id}`)
+        return newMetrics
+      }
+    }
+    return metrics
+  },
+
+  /**
+   * FIXED: Enhanced execution tracking that updates both legacy and enhanced metrics
+   */
+  trackExecution: (id: StateKey, executionTime?: number): void => {
+    try {
+      const now = Date.now()
+      const currentMetrics = io.getMetrics(id) || {
+        lastExecutionTime: 0,
+        executionCount: 0,
+        errors: []
+      }
+
+      // Update legacy metrics
+      const updatedMetrics: StateActionMetrics = {
+        ...currentMetrics,
+        lastExecutionTime: now,
+        executionCount: currentMetrics.executionCount + 1
+      }
+
+      actionMetrics.set(id, updatedMetrics)
+
+      log.debug(
+        `Tracked execution for ${id}: time=${
+          executionTime || 'unknown'
+        }ms, count=${updatedMetrics.executionCount}`
+      )
+
+      // Sync with enhanced metrics if execution time is provided
+      if (executionTime !== undefined) {
+        import('../context/metrics-report')
+          .then(({metricsReport}) => {
+            metricsReport.trackExecution(id, executionTime)
+          })
+          .catch(err => {
+            log.debug(`Could not sync execution with enhanced metrics: ${err}`)
+          })
+      }
+    } catch (error) {
+      log.error(`Failed to track execution for ${id}: ${error}`)
+    }
   },
 
   /**
@@ -203,10 +324,20 @@ export const subscribers = {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
+    log.debug(`Added subscriber: ${subscriber.id}`)
   },
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
-  forget: (id: StateKey): boolean => subscriberStore.forget(id),
-  clear: (): void => subscriberStore.clear(),
+  forget: (id: StateKey): boolean => {
+    const result = subscriberStore.forget(id)
+    if (result) {
+      log.debug(`Removed subscriber: ${id}`)
+    }
+    return result
+  },
+  clear: (): void => {
+    subscriberStore.clear()
+    log.debug('Cleared all subscribers')
+  },
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
 
@@ -218,24 +349,37 @@ export const middlewares = {
 
     // Store middleware in the central store
     middlewareStore.set(middleware.id, middleware)
+    log.debug(`Added middleware: ${middleware.id}`)
   },
   get: (id: StateKey): IMiddleware | undefined => {
     return middlewareStore.get(id)
   },
   forget: (id: StateKey): boolean => {
-    return middlewareStore.forget(id)
+    const result = middlewareStore.forget(id)
+    if (result) {
+      log.debug(`Removed middleware: ${id}`)
+    }
+    return result
   },
   clear: (): void => {
     middlewareStore.clear()
+    log.debug('Cleared all middleware')
   },
   getAll: (): IMiddleware[] => {
     return middlewareStore.getAll()
   }
 }
+
 export const timeline = {
   add: (timer: Timer): void => {
     if (!timer.id) return
     timelineStore.set(timer.id, timer)
+
+    // Update active formations count in metrics state
+    const activeCount = timelineStore
+      .getAll()
+      .filter(t => t.status === 'active').length
+    metricsState.update({activeFormations: activeCount})
   },
   get: (id: StateKey): Timer | undefined => timelineStore.get(id),
   forget: (id: StateKey): boolean => {
@@ -244,17 +388,33 @@ export const timeline = {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
       if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
     })
-    return timelineStore.forget(id)
+
+    const result = timelineStore.forget(id)
+
+    // Update active formations count
+    const activeCount = timelineStore
+      .getAll()
+      .filter(t => t.status === 'active').length
+    metricsState.update({activeFormations: activeCount})
+
+    return result
   },
   clear: (): void => {
     timelineStore.getAll().forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
     })
     timelineStore.clear()
+    metricsState.update({activeFormations: 0})
   },
   getAll: (): Timer[] => timelineStore.getAll(),
-  getActive: (): Timer[] =>
-    timelineStore.getAll().filter(timer => timer.status === 'active')
+  getActive: (): Timer[] => {
+    const active = timelineStore
+      .getAll()
+      .filter(timer => timer.status === 'active')
+    // Update the count in metrics state
+    metricsState.update({activeFormations: active.length})
+    return active
+  }
 }
 
 // Export readonly stores

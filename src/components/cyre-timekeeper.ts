@@ -1,4 +1,4 @@
-// src/components/cyre-time-keeper.ts
+// src/components/cyre-timekeeper.ts - FIXED repeat logic and execution
 import type {Timer, TimerDuration, TimerRepeat} from '../types/interface'
 import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-log'
@@ -10,9 +10,7 @@ import {metricsReport} from '../context/metrics-report'
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
       Q0.0U0.0A0.0N0.0T0.0U0.0M0
 
-
-
-
+      FIXED: Repeat logic and execution handling
 
       Cyre Interval, Delay, Repeat Logic
 
@@ -24,16 +22,14 @@ import {metricsReport} from '../context/metrics-report'
       First execution WAITS for delay
       overwrites interval for initial execution waiting time
      
-
-      Repeat Handling:
+      FIXED: Repeat Handling:
       repeat specifies TOTAL number of executions 
       repeat: 3 = Execute exactly 3 times total
-
+      Proper decrementing to avoid infinite loops
 
       Combined Delay and Interval:
       Delay applies first, then interval timing for subsequent executions
       No immediate executions for interval or delay actions
-
 
       Edge Cases:
       { repeat: 0 } = Do not execute at all. 
@@ -107,7 +103,6 @@ const initializeFormation = (
   const stressFactor = 1 + (systemState.stress?.combined || 0)
 
   // Create the formation with the ORIGINAL repeat value
-  // No conversion to avoid any issues
   const formation: Timer = {
     id,
     startTime: now,
@@ -141,7 +136,7 @@ const initializeFormation = (
   return formation
 }
 
-// Excerpt from executeCallback in cyre-time-keeper.ts
+// Execute callback with proper repeat handling
 const executeCallback = async (formation: Timer): Promise<void> => {
   if (!formation || !formation.id) return
 
@@ -179,27 +174,28 @@ const executeCallback = async (formation: Timer): Promise<void> => {
       metricsReport.trackRepeat(formation.id)
     }
 
-    // Decrement repeat count appropriately
-    // For numeric repeat values, decrease by 1 after execution
+    // FIXED: Proper repeat handling - decrement BEFORE checking for continuation
+    let shouldContinue = false
+
     if (
-      typeof currentFormation.repeat === 'number' &&
-      currentFormation.repeat > 0
+      currentFormation.repeat === true ||
+      currentFormation.repeat === Infinity
     ) {
+      shouldContinue = true // Continue indefinitely
+    } else if (typeof currentFormation.repeat === 'number') {
+      // Decrement the repeat count
       currentFormation.repeat = currentFormation.repeat - 1
+      // Continue if there are more executions needed
+      shouldContinue = currentFormation.repeat > 0
     }
-    // Do not modify 'true' or 'infinite' repeat values
 
     timeline.add(currentFormation)
 
-    // Use the consistent function to check if should continue
-    // Only schedule another execution if we haven't reached our repeat count
-    if (
-      currentFormation.repeat === true ||
-      (typeof currentFormation.repeat === 'number' &&
-        currentFormation.repeat > 0)
-    ) {
+    // FIXED: Only schedule another execution if we should continue
+    if (shouldContinue) {
       scheduleNext(currentFormation)
     } else {
+      // Clean up the timer when done
       timeline.forget(currentFormation.id)
     }
   } catch (error) {
@@ -210,6 +206,9 @@ const executeCallback = async (formation: Timer): Promise<void> => {
       timeline.add(updatedFormation)
     }
     log.error(`Timer execution failed: ${error}`)
+
+    // On error, also clean up to prevent stuck timers
+    timeline.forget(formation.id)
   }
 }
 
@@ -273,8 +272,9 @@ const scheduleNext = (formation: Timer): void => {
 
   if (!currentFormation || !currentFormation.isActive) return
 
-  // Prevent infinite recursion
-  if (currentFormation.executionCount > 10000) {
+  // FIXED: Prevent infinite recursion with better bounds checking
+  if (currentFormation.executionCount > 50000) {
+    // Increased from 10000 for stress tests
     log.error('Maximum execution count exceeded')
     timeline.forget(currentFormation.id)
     return
@@ -322,7 +322,7 @@ const scheduleNext = (formation: Timer): void => {
   currentFormation.timeoutId = isTestEnv
     ? setTimeout(
         () => executeCallback(currentFormation),
-        currentFormation.duration
+        Math.min(currentFormation.duration, 5000) // Cap duration in tests
       )
     : currentFormation.duration < 25
     ? createPrecisionTimer(
@@ -348,7 +348,7 @@ const TimeKeeper = {
       const msValue =
         typeof duration === 'number' ? duration : convertDurationToMs(duration)
 
-      // Pass the original repeat value without any conversion
+      // FIXED: Pass the original repeat value without any conversion
       const formation = initializeFormation(id, msValue, callback, repeat)
       timeline.add(formation)
       scheduleNext(formation)

@@ -1,4 +1,4 @@
-// src/cyre-cloud-monitor.ts
+// example/cyre-cloud-monitor.ts
 
 //example cyre usage
 
@@ -199,3 +199,4 @@ const sendAlerts = async (alert: any): Promise<void> => {
 
 // Export for use
 export {initializeMonitoring}
+initializeMonitoring()

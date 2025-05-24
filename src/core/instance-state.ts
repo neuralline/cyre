@@ -14,7 +14,7 @@ import {metricsState, QuantumState} from '../context/metrics-state'
 import {log} from '../components/cyre-log'
 import timeKeeper from '../components/cyre-timekeeper'
 import {isEqual} from '../libs/utils'
-import {buildProtectionPipeline} from '@/components/cyre-protection'
+import {buildProtectionPipeline} from '../components/cyre-actions'
 
 /*
 

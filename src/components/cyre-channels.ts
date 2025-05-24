@@ -1,13 +1,14 @@
-// src/components/cyre-channels.ts
-import {MSG} from '../config/cyre-config'
-import {IO} from '../types/interface'
-import {memoize} from '../libs/utils'
-import {log} from './cyre-log'
+// src/components/cyre-channel.ts
+// Channel creation, validation, and management
 
-/* 
+import {io} from '../context/state'
+import {IO} from '../types/interface'
+import {log} from './cyre-log'
+import {MSG} from '../config/cyre-config'
+
+/*
 
       C.Y.R.E. - C.H.A.N.N.E.L.S.
-
 
 */
 
@@ -33,8 +34,6 @@ type DataDefinitionResult = {
 type DataDefinition = (value: any) => DataDefinitionResult
 type DataDefinitions = Record<string, DataDefinition>
 
-// Constants for messages
-
 // Type guard functions
 const isValidChannel = (value: unknown): value is IO => {
   return (
@@ -47,7 +46,7 @@ const isValidChannel = (value: unknown): value is IO => {
 }
 
 // Validation functions with proper error handling
-const validateChannel = memoize((channel: IO): ValidationResult => {
+const validateChannel = (channel: IO): ValidationResult => {
   if (!channel) {
     return {isValid: false, error: MSG.CHANNEL_INVALID_STRUCTURE}
   }
@@ -65,7 +64,7 @@ const validateChannel = memoize((channel: IO): ValidationResult => {
   }
 
   return {isValid: true}
-})
+}
 
 // Process data definitions with improved error handling
 const processDataDefinitions = (
@@ -162,12 +161,12 @@ const validateDefinitions = (
 }
 
 /**
- * Enhanced CyreChannel factory function with improved type safety and error handling
+ * CyreChannel factory function with improved type safety and error handling
  * @param channel - The channel configuration object
  * @param definitions - Data definitions for validation
  * @returns Channel result object with status and payload
  */
-const CyreChannel = (
+export const CyreChannel = (
   channel: IO,
   definitions: DataDefinitions
 ): ChannelResult => {
@@ -211,6 +210,9 @@ const CyreChannel = (
       ...definitionResult.payload,
       id: channel.id
     })
+
+    // Store the channel
+    io.set(preparedChannel)
 
     // Log success
     log.debug(`${MSG.CHANNEL_CREATED}: ${channel.id}`)

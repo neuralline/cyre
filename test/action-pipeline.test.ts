@@ -1,13 +1,13 @@
-// test/protection-pipeline.test.ts
+// test/action-pipeline.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/app'
 import {
   buildProtectionPipeline,
   executeProtectionPipeline
-} from '../src/components/cyre-protection'
+} from '../src/components/cyre-actions'
 
-describe('Protection Pipeline', () => {
+describe('Action pipeline', () => {
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
@@ -15,18 +15,18 @@ describe('Protection Pipeline', () => {
     // Initialize cyre
     cyre.initialize()
 
-    console.log('===== PROTECTION PIPELINE TEST STARTED =====')
+    console.log('===== ACTION PIPELINE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== PROTECTION PIPELINE TEST COMPLETED =====')
+    console.log('===== ACTION PIPELINE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 
   /**
    * Test that pipelines are built correctly
    */
-  it('should build protection pipeline based on action configuration', () => {
+  it('should build action pipeline based on action configuration', () => {
     // Define actions with different protection combinations
     const actions = [
       {id: 'basic-action', type: 'test'},
@@ -73,7 +73,7 @@ describe('Protection Pipeline', () => {
   /**
    * Test pipeline execution
    */
-  it('should execute protection pipeline in correct order', async () => {
+  it('should execute action pipeline in correct order', async () => {
     // Create test action with a longer throttle time for clarity
     const action = {
       id: 'pipeline-test-action',

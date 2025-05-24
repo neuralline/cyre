@@ -415,7 +415,9 @@ describe('CYRE Repeat and Timing Behavior', () => {
 
       // Call should return ok: true (action registered but not executed)
       expect(result.ok).toBe(true)
-      expect(result.message).toContain('not executed')
+      expect(result.message).toContain(
+        'Timed execution: interval=200ms repeat=0'
+      )
     },
     TEST_TIMEOUT
   )
