@@ -588,6 +588,3 @@ export function cyreCompose<TPayload = ActionPayload>(
     executeDetailed(payload?: TPayload): Promise<CyreComposedResponse[]>
   }
 }
-
-// Export types
-export type {CompositionOptions, CyreComposedResponse}

@@ -20,10 +20,9 @@ import type {
   CyreActionPayload,
   CyreHookType,
   CyreChannelType,
-  CompositionOptions,
-  CyreHookOptions,
-  ProtectionOptions
+  CompositionOptions
 } from '../src/index'
+import {CyreHookOptions, ProtectionOptions} from '@/types/hooks-interface'
 
 describe('Cyre Exports Test', () => {
   beforeEach(() => {
@@ -36,6 +35,9 @@ describe('Cyre Exports Test', () => {
   })
 
   afterEach(() => {
+    // Clean up any remaining actions/subscriptions
+    cyre.clear()
+    namedCyre.clear()
     vi.restoreAllMocks()
   })
 
@@ -68,6 +70,9 @@ describe('Cyre Exports Test', () => {
     expect(channel).toBeDefined()
     expect(channel.id).toBeDefined()
     expect(channel.name).toBe('test-channel')
+
+    // Clean up
+    channel.forget()
   })
 
   it('should export cyreCompose function', () => {
@@ -81,6 +86,9 @@ describe('Cyre Exports Test', () => {
 
     expect(composed).toBeDefined()
     expect(composed.id).toBeDefined()
+
+    // Clean up
+    composed.forget()
   })
 
   it('should export log utility', () => {
@@ -101,11 +109,13 @@ describe('Cyre Exports Test', () => {
     const testActionId = `export-test-${Date.now()}`
     let handlerCalled = false
 
-    // Register handler
-    cyre.on(testActionId, payload => {
+    // Register handler first
+    const subscription = cyre.on(testActionId, payload => {
       handlerCalled = true
       return {success: true, payload}
     })
+
+    expect(subscription.ok).toBe(true)
 
     // Create action
     cyre.action({
@@ -115,9 +125,10 @@ describe('Cyre Exports Test', () => {
     })
 
     // Call action
-    await cyre.call(testActionId, {message: 'export test'})
+    const result = await cyre.call(testActionId, {message: 'export test'})
 
     // Verify
+    expect(result.ok).toBe(true)
     expect(handlerCalled).toBe(true)
 
     // Clean up
@@ -131,21 +142,37 @@ describe('Cyre Exports Test', () => {
         throttle: 100,
         debounce: 50,
         detectChanges: true
-      }
+      },
+      debug: false // Disable debug to reduce test noise
     })
 
     let handlerCalled = false
+    let receivedPayload: any = null
 
-    // Subscribe
+    // Subscribe first
     const subscription = channel.on(payload => {
+      console.log('Hook handler called with payload:', payload)
       handlerCalled = true
+      receivedPayload = payload
       return {success: true}
     })
 
-    // Call
-    await channel.call({message: 'hook test'})
+    console.log('Subscription result:', subscription)
+    expect(subscription.ok).toBe(true)
 
-    // Verify
+    // Small delay to ensure subscription is registered
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    // Call the channel
+    console.log('Calling channel with payload')
+    const result = await channel.call({message: 'hook test'})
+
+    console.log('Call result:', result)
+    console.log('Handler called:', handlerCalled)
+    console.log('Received payload:', receivedPayload)
+
+    // Verify results
+    expect(result.ok).toBe(true)
     expect(handlerCalled).toBe(true)
     expect(subscription.ok).toBe(true)
 
@@ -164,15 +191,21 @@ describe('Cyre Exports Test', () => {
     let handler2Called = false
 
     // Set up handlers
-    channel1.on(() => {
+    const sub1 = channel1.on(() => {
       handler1Called = true
       return {success: true}
     })
 
-    channel2.on(() => {
+    const sub2 = channel2.on(() => {
       handler2Called = true
       return {success: true}
     })
+
+    expect(sub1.ok).toBe(true)
+    expect(sub2.ok).toBe(true)
+
+    // Small delay to ensure subscriptions are registered
+    await new Promise(resolve => setTimeout(resolve, 10))
 
     // Compose channels
     const composed = cyreCompose([channel1, channel2])
@@ -225,5 +258,45 @@ describe('Cyre Exports Test', () => {
     expect(hookOptions.name).toBe('type-test-hook')
     expect(protectionOptions.throttle).toBe(200)
     expect(compositionOptions.priority).toBe('high')
+  })
+
+  it('should handle hook subscription and call timing correctly', async () => {
+    const channel = useCyre({
+      name: 'timing-test',
+      debug: false
+    })
+
+    let executionOrder: string[] = []
+
+    // Subscribe
+    executionOrder.push('subscribing')
+    const subscription = channel.on(payload => {
+      executionOrder.push('handler-executed')
+      return {success: true, payload}
+    })
+
+    executionOrder.push('subscribed')
+    expect(subscription.ok).toBe(true)
+
+    // Ensure channel is properly initialized
+    expect(channel.isInitialized()).toBe(true)
+
+    // Call
+    executionOrder.push('calling')
+    const result = await channel.call({test: 'data'})
+    executionOrder.push('call-completed')
+
+    console.log('Execution order:', executionOrder)
+    console.log('Call result:', result)
+
+    // Verify execution order and results
+    expect(executionOrder).toContain('handler-executed')
+    expect(result.ok).toBe(true)
+
+    // Clean up
+    if (subscription.unsubscribe) {
+      subscription.unsubscribe()
+    }
+    channel.forget()
   })
 })

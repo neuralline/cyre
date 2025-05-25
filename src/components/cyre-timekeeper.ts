@@ -10,7 +10,7 @@ import {metricsReport} from '../context/metrics-report'
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
       Q0.0U0.0A0.0N0.0T0.0U0.0M0
 
-      FIXED: Repeat logic and execution handling
+      Repeat logic and execution handling
 
       Cyre Interval, Delay, Repeat Logic
 
@@ -22,7 +22,7 @@ import {metricsReport} from '../context/metrics-report'
       First execution WAITS for delay
       overwrites interval for initial execution waiting time
      
-      FIXED: Repeat Handling:
+      Repeat Handling:
       repeat specifies TOTAL number of executions 
       repeat: 3 = Execute exactly 3 times total
       Proper decrementing to avoid infinite loops

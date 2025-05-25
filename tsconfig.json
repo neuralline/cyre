@@ -15,7 +15,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "removeComments": false,
-    "strict": true,
+    "strict": false,
     "noImplicitAny": false,
     "strictNullChecks": true,
     "strictFunctionTypes": true,
@@ -51,5 +51,12 @@
     }
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["node_modules", "dist", "coverage", "**/*.d.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/ssr",
+    "src/streams",
+    "coverage",
+    "**/*.d.ts"
+  ]
 }

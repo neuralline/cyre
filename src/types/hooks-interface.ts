@@ -1,4 +1,4 @@
-// src/types/hooks.ts
+// src/types/hooks-interface.ts
 // Hooks and Channel related types
 
 import {
