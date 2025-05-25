@@ -8,7 +8,7 @@ import {metricsReport} from '../context/metrics-report'
 
 /*
 
-    C.Y.R.E. - M.I.D.D.L.E.W.A.R.E. - A.C.T.I.O.N.S
+    C.Y.R.E - A.C.T.I.O.N.S - M.I.D.D.L.E.W.A.R.E
 
     FIXED: Proper middleware chaining with correct next() handling
     The issue was that middleware was calling next() but the result wasn't being returned properly

@@ -8,7 +8,7 @@ import {metricsReport} from '../context/metrics-report'
 
 /*
 
-    C.Y.R.E. - T.H.R.O.T.T.L.E. - A.C.T.I.O.N.S
+    C.Y.R.E - A.C.T.I.O.N.S - T.H.R.O.T.T.L.E. 
 
     Limits execution frequency based on throttle setting
 

@@ -9,7 +9,7 @@ import {log} from '../components/cyre-log'
 
 /*
 
-    C.Y.R.E. - D.E.B.O.U.N.C.E. - A.C.T.I.O.N.S
+    C.Y.R.E- A.C.T.I.O.N.S - D.E.B.O.U.N.C.E
 
     Collapses rapid calls into a single delayed execution
 

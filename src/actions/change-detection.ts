@@ -7,7 +7,7 @@ import {metricsReport} from '../context/metrics-report'
 
 /*
 
-    C.Y.R.E. - C.H.A.N.G.E. - A.C.T.I.O.N.S
+    C.Y.R.E - A.C.T.I.O.N.S - C.H.A.N.G.E
 
     Prevents execution if payload has not changed
 
