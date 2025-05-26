@@ -1,15 +1,15 @@
-// src/components/cyre-timekeeper.ts - FIXED repeat logic and execution
+// src/components/cyre-timekeeper.ts
 import type {Timer, TimerDuration, TimerRepeat} from '../types/interface'
 import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsState, Result} from '../context/metrics-state'
 import {timeline} from '../context/state'
-import {metricsReport} from '../context/metrics-report'
 
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
       Q0.0U0.0A0.0N0.0T0.0U0.0M0
 
+      
       Repeat logic and execution handling
 
       Cyre Interval, Delay, Repeat Logic
@@ -35,6 +35,21 @@ import {metricsReport} from '../context/metrics-report'
       { repeat: 0 } = Do not execute at all. 
       { repeat: 1, interval: 1000 } = Wait 1000ms, execute once, done.
       { delay: 0 } = wait 0ms then execute.
+      
+      1. Always replace existing timekeeper for same action ID
+      2. Delay handling: delay for first execution, interval for subsequent
+      3. delay = 0 executes immediately, then uses interval
+      4. After first execution, delay becomes undefined, interval takes over
+      5. Proper metrics integration
+      6. Maintains all existing timekeeper functionality
+
+      Logic:
+      - { delay: 500, interval: 1000, repeat: 3 }
+        → Wait 500ms → Execute → Wait 1000ms → Execute → Wait 1000ms → Execute
+      - { delay: 0, interval: 1000, repeat: 3 }  
+        → Execute immediately → Wait 1000ms → Execute → Wait 1000ms → Execute
+      - { interval: 1000, repeat: 3 } (no delay)
+        → Wait 1000ms → Execute → Wait 1000ms → Execute → Wait 1000ms → Execute
 */
 
 const createPrecisionTimer = (
@@ -102,14 +117,13 @@ const initializeFormation = (
   const systemState = metricsState.get()
   const stressFactor = 1 + (systemState.stress?.combined || 0)
 
-  // Create the formation with the ORIGINAL repeat value
   const formation: Timer = {
     id,
     startTime: now,
     duration: isLongDuration ? TIMING.MAX_TIMEOUT : rawDuration * stressFactor,
     originalDuration: rawDuration,
     callback,
-    repeat: repeat ?? 0, // Provide a default value (e.g., 0) if repeat is undefined
+    repeat,
     executionCount: 0,
     lastExecutionTime: 0,
     nextExecutionTime:
@@ -136,7 +150,6 @@ const initializeFormation = (
   return formation
 }
 
-// Execute callback with proper repeat handling
 const executeCallback = async (formation: Timer): Promise<void> => {
   if (!formation || !formation.id) return
 
@@ -148,7 +161,6 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     await formation.callback()
 
     const executionTime = performance.now() - startTime
-    metricsReport.trackExecution(formation.id, executionTime)
 
     currentFormation.metrics.totalExecutions++
     currentFormation.metrics.successfulExecutions++
@@ -170,45 +182,32 @@ const executeCallback = async (formation: Timer): Promise<void> => {
     currentFormation.executionCount++
     currentFormation.lastExecutionTime = Date.now()
 
-    if (currentFormation.executionCount > 1) {
-      metricsReport.trackRepeat(formation.id)
-    }
-
-    // FIXED: Proper repeat handling - decrement BEFORE checking for continuation
-    let shouldContinue = false
-
     if (
-      currentFormation.repeat === true ||
-      currentFormation.repeat === Infinity
+      currentFormation.repeat !== true &&
+      typeof currentFormation.repeat === 'number'
     ) {
-      shouldContinue = true // Continue indefinitely
-    } else if (typeof currentFormation.repeat === 'number') {
-      // Decrement the repeat count
       currentFormation.repeat = currentFormation.repeat - 1
-      // Continue if there are more executions needed
-      shouldContinue = currentFormation.repeat > 0
     }
 
     timeline.add(currentFormation)
 
-    // FIXED: Only schedule another execution if we should continue
-    if (shouldContinue) {
+    // Check if we should continue repeating
+    if (
+      currentFormation.repeat === true ||
+      (typeof currentFormation.repeat === 'number' &&
+        currentFormation.repeat > 0)
+    ) {
       scheduleNext(currentFormation)
     } else {
-      // Clean up the timer when done
       timeline.forget(currentFormation.id)
     }
   } catch (error) {
-    metricsReport.trackError(formation.id)
     const updatedFormation = timeline.get(formation.id)
     if (updatedFormation) {
       updatedFormation.metrics.failedExecutions++
       timeline.add(updatedFormation)
     }
     log.error(`Timer execution failed: ${error}`)
-
-    // On error, also clean up to prevent stuck timers
-    timeline.forget(formation.id)
   }
 }
 
@@ -260,6 +259,8 @@ const createRecuperationChecker = (formation: Timer): NodeJS.Timeout => {
   return timeoutRef
 }
 
+// src/components/cyre-time-keeper.ts (partial)
+
 const scheduleNext = (formation: Timer): void => {
   if (!formation || !formation.id) return
 
@@ -272,9 +273,8 @@ const scheduleNext = (formation: Timer): void => {
 
   if (!currentFormation || !currentFormation.isActive) return
 
-  // FIXED: Prevent infinite recursion with better bounds checking
-  if (currentFormation.executionCount > 50000) {
-    // Increased from 10000 for stress tests
+  // Prevent infinite recursion
+  if (currentFormation.executionCount > 10000) {
     log.error('Maximum execution count exceeded')
     timeline.forget(currentFormation.id)
     return
@@ -322,7 +322,7 @@ const scheduleNext = (formation: Timer): void => {
   currentFormation.timeoutId = isTestEnv
     ? setTimeout(
         () => executeCallback(currentFormation),
-        Math.min(currentFormation.duration, 5000) // Cap duration in tests
+        currentFormation.duration
       )
     : currentFormation.duration < 25
     ? createPrecisionTimer(
@@ -348,7 +348,6 @@ const TimeKeeper = {
       const msValue =
         typeof duration === 'number' ? duration : convertDurationToMs(duration)
 
-      // FIXED: Pass the original repeat value without any conversion
       const formation = initializeFormation(id, msValue, callback, repeat)
       timeline.add(formation)
       scheduleNext(formation)

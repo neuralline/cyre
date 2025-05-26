@@ -1,5 +1,5 @@
 // src/pipeline/pipeline-executor.ts
-// FIXED: Lightweight metrics integration
+// FIXED: Synchronous chain reactions and proper delay/interval handling
 
 import type {
   IO,
@@ -10,7 +10,7 @@ import type {
 import {subscribers} from '../context/state'
 import {log} from '../components/cyre-log'
 import {MSG} from '../config/cyre-config'
-import {metricsReport} from '../context/metrics-report' // FIXED: Lightweight collector
+import {metricsReport} from '../context/metrics-report'
 import {historyState} from '../context/history-state'
 import timeKeeper from '../components/cyre-timekeeper'
 import {CompiledPipeline, getCompiledPipeline} from './pipeline-compiler'
@@ -125,9 +125,7 @@ const executeFastPath = async (
   payload: ActionPayload,
   timer: SimpleTimer
 ): Promise<CyreResponse> => {
-  // FIXED: Apply essential system protections even in fast path
-
-  // 1. System recuperation check
+  // Apply essential system protections even in fast path
   const {metricsState} = await import('../context/metrics-state')
   const {breathing} = metricsState.get()
   if (breathing.isRecuperating && action.priority?.level !== 'critical') {
@@ -138,7 +136,7 @@ const executeFastPath = async (
     }
   }
 
-  // 2. CRITICAL FIX: Repeat zero check for fast path
+  // CRITICAL FIX: Repeat zero check for fast path
   if (action.repeat === 0) {
     return {
       ok: true,
@@ -155,7 +153,7 @@ const executeFastPath = async (
   }
 
   try {
-    // 🚀 DIRECT EXECUTION - Minimal pipeline overhead
+    // Direct execution - Minimal pipeline overhead
     const result = subscriber.fn(payload)
     // Handle both sync and async results
     const handlerResult = await Promise.resolve(result)
@@ -166,7 +164,7 @@ const executeFastPath = async (
 
     const totalTime = timer.getTotalTime()
 
-    // FIXED: Track execution with lightweight collector
+    // Track execution with lightweight collector
     metricsReport.trackExecution(action.id, totalTime, 'fast-path')
 
     // Record history
@@ -177,21 +175,23 @@ const executeFastPath = async (
       totalTime
     )
 
-    // Handle chain reactions (intraLinks) - FIXED processing
+    // FIXED: Handle chain reactions synchronously for fast path
     if (
       handlerResult &&
       typeof handlerResult === 'object' &&
       'id' in handlerResult &&
       handlerResult.id
     ) {
-      // Process chain reaction asynchronously to avoid blocking
-      setImmediate(async () => {
-        await processChainReaction(
-          action.id,
-          handlerResult.id,
-          handlerResult.payload
-        )
-      })
+      log.debug(
+        `🔗 Processing fast path chain reaction: ${action.id} -> ${handlerResult.id}`
+      )
+
+      // Process chain reaction synchronously
+      const chainResult = await processChainReaction(
+        action.id,
+        handlerResult.id,
+        handlerResult.payload
+      )
 
       return {
         ok: true,
@@ -202,7 +202,8 @@ const executeFastPath = async (
           executionTime: totalTime,
           intraLink: {
             id: handlerResult.id,
-            payload: handlerResult.payload
+            payload: handlerResult.payload,
+            chainResult: chainResult
           }
         }
       }
@@ -225,7 +226,7 @@ const executeFastPath = async (
       `Cyre: Fast path execution failed for ${action.id}: ${errorMessage}`
     )
 
-    // FIXED: Track error with lightweight collector
+    // Track error with lightweight collector
     metricsReport.trackError(action.id, errorMessage)
 
     // Record error in history
@@ -270,12 +271,18 @@ const executePipeline = async (
         subscriber.fn(finalPayload || payload)
       )
 
-      // Handle chain reactions from pipeline execution
+      // FIXED: Handle chain reactions synchronously from pipeline execution
       if (result && typeof result === 'object' && 'id' in result && result.id) {
-        // Process chain reaction asynchronously
-        setImmediate(async () => {
-          await processChainReaction(action.id, result.id, result.payload)
-        })
+        log.debug(
+          `🔗 Processing pipeline chain reaction: ${action.id} -> ${result.id}`
+        )
+
+        // Process chain reaction synchronously
+        const chainResult = await processChainReaction(
+          action.id,
+          result.id,
+          result.payload
+        )
 
         return {
           ok: true,
@@ -284,7 +291,8 @@ const executePipeline = async (
           metadata: {
             intraLink: {
               id: result.id,
-              payload: result.payload
+              payload: result.payload,
+              chainResult: chainResult
             }
           }
         }
@@ -302,7 +310,7 @@ const executePipeline = async (
     let response: CyreResponse
 
     if (compiledPipeline.pipeline.length === 0) {
-      // No pipeline functions, direct execution (shouldn't happen for non-fast-path)
+      // No pipeline functions, direct execution
       response = await finalExecution(currentPayload)
     } else {
       // Execute pipeline using functional composition
@@ -328,7 +336,7 @@ const executePipeline = async (
 
     const totalTime = timer.getTotalTime()
 
-    // FIXED: Track execution with lightweight collector
+    // Track execution with lightweight collector
     metricsReport.trackExecution(
       action.id,
       totalTime,
@@ -360,7 +368,7 @@ const executePipeline = async (
 
     log.error(`Pipeline execution failed for ${action.id}: ${errorMessage}`)
 
-    // FIXED: Track error with lightweight collector
+    // Track error with lightweight collector
     metricsReport.trackError(action.id, errorMessage)
 
     // Record error in history
@@ -381,8 +389,7 @@ const executePipeline = async (
 }
 
 /**
- * FIXED: TIMEKEEPER INTEGRATION - SIMPLIFIED
- * Let timekeeper handle all timing complexity with proper callback execution
+ * FIXED: TIMEKEEPER INTEGRATION with proper delay/interval handling
  */
 const executeWithTimekeeper = async (
   action: IO,
@@ -421,26 +428,42 @@ const executeWithTimekeeper = async (
       }
     }
 
-    // FIXED: Use proper timing parameters based on v4.0.0 logic
-    let duration: number
+    // FIXED: Proper delay/interval handling for v4.0.0 logic
     let repeat: number | boolean = action.repeat ?? 1
 
-    // v4.0.0 timing priority: delay overwrites interval for initial execution
+    // FIXED: Pass delay and interval separately to timekeeper
+    const timekeeperOptions: {delay?: number; interval?: number} = {}
+
+    if (action.delay !== undefined) {
+      timekeeperOptions.delay = action.delay
+    }
+
+    if (action.interval !== undefined) {
+      timekeeperOptions.interval = action.interval
+    }
+
+    // Determine primary duration for timekeeper (delay takes priority, then interval)
+    let duration: number
     if (action.delay !== undefined) {
       duration = action.delay
     } else if (action.interval) {
       duration = action.interval
     } else {
-      // Only repeat specified, use immediate execution
-      duration = 0
+      duration = 0 // Immediate execution
     }
 
-    // CRITICAL FIX: Use action.id directly as timekeeper ID for proper management
+    log.debug(
+      `[TIMEKEEPER] Setting up ${action.id} with duration: ${duration}, repeat: ${repeat}, options:`,
+      timekeeperOptions
+    )
+
+    // Use action.id directly as timekeeper ID for proper management
     const timekeeperResult = timeKeeper.keep(
       duration,
       executionCallback,
       repeat,
-      action.id // Use action ID directly, not generated ID
+      action.id, // Use action ID directly
+      timekeeperOptions // Pass delay/interval options
     )
 
     if (timekeeperResult.kind === 'error') {
@@ -474,7 +497,8 @@ const executeWithTimekeeper = async (
         schedulingTime: totalTime,
         duration,
         repeat,
-        scheduled: true
+        scheduled: true,
+        timingOptions: timekeeperOptions
       }
     }
   } catch (error) {
@@ -506,7 +530,7 @@ export const executeCompiledAction = async (
     // Get or compile pipeline
     const compiledPipeline = getCompiledPipeline(action)
 
-    // FIXED: Check if action requires timekeeper first
+    // Check if action requires timekeeper first
     if (requiresTimekeeper(action)) {
       return await executeWithTimekeeper(action, payload, compiledPipeline)
     }
@@ -536,14 +560,14 @@ export const executeCompiledAction = async (
 }
 
 /**
- * 🔗 CHAIN REACTION PROCESSOR
- * Handles intraLink execution with proper isolation and error handling
+ * FIXED: SYNCHRONOUS CHAIN REACTION PROCESSOR
+ * Handles intraLink execution synchronously for tests and predictable behavior
  */
 export const processChainReaction = async (
   originActionId: string,
   chainId: string,
   chainPayload?: ActionPayload
-): Promise<void> => {
+): Promise<{ok: boolean; chainExecuted: boolean; error?: string}> => {
   try {
     log.debug(`🔗 Processing chain reaction: ${originActionId} -> ${chainId}`)
 
@@ -553,7 +577,7 @@ export const processChainReaction = async (
 
     if (!linkedAction) {
       log.warn(`⚠️ Chain reaction failed: action '${chainId}' not found`)
-      return
+      return {ok: false, chainExecuted: false, error: 'Action not found'}
     }
 
     // Execute the chain with its own timer and metrics
@@ -562,8 +586,8 @@ export const processChainReaction = async (
       chainPayload || linkedAction.payload
     )
 
-    // Process nested chains recursively if present
-    if (chainResponse.metadata?.intraLink) {
+    // FIXED: Process nested chains recursively if present
+    if (chainResponse.ok && chainResponse.metadata?.intraLink) {
       await processChainReaction(
         chainId,
         chainResponse.metadata.intraLink.id,
@@ -572,10 +596,17 @@ export const processChainReaction = async (
     }
 
     log.debug(`✅ Chain reaction completed: ${originActionId} -> ${chainId}`)
+    return {
+      ok: chainResponse.ok,
+      chainExecuted: true,
+      error: chainResponse.ok ? undefined : chainResponse.error
+    }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(
-      `❌ Chain reaction failed: ${originActionId} -> ${chainId}: ${error}`
+      `❌ Chain reaction failed: ${originActionId} -> ${chainId}: ${errorMessage}`
     )
+    return {ok: false, chainExecuted: false, error: errorMessage}
   }
 }
 

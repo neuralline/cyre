@@ -25,6 +25,7 @@ export type EventType =
   | 'error'
   | 'warning'
   | 'critical'
+  | 'success'
   | 'info'
   | 'debug'
   | 'throttle'
@@ -283,15 +284,23 @@ export const metricsReport = {
   /**
    * Record protection events (throttle, debounce, skip)
    */
-  trackProtection: (
-    actionId: ActionId,
-    protectionType: 'throttle' | 'debounce' | 'skip'
-  ): void => {
+  trackProtection: (actionId: ActionId, eventType: EventType): void => {
     try {
-      const event = createEvent(actionId, protectionType)
-      eventStore.set(`${protectionType}-${eventSequence++}`, event)
+      const event = createEvent(actionId, eventType)
+      eventStore.set(`${eventType}-${eventSequence++}`, event)
     } catch (error) {
       log.error(`Protection tracking failed: ${error}`)
+    }
+  },
+  /**
+   * Record middleware rejection events
+   */
+  trackMiddleware: (actionId: ActionId, eventType: EventType): void => {
+    try {
+      const event = createEvent(actionId, eventType)
+      eventStore.set(`middleware-${eventSequence++}`, event)
+    } catch (error) {
+      log.error(`Middleware rejection tracking failed: ${error}`)
     }
   },
 
@@ -315,7 +324,7 @@ export const metricsReport = {
    */
   exportEvents: (filter?: {
     actionId?: ActionId
-    eventType?: RawMetricEvent['eventType']
+    eventType?: EventType
     since?: number
     limit?: number
   }): RawMetricEvent[] => {
