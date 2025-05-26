@@ -17,7 +17,7 @@
     "type-check": "tsc --noEmit --skipLibCheck",
     "prepublishOnly": "npm run test",
     "clean": "rimraf dist coverage .vite",
-    "example": "tsx examples/basic-usage.ts",
+    "example": "pnpm tsx example/cyre-extended-tests.ts",
     "roll": "rimraf dist && rollup -c && tsc --emitDeclarationOnly --skipLibCheck --noImplicitAny false"
   },
   "author": "Darik.",

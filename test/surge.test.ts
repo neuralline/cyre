@@ -1,7 +1,7 @@
 // test/surge.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre, log} from '../src/app'
+import {cyre, log} from '../src'
 
 /*
  * C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E. T.E.S.T

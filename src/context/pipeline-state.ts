@@ -65,10 +65,6 @@ export const pipelineState = {
             ? pipelineStats.heavyChannels + 1
             : pipelineStats.heavyChannels
       }
-
-      log.debug(
-        `Pipeline stored for ${compiledPipeline.channelId} (${compiledPipeline.performance.category})`
-      )
     } catch (error) {
       log.error(
         `Failed to store pipeline for ${compiledPipeline.channelId}: ${error}`
@@ -89,14 +85,13 @@ export const pipelineState = {
           ...pipelineStats,
           cacheHits: pipelineStats.cacheHits + 1
         }
-        log.debug(`Pipeline cache hit for ${channelId}`)
-      } else {
+
         // Update cache miss stats
         pipelineStats = {
           ...pipelineStats,
           cacheMisses: pipelineStats.cacheMisses + 1
         }
-        log.debug(`Pipeline cache miss for ${channelId}`)
+        // log.debug(`Pipeline cache miss for ${channelId}`)
       }
 
       return pipeline

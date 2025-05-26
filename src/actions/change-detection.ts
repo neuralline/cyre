@@ -1,15 +1,16 @@
 // src/actions/change-detection.ts
-// Change detection protection mechanism
+// FIXED: Lightweight metrics integration
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io} from '../context/state'
-import {metricsReport} from '../context/metrics-report'
+import {metricsReport} from '../context/metrics-report' // FIXED: Lightweight collector
 
 /*
 
     C.Y.R.E - A.C.T.I.O.N.S - C.H.A.N.G.E
 
     Prevents execution if payload has not changed
+    FIXED: Uses lightweight metrics collection
 
 */
 
@@ -26,7 +27,9 @@ export const applyChangeDetectionProtection = async (
   }
 
   if (!io.hasChanged(action.id, payload)) {
-    metricsReport.trackChangeDetectionSkip(action.id)
+    // FIXED: Track skip event with lightweight collector
+    metricsReport.trackProtection(action.id, 'skip')
+
     return {
       ok: true,
       payload: null,

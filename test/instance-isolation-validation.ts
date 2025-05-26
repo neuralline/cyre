@@ -2,7 +2,7 @@
 // Validation test for the instance isolation fixes
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {Cyre} from '../src'
+import {cyre as Cyre} from '../src'
 
 /*
  * Instance Isolation Validation Test

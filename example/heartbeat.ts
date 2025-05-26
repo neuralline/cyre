@@ -1,5 +1,5 @@
 // example/repeat.ts
-import {cyre, log} from '../src/app'
+import {cyre, log} from '../src'
 // Create an action with infinite repeat
 cyre.action({
   id: 'heartbeat',

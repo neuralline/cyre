@@ -1,9 +1,9 @@
 // src/actions/debounce.ts
-// Debounce protection mechanism
+// FIXED: Lightweight metrics integration
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io} from '../context/state'
-import {metricsReport} from '../context/metrics-report'
+import {metricsReport} from '../context/metrics-report' // FIXED: Lightweight collector
 import timeKeeper from '../components/cyre-timekeeper'
 import {log} from '../components/cyre-log'
 
@@ -12,6 +12,7 @@ import {log} from '../components/cyre-log'
     C.Y.R.E- A.C.T.I.O.N.S - D.E.B.O.U.N.C.E
 
     Collapses rapid calls into a single delayed execution
+    FIXED: Uses lightweight metrics collection
 
 */
 
@@ -32,8 +33,8 @@ export const applyDebounceProtection = async (
     return next(payload)
   }
 
-  // IMPORTANT: Track debounce before setting up timer
-  metricsReport.trackDebounce(action.id)
+  // FIXED: Track debounce with lightweight collector
+  metricsReport.trackProtection(action.id, 'debounce')
 
   // Cancel any existing debounce timer
   if (action.debounceTimerId) {

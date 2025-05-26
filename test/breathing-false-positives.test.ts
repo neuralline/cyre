@@ -329,16 +329,16 @@ describe('Breathing System False Positives', () => {
     )
 
     // Log all data for analysis
-    console.log(
-      '[TEST] Execution data:',
-      executions.map((e, i) => ({
-        index: i,
-        stress: (e.stress * 100).toFixed(1) + '%',
-        delay: e.delay,
-        rate: e.breathing.rate,
-        recuperating: e.breathing.isRecuperating
-      }))
-    )
+    // console.log(
+    //   '[TEST] Execution data:',
+    //   executions.map((e, i) => ({
+    //     index: i,
+    //     stress: (e.stress * 100).toFixed(1) + '%',
+    //     delay: e.delay,
+    //     rate: e.breathing.rate,
+    //     recuperating: e.breathing.isRecuperating
+    //   }))
+    // )
 
     // ASSERTIONS
 

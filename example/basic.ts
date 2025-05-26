@@ -1,5 +1,5 @@
 // example/basic.ts
-import {cyre, log} from '../src/app'
+import {cyre, log} from '../src'
 //export default cyre
 
 //example use

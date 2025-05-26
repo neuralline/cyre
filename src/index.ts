@@ -9,12 +9,13 @@
 */
 
 // Import the cyre instance and related utilities from app.ts
-import {cyre, Cyre, log} from './app'
+import {cyre} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
+import {log} from './components/cyre-log'
 
 // Main exports - ensure these are properly exported
-export {cyre, Cyre, log, useCyre, cyreCompose}
+export {cyre, log, useCyre, cyreCompose}
 
 // Export utility components
 //export {pipe, memoize, isEqual, tryCatch} from './libs/utils'
