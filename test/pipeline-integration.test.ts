@@ -164,9 +164,15 @@ describe('Clean Pipeline Integration System', () => {
   it('should apply change detection through pipeline', async () => {
     const actionId = 'change-detection-test'
     let executionCount = 0
+    let lastPayload: any = null
 
     cyre.on(actionId, payload => {
       executionCount++
+      lastPayload = payload
+      console.log(
+        `Handler executed ${executionCount} times with payload:`,
+        payload
+      )
       return {executed: true, payload}
     })
 
@@ -176,25 +182,49 @@ describe('Clean Pipeline Integration System', () => {
       detectChanges: true
     })
 
+    console.log('=== Testing change detection ===')
+
     // First call should execute
+    console.log('Making first call with {value: "test"}')
     const result1 = await cyre.call(actionId, {value: 'test'})
+    console.log('First call result:', {
+      ok: result1.ok,
+      message: result1.message
+    })
     expect(result1.ok).toBe(true)
     expect(executionCount).toBe(1)
 
+    // Small delay to ensure async operations complete
+    await new Promise(resolve => setTimeout(resolve, 10))
+
     // Second call with same payload should be skipped
+    console.log('Making second call with same payload {value: "test"}')
     const result2 = await cyre.call(actionId, {value: 'test'})
+    console.log('Second call result:', {
+      ok: result2.ok,
+      message: result2.message
+    })
+    console.log('Execution count after second call:', executionCount)
+
     expect(result2.ok).toBe(false)
     expect(result2.message).toContain('No changes detected')
     expect(executionCount).toBe(1) // Should not increase
 
     // Third call with different payload should execute
+    console.log('Making third call with different payload {value: "different"}')
     const result3 = await cyre.call(actionId, {value: 'different'})
+    console.log('Third call result:', {
+      ok: result3.ok,
+      message: result3.message
+    })
     expect(result3.ok).toBe(true)
     expect(executionCount).toBe(2)
 
     console.log('Change detection results:', {
+      first: result1.ok,
       same: result2.ok,
-      different: result3.ok
+      different: result3.ok,
+      finalCount: executionCount
     })
   })
 

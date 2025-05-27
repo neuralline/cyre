@@ -534,6 +534,9 @@ export const metricsReport = {
   getActionStats: (actionId: ActionId): ActionStats | undefined => {
     return actionStatsStore.get(actionId)
   },
+  getActionMetrics: (actionId: ActionId): ActionStats | undefined => {
+    return actionStatsStore.get(actionId)
+  },
 
   // Basic reporting
   getBasicReport: (): string => {

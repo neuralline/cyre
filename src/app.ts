@@ -393,6 +393,8 @@ const hasChanged = (id: string, payload: ActionPayload): boolean =>
   io.hasChanged(id, payload)
 const getPrevious = (id: string): ActionPayload | undefined =>
   io.getPrevious(id)
+const updatePayloadHistory = (id: string, payload: ActionPayload): void =>
+  io.updatePayloadHistory(id, payload)
 const pause = (id?: string): void => {
   timeKeeper.pause(id)
   metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
@@ -576,6 +578,7 @@ export const cyre = {
   // State methods
   hasChanged,
   getPrevious,
+  updatePayloadHistory,
 
   // Control methods
   pause,
@@ -596,7 +599,47 @@ export const cyre = {
 
   // Metrics export
   exportMetrics,
-  getBasicMetricsReport
+  getBasicMetricsReport,
+
+  //timer
+  /**
+   * Set a timer with proper error handling
+   * @returns Object indicating success and optional timerId/message
+   */
+  setTimer: (
+    duration: number,
+    callback: () => void,
+    timerId: string
+  ): {ok: boolean; message?: string} => {
+    try {
+      const result = timeKeeper.keep(
+        duration,
+        callback,
+        1, // Execute once
+        timerId
+      )
+
+      return result.kind === 'ok'
+        ? {ok: true}
+        : {ok: false, message: result.error.message}
+    } catch (error) {
+      log.error(`Failed to set timer: ${error}`)
+      return {ok: false, message: String(error)}
+    }
+  },
+
+  /**
+   * Clear a timer by ID
+   */
+  clearTimer: (timerId: string): boolean => {
+    try {
+      timeKeeper.forget(timerId)
+      return true
+    } catch (error) {
+      log.error(`Failed to clear timer ${timerId}: ${error}`)
+      return false
+    }
+  }
 }
 
 // Initialize on import

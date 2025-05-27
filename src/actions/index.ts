@@ -224,15 +224,39 @@ export const useMiddleware: ActionPipelineFunction = (
 
 /**
  * Build action pipeline based on action configuration
+ * Fast path: No pipeline functions for simple actions
  */
 export const buildActionPipeline = (action: IO): ActionPipelineFunction[] => {
   const pipeline: ActionPipelineFunction[] = []
 
-  // System recuperation check (always included for non-critical actions)
-  pipeline.push(useRecuperation)
+  // Check if action needs any protection features
+  const needsProtection = !!(
+    action.throttle ||
+    action.debounce ||
+    action.detectChanges ||
+    (action.middleware && action.middleware.length > 0) ||
+    action.repeat === 0 ||
+    (action.priority?.level &&
+      action.priority.level !== 'medium' &&
+      action.priority.level !== undefined)
+  )
 
-  // Repeat: 0 check (always included)
-  pipeline.push(useBlock)
+  // If no protection needed, return empty pipeline for fast path
+  if (!needsProtection) {
+    return pipeline // Empty array = fast path
+  }
+
+  // Add protection functions only when needed
+
+  // System recuperation check (only for non-critical actions that need protection)
+  if (!action.priority?.level || action.priority.level !== 'critical') {
+    pipeline.push(useRecuperation)
+  }
+
+  // Repeat: 0 check (only if repeat is explicitly set to 0)
+  if (action.repeat === 0) {
+    pipeline.push(useBlock)
+  }
 
   // Add conditional pipeline functions based on action configuration
   if (action.throttle) {

@@ -67,6 +67,12 @@ export const useDispatch = async (
       'useDispatch'
     )
 
+    // IMPORTANT: Update payload history after successful execution for change detection
+    if (result.ok && action.detectChanges) {
+      // Force update the payload history now that execution succeeded
+      io.hasChanged(action.id, currentPayload)
+    }
+
     // Record in history
     historyState.record(
       action.id,

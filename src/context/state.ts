@@ -1,18 +1,13 @@
-// src/context/state.ts - FIXED: Proper metrics tracking and synchronization
+// src/context/state.ts
+// Updated with proper payload history management for change detection
+
 import {log} from '../components/cyre-log'
-import type {
-  ActionMetrics,
-  ActionPayload,
-  IO,
-  ISubscriber,
-  Timer
-} from '../types/interface'
+import type {ActionPayload, IO, ISubscriber, Timer} from '../types/interface'
 import {isEqual} from '../libs/utils'
 import {metricsState, type QuantumState} from './metrics-state'
 
 import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
-import timeKeeper from '../components/cyre-timekeeper'
 export type MiddlewareFunction = (action: IO) => Promise<void>
 // Update to include proper middleware typing
 
@@ -49,7 +44,7 @@ const cleanupAction = (id: StateKey): void => {
   payloadHistory.forget(id)
 }
 
-// Export IO operations with FIXED metrics tracking and synchronization
+// Export IO operations with proper metrics tracking and synchronization
 export const io = {
   set: (ioState: IO): void => {
     if (!ioState?.id) throw new Error('IO must have an id')
@@ -64,7 +59,7 @@ export const io = {
       cleanupAction(ioState.id)
       ioStore.set(ioState.id, enhanced)
 
-      // FIXED: Ensure action metrics are initialized properly with current timestamp
+      // Initialize action metrics properly with current timestamp
       const currentTime = Date.now()
       const currentMetrics = actionMetrics.get(ioState.id)
 
@@ -75,10 +70,10 @@ export const io = {
           executionCount: 0,
           errors: []
         })
-        //log.debug(`Initialized metrics for ${ioState.id}`)
       }
 
-      if (ioState.detectChanges) {
+      // Initialize payload history for change detection if needed
+      if (ioState.detectChanges && ioState.payload !== undefined) {
         payloadHistory.set(ioState.id, ioState.payload)
       }
 
@@ -94,7 +89,7 @@ export const io = {
     }
   },
 
-  // FIXED: Improved metrics update with proper validation and synchronization
+  // Improved metrics update with proper validation and synchronization
   updateMetrics: (id: StateKey, update: Partial<StateActionMetrics>): void => {
     try {
       // Get current metrics or create default if none exist
@@ -127,34 +122,6 @@ export const io = {
       if (hasChanges) {
         // Store updated metrics
         actionMetrics.set(id, updatedMetrics)
-
-        // log.debug(
-        //  `Updated metrics for ${id}: lastExecution=${updatedMetrics.lastExecutionTime}, count=${updatedMetrics.executionCount}`
-        //)
-
-        // FIXED: Synchronize with enhanced metrics system
-        // Import here to avoid circular dependency
-        import('../context/metrics-report')
-          .then(({metricsReport}) => {
-            // Ensure enhanced metrics system is also tracking this execution
-            if (
-              update.lastExecutionTime &&
-              update.lastExecutionTime > current.lastExecutionTime
-            ) {
-              // This indicates a new execution, so track it in enhanced system if not already tracked
-              const enhancedMetrics = metricsReport.getActionMetrics(id)
-              if (
-                !enhancedMetrics ||
-                enhancedMetrics.lastExecution < update.lastExecutionTime
-              ) {
-                // Track a basic execution to keep systems in sync
-                metricsReport.trackExecution(id, 1) // Minimal time to indicate execution occurred
-              }
-            }
-          })
-          .catch(err => {
-            log.debug(`Could not sync with enhanced metrics: ${err}`)
-          })
       }
     } catch (error) {
       log.error(`Failed to update metrics for ${id}: ${error}`)
@@ -183,20 +150,17 @@ export const io = {
   // Get all io state
   getAll: (): IO[] => ioStore.getAll(),
 
-  // FIXED: Improved change detection with better logging
+  // Improved change detection with better logging
   hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
     try {
       const previousPayload = payloadHistory.get(id)
 
       // If no previous payload, consider it changed
       if (previousPayload === undefined) {
-        // log.debug(`No previous payload for ${id}, considering changed`)
         return true
       }
 
       const hasChanged = !isEqual(newPayload, previousPayload)
-      // log.debug(`Change detection for ${id}: ${hasChanged}`)
-
       return hasChanged
     } catch (error) {
       log.error(`Error in change detection for ${id}: ${error}`)
@@ -208,7 +172,16 @@ export const io = {
     return payloadHistory.get(id)
   },
 
-  // FIXED: Proper metrics retrieval with better logging and fallback
+  // NEW: Update payload history after successful execution
+  updatePayloadHistory: (id: StateKey, payload: ActionPayload): void => {
+    try {
+      payloadHistory.set(id, payload)
+    } catch (error) {
+      log.error(`Failed to update payload history for ${id}: ${error}`)
+    }
+  },
+
+  // Proper metrics retrieval with better logging and fallback
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
     const metrics = actionMetrics.get(id)
     if (metrics) {
@@ -218,7 +191,7 @@ export const io = {
     } else {
       log.debug(`No metrics found for ${id}`)
 
-      // FIXED: If no legacy metrics exist but action exists, create minimal metrics
+      // If no legacy metrics exist but action exists, create minimal metrics
       const action = ioStore.get(id)
       if (action) {
         const newMetrics: StateActionMetrics = {
@@ -227,7 +200,6 @@ export const io = {
           errors: []
         }
         actionMetrics.set(id, newMetrics)
-        //log.debug(`Created minimal metrics for existing action ${id}`)
         return newMetrics
       }
     }
@@ -235,7 +207,7 @@ export const io = {
   },
 
   /**
-   * FIXED: Enhanced execution tracking that updates both legacy and enhanced metrics
+   * Enhanced execution tracking that updates both legacy and enhanced metrics
    */
   trackExecution: (id: StateKey, executionTime?: number): void => {
     try {
@@ -255,12 +227,6 @@ export const io = {
 
       actionMetrics.set(id, updatedMetrics)
 
-      // log.debug(
-      //   `Tracked execution for ${id}: time=${
-      //     executionTime || 'unknown'
-      //   }ms, count=${updatedMetrics.executionCount}`
-      // )
-
       // Sync with enhanced metrics if execution time is provided
       if (executionTime !== undefined) {
         import('../context/metrics-report')
@@ -274,45 +240,6 @@ export const io = {
     } catch (error) {
       log.error(`Failed to track execution for ${id}: ${error}`)
     }
-  },
-
-  /**
-   * Set a timer with proper error handling
-   * @returns Object indicating success and optional timerId/message
-   */
-  setTimer: (
-    duration: number,
-    callback: () => void,
-    timerId: string
-  ): {ok: boolean; message?: string} => {
-    try {
-      const result = timeKeeper.keep(
-        duration,
-        callback,
-        1, // Execute once
-        timerId
-      )
-
-      return result.kind === 'ok'
-        ? {ok: true}
-        : {ok: false, message: result.error.message}
-    } catch (error) {
-      log.error(`Failed to set timer: ${error}`)
-      return {ok: false, message: String(error)}
-    }
-  },
-
-  /**
-   * Clear a timer by ID
-   */
-  clearTimer: (timerId: string): boolean => {
-    try {
-      timeKeeper.forget(timerId)
-      return true
-    } catch (error) {
-      log.error(`Failed to clear timer ${timerId}: ${error}`)
-      return false
-    }
   }
 }
 
@@ -323,7 +250,6 @@ export const subscribers = {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
-    // log.debug(`Added subscriber: ${subscriber.id}`)
   },
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
   forget: (id: StateKey): boolean => {
@@ -335,7 +261,6 @@ export const subscribers = {
   },
   clear: (): void => {
     subscriberStore.clear()
-    // log.debug('Cleared all subscribers')
   },
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
@@ -348,7 +273,6 @@ export const middlewares = {
 
     // Store middleware in the central store
     middlewareStore.set(middleware.id, middleware)
-    // log.debug(`Added middleware: ${middleware.id}`)
   },
   get: (id: StateKey): IMiddleware | undefined => {
     return middlewareStore.get(id)
@@ -362,7 +286,6 @@ export const middlewares = {
   },
   clear: (): void => {
     middlewareStore.clear()
-    // log.debug('Cleared all middleware')
   },
   getAll: (): IMiddleware[] => {
     return middlewareStore.getAll()

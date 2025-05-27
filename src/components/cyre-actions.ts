@@ -9,7 +9,7 @@ import {log} from './cyre-log'
 
 /*
 
-      C.Y.R.E - A.C.T.I.O.N.S
+      C.Y.R.E. - A.C.T.I.O.N.S.
       
       Clean pipeline application system:
       - Loop through saved pipeline functions
@@ -28,10 +28,10 @@ export const applyActionPipeline = async (
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
   let currentPayload = payload || action.payload
-
+  const pipeline = pipelineState.get(action.id) || []
   try {
     // Check for fast path
-    if (pipelineState.isFastPath(action.id)) {
+    if (!pipeline.length) {
       // Zero overhead path - no pipeline to apply
       metricsReport.sensor.log(action.id, 'info', 'fast-path')
       return {
@@ -42,7 +42,6 @@ export const applyActionPipeline = async (
     }
 
     // Get saved pipeline for this action
-    const pipeline = pipelineState.get(action.id)
 
     if (!pipeline || pipeline.length === 0) {
       // No pipeline saved, treat as fast path
@@ -81,6 +80,7 @@ export const applyActionPipeline = async (
             )
           }
 
+          // Return the blocking result immediately - don't continue pipeline
           return result
         }
 

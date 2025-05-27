@@ -6,7 +6,7 @@ import type {StateKey} from '../types/interface'
 
 /*
 
-      C.Y.R.E. - P.I.P.E.L.I.N.E. - S.T.A.T.E.
+      C.Y.R.E - P.I.P.E.L.I.N.E - S.T.A.T.E
       
       Functional state management for compiled action pipelines:
       - Store compiled pipelines per action during action creation
