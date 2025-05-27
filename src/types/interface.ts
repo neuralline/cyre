@@ -57,3 +57,4 @@ export type {
   CyreHook,
   CyreChannel
 } from './hooks-interface'
+export * from './middleware'

@@ -1,33 +1,33 @@
 // src/app.ts
-// Updated with clean pipeline integration
+// Fixed integration with working unified middleware system
 
-import type {
-  IO,
-  ActionPayload,
-  CyreResponse,
-  IMiddleware
-} from './types/interface'
+import type {IO, ActionPayload, CyreResponse} from './types/interface'
 
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
-import {registerSingleAction} from './components/cyre-channels'
+import dataDefinitions from './elements/data-definitions'
+import CyreChannel from './components/cyre-channels'
 import {subscribe} from './components/cyre-on'
-import timeKeeper from './components/cyre-timekeeper'
-import {io, subscribers, middlewares, timeline} from './context/state'
+import {TimeKeeper} from './components/cyre-timekeeper'
+import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
-import {processCall} from './components/cyre-call'
-import {pipelineState} from './context/pipeline-state'
+import {middlewareState} from './middleware/state'
+import {executeMiddlewareChain} from './middleware/executor'
+import {useDispatch} from './components/cyre-dispatch'
+import type {ExternalMiddlewareFunction} from './types/interface'
+import {registerSingleAction} from './components/cyre-actions'
+import {processCall, scheduleCall} from './components/cyre-call'
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.0.2 2025
+    Version 4.1.0 2025
 
-    example use:
+     example use:
       cyre.action({id: 'uber', payload: 44085648634})
       cyre.on('uber', number => {
           console.log('Calling Uber: ', number)
@@ -42,13 +42,33 @@ import {pipelineState} from './context/pipeline-state'
 
  
 
+    Fixed with working unified middleware system:
+    - Single middleware execution chain
+    - Built-in protections as internal middleware
+    - External middleware without state access
+    - Zero overhead fast path for simple actions
+    - Proper integration with existing call flow
+
+    Example use:
+      cyre.action({id: 'uber', payload: 44085648634})
+      cyre.on('uber', number => {
+          console.log('Calling Uber: ', number)
+      })
+      cyre.call('uber') 
+
+    Middleware Features:
+    - Unified middleware system (internal + external)
+    - Zero-overhead fast path for actions without protections
+    - Per-action middleware chain compilation
+    - Built-in protections: throttle, debounce, change detection, etc.
+    - External middleware without internal state access
 */
 
 /**
  * Initialize the breathing system
  */
 const initializeBreathing = (): void => {
-  timeKeeper.keep(
+  TimeKeeper.keep(
     BREATHING.RATES.BASE,
     async () => {
       const currentState = metricsState.get()
@@ -68,7 +88,7 @@ let isInitialized = false
 let isLocked = false
 
 /**
- * Action registration with pipeline compilation and caching
+ * Action registration with middleware chain compilation
  */
 const action = (
   attribute: IO | IO[]
@@ -90,7 +110,7 @@ const action = (
 
       return {
         ok: successful > 0,
-        message: `Registered ${successful}/${total} actions with pipeline compilation`,
+        message: `Registered ${successful}/${total} actions with middleware compilation`,
         payload: results
       }
     } else {
@@ -138,24 +158,37 @@ export const call = async (
   })
 
   try {
-    // Check if action exists
+    // Check if channel exists
     const actionConfig = io.get(id)
     if (!actionConfig) {
       metricsReport.sensor.error(id, 'unknown id', 'call-validation')
       return {
         ok: false,
         payload: null,
-        message: `Action not found: ${id}`
+        message: `Channel not found: ${id}`
       }
     }
 
-    // Process call through clean flow
-    const result = await processCall(actionConfig, payload)
+    // Check if action requires timekeeper (has timing properties)
+    const requiresTimekeeper = !!(
+      actionConfig.interval ||
+      actionConfig.delay !== undefined ||
+      (actionConfig.repeat !== undefined &&
+        actionConfig.repeat !== 1 &&
+        actionConfig.repeat !== 0)
+    )
+
+    let result: CyreResponse
+
+    if (requiresTimekeeper) {
+      result = await scheduleCall(actionConfig, payload)
+    } else {
+      result = await processCall(actionConfig, payload)
+    }
 
     // Handle IntraLink chain reactions
     if (result.ok && result.metadata?.intraLink) {
       const chainLink = result.metadata.intraLink
-      log.debug(`Processing IntraLink: ${id} -> ${chainLink.id}`)
 
       try {
         // Recursively call the linked action
@@ -193,7 +226,7 @@ export const call = async (
 }
 
 /**
- * Forget action with pipeline cleanup
+ * Forget action with middleware cleanup
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -201,8 +234,8 @@ const forget = (id: string): boolean => {
   }
 
   try {
-    // Clean up pipeline
-    const pipelineRemoved = pipelineState.forget(id)
+    // Clean up middleware chain
+    const middlewareRemoved = middlewareState.forgetChain(id)
 
     // Remove action and subscriber
     const actionRemoved = io.forget(id)
@@ -211,8 +244,8 @@ const forget = (id: string): boolean => {
     // Clean up timeline entries
     timeline.forget(id)
 
-    if (actionRemoved || subscriberRemoved || pipelineRemoved) {
-      log.debug(`Removed action, pipeline, and subscriber for ${id}`)
+    if (actionRemoved || subscriberRemoved || middlewareRemoved) {
+      log.debug(`Removed action, middleware chain, and subscriber for ${id}`)
       metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
       return true
     }
@@ -230,14 +263,11 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * Middleware registration
+ * External middleware registration (user-facing API)
  */
 const middleware = (
   id: string,
-  fn: (
-    action: IO,
-    payload: ActionPayload
-  ) => Promise<{action: IO; payload: ActionPayload} | null>
+  fn: ExternalMiddlewareFunction
 ): {ok: boolean; message: string; payload: null} => {
   if (isLocked) {
     metricsReport.sensor.log(id, 'blocked', 'middleware-registration', {
@@ -247,38 +277,21 @@ const middleware = (
   }
 
   try {
-    if (!id || typeof id !== 'string') {
-      metricsReport.sensor.error(
-        id || 'unknown',
-        'Invalid middleware ID',
-        'middleware-registration'
-      )
-      return {ok: false, message: 'Middleware ID is required', payload: null}
+    const result = middlewareState.registerExternal(id, fn)
+
+    if (result.ok) {
+      metricsReport.sensor.log(id, 'middleware', 'middleware-registration', {
+        registered: true
+      })
+    } else {
+      metricsReport.sensor.error(id, result.message, 'middleware-registration')
     }
 
-    if (typeof fn !== 'function') {
-      metricsReport.sensor.error(
-        id,
-        'Invalid middleware function',
-        'middleware-registration'
-      )
-      return {
-        ok: false,
-        message: 'Middleware function is required',
-        payload: null
-      }
+    return {
+      ok: result.ok,
+      message: result.message,
+      payload: null
     }
-
-    // Register middleware
-    const middlewareObj: IMiddleware = {id, fn}
-    middlewares.add(middlewareObj)
-
-    log.debug(`Middleware registered: ${id}`)
-    metricsReport.sensor.log(id, 'middleware', 'middleware-registration', {
-      registered: true
-    })
-
-    return {ok: true, message: `Middleware registered: ${id}`, payload: null}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Middleware registration failed: ${errorMessage}`)
@@ -286,20 +299,18 @@ const middleware = (
     return {ok: false, message: errorMessage, payload: null}
   }
 }
-
 const clear = (): void => {
   try {
     metricsReport.sensor.log('system', 'info', 'system-clear', {
       timestamp: Date.now()
     })
 
-    // Clear pipeline cache
-    pipelineState.clear()
+    // Clear middleware chains
+    middlewareState.clearChains()
 
     // Clear existing state
     io.clear()
     subscribers.clear()
-    middlewares.clear()
     timeline.clear()
 
     // Clear history
@@ -332,7 +343,7 @@ export const cyre = {
     try {
       isInitialized = true
       initializeBreathing()
-      timeKeeper.resume()
+      TimeKeeper.resume()
 
       log.sys(MSG.QUANTUM_HEADER)
       log.success('CYRE initialized with clean pipeline system')
@@ -382,11 +393,11 @@ export const cyre = {
 
   // Control methods
   pause: (id?: string): void => {
-    timeKeeper.pause(id)
+    TimeKeeper.pause(id)
     metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
   },
   resume: (id?: string): void => {
-    timeKeeper.resume(id)
+    TimeKeeper.resume(id)
     metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
   },
   lock: (): {ok: boolean; message: string; payload: null} => {
@@ -395,6 +406,7 @@ export const cyre = {
     metricsReport.sensor.log('system', 'critical', 'system-lock')
     return {ok: true, message: 'System locked', payload: null}
   },
+
   shutdown: (): void => {
     try {
       metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
@@ -516,7 +528,7 @@ export const cyre = {
     timerId: string
   ): {ok: boolean; message?: string} => {
     try {
-      const result = timeKeeper.keep(
+      const result = TimeKeeper.keep(
         duration,
         callback,
         1, // Execute once
@@ -532,12 +544,9 @@ export const cyre = {
     }
   },
 
-  /**
-   * Clear a timer by ID
-   */
   clearTimer: (timerId: string): boolean => {
     try {
-      timeKeeper.forget(timerId)
+      TimeKeeper.forget(timerId)
       return true
     } catch (error) {
       log.error(`Failed to clear timer ${timerId}: ${error}`)

@@ -2,12 +2,12 @@
 // Clean call processing with proper flow separation
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
-import {applyActionPipeline} from './cyre-actions'
 import {useDispatch} from './cyre-dispatch'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
+import {executeMiddlewareChain} from '../middleware/executor'
 
 /*
 
@@ -26,54 +26,52 @@ import {TimeKeeper} from './cyre-timekeeper'
 /**
  * Main call processing function - clean and focused
  */
+/**
+ * Process call with unified middleware integration
+ */
 export const processCall = async (
   action: IO,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
-  if (!action) {
-    return {ok: false, payload: null, message: 'Invalid action'}
-  }
-
-  // Check if action requires timekeeper (has timing properties)
-  const requiresTimekeeper = !!(
-    action.interval ||
-    action.delay !== undefined ||
-    (action.repeat !== undefined && action.repeat !== 1 && action.repeat !== 0)
-  )
-
-  if (requiresTimekeeper) {
-    return await scheduleCall(action, payload)
-  }
-
-  // Normal call flow: apply pipeline then dispatch
-  return await processNormalCall(action, payload)
-}
-
-/**
- * Process normal call (no timing requirements)
- */
-const processNormalCall = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<CyreResponse> => {
   try {
-    // Apply action pipeline (includes all protections)
-    const pipelineResult = await applyActionPipeline(action, payload)
+    // Execute unified middleware chain
+    const middlewareResult = await executeMiddlewareChain(action, payload)
 
-    if (!pipelineResult.ok) {
-      // Pipeline blocked execution
-      return pipelineResult
+    if (!middlewareResult.ok) {
+      // Middleware blocked execution or failed
+      return {
+        ok: false,
+        payload: middlewareResult.payload,
+        message: middlewareResult.message,
+        metadata: middlewareResult.metadata
+      }
     }
 
-    // Pipeline passed - dispatch to execution
-    return await useDispatch(action, pipelineResult.payload)
+    // Handle delayed execution (debounce)
+    if (middlewareResult.delayed) {
+      return {
+        ok: true,
+        payload: middlewareResult.payload,
+        message: middlewareResult.message,
+        metadata: {
+          ...middlewareResult.metadata,
+          executionPath: 'delayed',
+          delayed: true
+        }
+      }
+    }
+
+    // Middleware passed - dispatch to execution
+    return await useDispatch(action, middlewareResult.payload)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Normal call processing failed for ${action.id}: ${errorMessage}`)
+    log.error(
+      `Middleware call processing failed for ${action.id}: ${errorMessage}`
+    )
     metricsReport.sensor.error(
       action.id,
       errorMessage,
-      'normal-call-processing'
+      'middleware-call-processing'
     )
 
     return {
@@ -86,27 +84,35 @@ const processNormalCall = async (
 }
 
 /**
- * Handle calls with delay, interval and repeat using timekeeper
+ * Handle calls with timing requirements
  */
-const scheduleCall = async (
+export const scheduleCall = async (
   action: IO,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   try {
-    // Create execution callback that applies pipeline then dispatches
+    // Create execution callback that runs middleware then dispatches
     const executionCallback = async () => {
-      // Apply pipeline for each execution
-      const pipelineResult = await applyActionPipeline(action, payload)
+      // Execute middleware chain for each execution
+      const middlewareResult = await executeMiddlewareChain(action, payload)
 
-      if (!pipelineResult.ok) {
+      if (!middlewareResult.ok) {
         log.debug(
-          `Scheduled execution blocked by pipeline for ${action.id}: ${pipelineResult.message}`
+          `Scheduled execution blocked by middleware for ${action.id}: ${middlewareResult.message}`
         )
         return
       }
 
-      // Pipeline passed - dispatch to execution
-      await useDispatch(action, pipelineResult.payload)
+      // Handle delayed execution within scheduled calls
+      if (middlewareResult.delayed) {
+        log.debug(
+          `Scheduled execution delayed by middleware for ${action.id}: ${middlewareResult.duration}ms`
+        )
+        return
+      }
+
+      // Middleware passed - dispatch to execution
+      await useDispatch(action, middlewareResult.payload)
     }
 
     // Configure timing parameters

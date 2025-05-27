@@ -1,7 +1,7 @@
 // src/components/cyre-dispatch.ts
-// Clean dispatch logic separated from call processing
+// Updated dispatch logic with unified middleware integration
 
-import {subscribers} from '../context/state'
+import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {cyreExecute} from './cyre-execute'
 import {historyState} from '../context/history-state'
@@ -13,10 +13,11 @@ import {metricsReport} from '../context/metrics-report'
 
       C.Y.R.E. - D.I.S.P.A.T.C.H.
       
-      Clean dispatch logic:
+      Updated dispatch logic with middleware integration:
       - Find subscriber and execute
       - Handle IntraLink chain reactions
       - Record execution history
+      - Update payload history after successful execution
       - Proper error handling and metrics
 
 */
@@ -68,9 +69,14 @@ export const useDispatch = async (
     )
 
     // IMPORTANT: Update payload history after successful execution for change detection
-    if (result.ok && action.detectChanges) {
-      // Force update the payload history now that execution succeeded
-      io.hasChanged(action.id, currentPayload)
+    if (result.ok) {
+      // Update payload history for change detection on successful execution
+      if (action.detectChanges) {
+        io.updatePayload(action.id, currentPayload)
+      }
+
+      // Track execution in metrics
+      io.trackExecution(action.id, totalTime)
     }
 
     // Record in history

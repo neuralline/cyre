@@ -5,10 +5,9 @@ import {io} from '../context/state'
 import {IO} from '../types/interface'
 import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
-import {buildActionPipeline} from '../actions'
 import {metricsReport} from '../context/metrics-report'
-import {pipelineState} from '../context/pipeline-state'
 import dataDefinitions from '../elements/data-definitions'
+import {middlewareState} from '../middleware/state'
 
 /*
 
@@ -71,63 +70,9 @@ const validateChannel = (channel: IO): ValidationResult => {
 }
 
 /**
- * Register single action with pipeline compilation
+ * Register single action with middleware chain compilation
  */
-export const registerSingleAction = (
-  attribute: IO
-): {ok: boolean; message: string; payload?: any} => {
-  try {
-    // Validate and create channel
-    const channelResult = CyreChannel(attribute, dataDefinitions)
-    if (!channelResult.ok || !channelResult.payload) {
-      metricsReport.sensor.error(
-        attribute.id || 'unknown',
-        channelResult.message,
-        'action-validation'
-      )
-      return {ok: false, message: channelResult.message}
-    }
 
-    const validatedAction = channelResult.payload
-
-    // Build and save pipeline during action creation
-    const pipeline = buildActionPipeline(validatedAction)
-    pipelineState.set(validatedAction.id, pipeline)
-
-    // Log pipeline creation
-    const pipelineInfo = pipelineState.isFastPath(validatedAction.id)
-      ? 'fast-path (zero overhead)'
-      : `${pipeline.length} pipeline functions`
-
-    log.debug(`Action ${validatedAction.id} registered with ${pipelineInfo}`)
-
-    metricsReport.sensor.log(
-      validatedAction.id,
-      'info',
-      'action-registration',
-      {
-        pipelineLength: pipeline.length,
-        isFastPath: pipelineState.isFastPath(validatedAction.id),
-        pipelineInfo
-      }
-    )
-
-    return {
-      ok: true,
-      message: `Action registered with ${pipelineInfo}`,
-      payload: validatedAction
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    log.error(`Failed to register action ${attribute.id}: ${msg}`)
-    metricsReport.sensor.error(
-      attribute.id || 'unknown',
-      msg,
-      'action-registration'
-    )
-    return {ok: false, message: msg}
-  }
-}
 // Process data definitions with improved error handling
 const processDataDefinitions = (
   channel: IO,
