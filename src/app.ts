@@ -1,5 +1,5 @@
-import {buildActionPipeline} from './components/cyre-actions'
 // src/app.ts
+// Updated with clean pipeline integration
 
 import type {
   IO,
@@ -19,8 +19,8 @@ import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
 import {processCall} from './components/cyre-call'
-
-// Pipeline system imports
+import {buildActionPipeline} from './actions'
+import {pipelineState} from './context/pipeline-state'
 
 /* 
     Neural Line
@@ -29,14 +29,11 @@ import {processCall} from './components/cyre-call'
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
     Version 4.0.0 2025
 
-    Pipeline-compiled action system with lightweight metrics collection:
-    - Actions compiled at registration time for optimal performance
-    - Fast path for simple channels with zero overhead
-    - Timekeeper integration for interval/delay/repeat timing
-    - Pre-compiled pipelines cached per channel
-    - Raw metrics collection via sensor architecture
-    - Functional programming approach with no OOP/Classes
-    - Live streaming capabilities for external monitoring
+    Updated with clean pipeline integration:
+    - Pipelines compiled and saved during action creation
+    - Fast path for actions without pipeline (zero overhead)
+    - Clean separation of concerns
+    - Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → [IntraLink → call()]
 
     Example use:
       cyre.action({id: 'uber', payload: 44085648634})
@@ -46,11 +43,10 @@ import {processCall} from './components/cyre-call'
       cyre.call('uber') 
 
     Pipeline Features:
-    - Compile-time verification and optimization
+    - Compile-time pipeline creation and caching
     - Zero-overhead fast path for simple actions
-    - Protection pipeline for complex actions
+    - Individual action modules for clean separation
     - Lightweight sensor-based metrics collection
-    - Live event streaming for external monitoring
 */
 
 /**
@@ -76,18 +72,8 @@ const initializeBreathing = (): void => {
 let isInitialized = false
 let isLocked = false
 
-export interface DetailedTiming {
-  stages: Record<string, number>
-  totals: {
-    totalExecution: number
-    pipelineOverhead: number
-    listenerExecution: number
-    overheadRatio: number
-  }
-}
-
 /**
- * Action registration with pipeline compilation and sensor logging
+ * Action registration with pipeline compilation and caching
  */
 const action = (
   attribute: IO | IO[]
@@ -101,43 +87,7 @@ const action = (
     if (Array.isArray(attribute)) {
       // Handle array of actions
       const results = attribute.map(singleAction => {
-        try {
-          // Validate and create channel
-          const channelResult = CyreChannel(singleAction, dataDefinitions)
-          if (!channelResult.ok || !channelResult.payload) {
-            metricsReport.sensor.error(
-              singleAction.id || 'unknown',
-              channelResult.message,
-              'action-validation'
-            )
-            return {ok: false, message: channelResult.message}
-          }
-
-          // Register with pipeline compilation
-          const pipelineResult = buildActionPipeline(channelResult.payload)
-
-          // Log action registration
-          metricsReport.sensor.log(
-            singleAction.id,
-            'info',
-            'action-registration',
-            {
-              success: pipelineResult.ok,
-              pipeline: pipelineResult.message
-            }
-          )
-
-          return pipelineResult
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error)
-          log.error(`Failed to register action ${singleAction.id}: ${msg}`)
-          metricsReport.sensor.error(
-            singleAction.id || 'unknown',
-            msg,
-            'action-registration'
-          )
-          return {ok: false, message: msg}
-        }
+        return registerSingleAction(singleAction)
       })
 
       const successful = results.filter(r => r.ok).length
@@ -150,37 +100,12 @@ const action = (
       }
     } else {
       // Handle single action
-      // Validate and create channel
-      const channelResult = CyreChannel(attribute, dataDefinitions)
-      if (!channelResult.ok || !channelResult.payload) {
-        metricsReport.sensor.error(
-          attribute.id || 'unknown',
-          channelResult.message,
-          'action-validation'
-        )
-        return {ok: false, message: channelResult.message}
-      }
-
-      // Register with pipeline compilation
-      const pipelineResult = buildActionPipeline(channelResult.payload)
-
-      // Log action registration
-      metricsReport.sensor.log(attribute.id, 'info', 'action-registration', {
-        success: pipelineResult.ok,
-        pipeline: pipelineResult.message
-      })
-
-      return {
-        ok: pipelineResult.ok,
-        message: pipelineResult.message,
-        payload: channelResult.payload
-      }
+      return registerSingleAction(attribute)
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Action registration failed: ${errorMessage}`)
 
-    // Log system error
     metricsReport.sensor.log('system', 'error', 'action-registration', {
       error: errorMessage
     })
@@ -193,7 +118,66 @@ const action = (
 }
 
 /**
- * Call execution with optimized pipeline and sensor logging
+ * Register single action with pipeline compilation
+ */
+const registerSingleAction = (
+  attribute: IO
+): {ok: boolean; message: string; payload?: any} => {
+  try {
+    // Validate and create channel
+    const channelResult = CyreChannel(attribute, dataDefinitions)
+    if (!channelResult.ok || !channelResult.payload) {
+      metricsReport.sensor.error(
+        attribute.id || 'unknown',
+        channelResult.message,
+        'action-validation'
+      )
+      return {ok: false, message: channelResult.message}
+    }
+
+    const validatedAction = channelResult.payload
+
+    // Build and save pipeline during action creation
+    const pipeline = buildActionPipeline(validatedAction)
+    pipelineState.set(validatedAction.id, pipeline)
+
+    // Log pipeline creation
+    const pipelineInfo = pipelineState.isFastPath(validatedAction.id)
+      ? 'fast-path (zero overhead)'
+      : `${pipeline.length} pipeline functions`
+
+    log.debug(`Action ${validatedAction.id} registered with ${pipelineInfo}`)
+
+    metricsReport.sensor.log(
+      validatedAction.id,
+      'info',
+      'action-registration',
+      {
+        pipelineLength: pipeline.length,
+        isFastPath: pipelineState.isFastPath(validatedAction.id),
+        pipelineInfo
+      }
+    )
+
+    return {
+      ok: true,
+      message: `Action registered with ${pipelineInfo}`,
+      payload: validatedAction
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    log.error(`Failed to register action ${attribute.id}: ${msg}`)
+    metricsReport.sensor.error(
+      attribute.id || 'unknown',
+      msg,
+      'action-registration'
+    )
+    return {ok: false, message: msg}
+  }
+}
+
+/**
+ * Call execution with clean flow and IntraLink handling
  */
 export const call = async (
   id: string,
@@ -229,8 +213,33 @@ export const call = async (
       }
     }
 
-    // Streamlined call processing
+    // Process call through clean flow
     const result = await processCall(actionConfig, payload)
+
+    // Handle IntraLink chain reactions
+    if (result.ok && result.metadata?.intraLink) {
+      const chainLink = result.metadata.intraLink
+      log.debug(`Processing IntraLink: ${id} -> ${chainLink.id}`)
+
+      try {
+        // Recursively call the linked action
+        const chainResult = await call(chainLink.id, chainLink.payload)
+
+        // Return original result but include chain information
+        return {
+          ...result,
+          metadata: {
+            ...result.metadata,
+            chainResult
+          }
+        }
+      } catch (chainError) {
+        log.error(`IntraLink execution failed: ${chainError}`)
+        // Return original result even if chain fails
+        return result
+      }
+    }
+
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -248,7 +257,7 @@ export const call = async (
 }
 
 /**
- * Forget action with pipeline cleanup and sensor logging
+ * Forget action with pipeline cleanup
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -256,15 +265,18 @@ const forget = (id: string): boolean => {
   }
 
   try {
-    // Remove with pipeline cleanup
-    //const actionRemoved = removeActionWithCleanup(id)
+    // Clean up pipeline
+    const pipelineRemoved = pipelineState.forget(id)
+
+    // Remove action and subscriber
+    const actionRemoved = io.forget(id)
     const subscriberRemoved = subscribers.forget(id)
 
     // Clean up timeline entries
     timeline.forget(id)
 
-    if (subscriberRemoved) {
-      log.debug(`Removed action and pipeline for ${id}`)
+    if (actionRemoved || subscriberRemoved || pipelineRemoved) {
+      log.debug(`Removed action, pipeline, and subscriber for ${id}`)
       metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
       return true
     }
@@ -282,7 +294,7 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * Clear system with comprehensive cleanup and sensor logging
+ * Clear system with comprehensive cleanup
  */
 const clear = (): void => {
   try {
@@ -290,8 +302,8 @@ const clear = (): void => {
       timestamp: Date.now()
     })
 
-    // Clear all pipeline caches
-    //invalidatePipelineCache()
+    // Clear pipeline cache
+    pipelineState.clear()
 
     // Clear existing state
     io.clear()
@@ -304,10 +316,9 @@ const clear = (): void => {
 
     // Reset metrics
     metricsReport.reset()
-    //resetExecutionStats()
     metricsState.reset()
 
-    log.success('System cleared with pipeline cleanup')
+    log.success('System cleared with complete cleanup')
     metricsReport.sensor.log('system', 'success', 'system-clear', {
       completed: true
     })
@@ -318,7 +329,7 @@ const clear = (): void => {
 }
 
 /**
- * Middleware registration with sensor logging
+ * Middleware registration
  */
 const middleware = (
   id: string,
@@ -405,7 +416,6 @@ const shutdown = (): void => {
       timestamp: Date.now()
     })
 
-    // Shutdown metrics collector
     metricsReport.shutdown()
     clear()
 
@@ -429,11 +439,16 @@ const initialize = (): {ok: boolean; payload: number; message: string} => {
     timeKeeper.resume()
 
     log.sys(MSG.QUANTUM_HEADER)
-    log.success('CYRE initialized with pipeline compilation and sensor metrics')
+    log.success('CYRE initialized with clean pipeline system')
 
     metricsReport.sensor.log('system', 'success', 'system-initialization', {
       timestamp: Date.now(),
-      features: ['pipeline-compilation', 'sensor-metrics', 'breathing-system']
+      features: [
+        'clean-pipeline',
+        'fast-path',
+        'sensor-metrics',
+        'breathing-system'
+      ]
     })
 
     return {ok: true, payload: Date.now(), message: MSG.ONLINE}
@@ -522,11 +537,14 @@ const clearHistory = (actionId?: string): void => {
 }
 
 /**
- * Pipeline management methods
+ * Pipeline statistics for monitoring
  */
+const getPipelineStats = () => {
+  return pipelineState.getStats()
+}
 
 /**
- * Metrics export and monitoring methods
+ * Metrics export methods
  */
 const exportMetrics = (filter?: {
   actionId?: string
@@ -541,23 +559,8 @@ const getBasicMetricsReport = (): string => {
   return metricsReport.getBasicReport()
 }
 
-const getMetricsMemoryInfo = () => {
-  const stats = metricsReport.getSystemStats()
-  return {
-    totalCalls: stats.totalCalls,
-    totalExecutions: stats.totalExecutions,
-    totalErrors: stats.totalErrors,
-    callRate: stats.callRate,
-    uptime: Date.now() - stats.startTime
-  }
-}
-
 /**
- * Live streaming methods for external monitoring
- */
-
-/**
- * Main CYRE instance with pipeline compilation and sensor metrics
+ * Main CYRE instance with clean pipeline integration
  */
 export const cyre = {
   // Core methods
@@ -588,27 +591,12 @@ export const cyre = {
   getHistory,
   clearHistory,
 
+  // Pipeline monitoring
+  getPipelineStats,
+
   // Metrics export
   exportMetrics,
-  getBasicMetricsReport,
-  getMetricsMemoryInfo
-
-  // Development helpers
-  // dev: {
-  //   resetExecutionStats,
-  //   getExecutionStats,
-  //   getPerformanceAnalysis,
-  //   invalidatePipelineCache: (channelId?: string) =>
-  //     invalidatePipelineCache(channelId),
-  //   getAllPipelines: () => getAllCompiledPipelines(),
-  //   forceRecompile: (actionId: string) => {
-  //     invalidatePipelineCache(actionId)
-  //     return recompileAction(actionId)
-  //   },
-  //   // Raw metrics access for advanced monitoring
-  //   getSystemStats: () => metricsReport.getSystemStats(),
-  //   getActionStats: (actionId: string) => metricsReport.getActionStats(actionId)
-  // }
+  getBasicMetricsReport
 }
 
 // Initialize on import

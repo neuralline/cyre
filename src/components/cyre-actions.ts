@@ -1,198 +1,155 @@
 // src/components/cyre-actions.ts
+// Clean pipeline application system
 
 import {IO, ActionPayload, CyreResponse} from '../types/interface'
+import {pipelineState} from '../context/pipeline-state'
+import {processMiddleware, processDebounce} from '../actions'
 import {metricsReport} from '../context/metrics-report'
 import {log} from './cyre-log'
-import {
-  useBlock,
-  useDebounce,
-  useDetectChange,
-  useMiddleware,
-  useRecuperation,
-  useThrottle
-} from '../actions'
 
 /*
 
-      C.Y.R.E. - A.C.T.I.O.N.S.
+      C.Y.R.E - A.C.T.I.O.N.S
       
-      Complete action processing pipeline with enhanced timing measurement
-      Proper separation of Action Pipeline overhead vs Listener execution time
-      FIXED: Chain reaction (intraLink) processing with proper history recording
-      
+      Clean pipeline application system:
+      - Loop through saved pipeline functions
+      - Handle async operations (middleware, debounce)
+      - Fast path for actions without pipeline
+      - Proper error handling and metrics
+
 */
 
-export type ActionStatus =
-  | 'pending'
-  | 'active'
-  | 'completed'
-  | 'error'
-  | 'skipped'
-
-export interface ActionResult extends IO {
-  ok: boolean
-  done: boolean
-  status?: ActionStatus
-  error?: string
-  skipped?: boolean
-  skipReason?: string
-  intraLink?: {
-    id: string
-    payload?: ActionPayload
-  }
-}
-
 /**
- * Enhanced Protection function type with timing context
- */
-export type ActionPipelineFunction = (
-  action: IO,
-  payload: ActionPayload,
-  timer: any
-) => CyreResponse
-
-/**
- * Builds an action pipeline for each channel on channel creation
- */
-export const buildActionPipeline = (action: IO): ActionPipelineFunction[] => {
-  const pipeline: ActionPipelineFunction[] = []
-
-  // System recuperation check (always included)
-  pipeline.push(useRecuperation)
-
-  // Repeat: 0 check (always included)
-  pipeline.push(useBlock)
-
-  // Add pipeline functions based on action configuration
-  if (action.throttle) {
-    pipeline.push(useThrottle)
-  }
-
-  if (action.debounce) {
-    pipeline.push(useDebounce)
-  }
-
-  if (action.detectChanges) {
-    pipeline.push(useDetectChange)
-  }
-
-  // Add middleware if configured
-  if (action.middleware && action.middleware.length > 0) {
-    pipeline.push(useMiddleware)
-  }
-
-  //then save this to the channel
-  return pipeline
-}
-
-/**
- * apply/ follow actionPipeline before dispatch then of all pass call dispatch
+ * Apply action pipeline by looping through saved pipeline functions
  */
 export const applyActionPipeline = async (
   action: IO,
-  pipeline,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
+  const startTime = performance.now()
   let currentPayload = payload || action.payload
 
-  //this is wrong it should loop through action pipeline and apply
-  //  for each pipeline
   try {
-    // Apply protections in sequence
-    if (action.throttle) {
-      const throttleResult = await useThrottle(
-        action,
-        currentPayload,
-        async transformedPayload => {
-          currentPayload = transformedPayload || currentPayload
-          return {ok: true, payload: currentPayload, message: 'Throttle passed'}
-        }
-      )
-      if (!throttleResult.ok) {
-        metricsReport.sensor.throttle(action.id, 0, 'throttle-protection')
-        return throttleResult
+    // Check for fast path
+    if (pipelineState.isFastPath(action.id)) {
+      // Zero overhead path - no pipeline to apply
+      metricsReport.sensor.log(action.id, 'info', 'fast-path')
+      return {
+        ok: true,
+        payload: currentPayload,
+        message: 'Fast path - no pipeline'
       }
     }
 
-    if (action.debounce) {
-      const debounceResult = await useDebounce(
-        action,
-        currentPayload,
-        async transformedPayload => {
-          currentPayload = transformedPayload || currentPayload
-          return {ok: true, payload: currentPayload, message: 'Debounce passed'}
-        }
-      )
-      if (!debounceResult.ok) {
-        metricsReport.sensor.debounce(
-          action.id,
-          action.debounce,
-          1,
-          'debounce-protection'
-        )
-        return debounceResult
+    // Get saved pipeline for this action
+    const pipeline = pipelineState.get(action.id)
+
+    if (!pipeline || pipeline.length === 0) {
+      // No pipeline saved, treat as fast path
+      metricsReport.sensor.log(action.id, 'info', 'no-pipeline')
+      return {
+        ok: true,
+        payload: currentPayload,
+        message: 'No pipeline configured'
       }
     }
 
-    if (action.detectChanges) {
-      const changeResult = await useDetectChange(
-        action,
-        currentPayload,
-        async transformedPayload => {
-          currentPayload = transformedPayload || currentPayload
-          return {
-            ok: true,
-            payload: currentPayload,
-            message: 'Change detection passed'
+    // Apply pipeline functions in sequence
+    for (let i = 0; i < pipeline.length; i++) {
+      const pipelineFunction = pipeline[i]
+
+      try {
+        const result = pipelineFunction(action, currentPayload, null)
+
+        if (!result.ok) {
+          // Pipeline function blocked execution
+          const overhead = performance.now() - startTime
+
+          metricsReport.sensor.log(action.id, 'blocked', 'pipeline-blocked', {
+            blockingFunction: i,
+            reason: result.message,
+            overhead
+          })
+
+          // Handle special cases that require async processing
+          if (result.metadata?.debounce) {
+            // Process debounce delay
+            return await processDebounce(
+              action,
+              currentPayload,
+              result.metadata.debounce
+            )
           }
-        }
-      )
-      if (!changeResult.ok) {
-        metricsReport.sensor.log(action.id, 'skip', 'change-detection')
-        return changeResult
-      }
-    }
 
-    if (action.middleware && action.middleware.length > 0) {
-      const middlewareResult = await useMiddleware(
-        action,
-        currentPayload,
-        async transformedPayload => {
-          currentPayload = transformedPayload || currentPayload
-          return {
-            ok: true,
-            payload: currentPayload,
-            message: 'Middleware passed'
+          return result
+        }
+
+        // Pipeline function passed, continue with potentially modified payload
+        if (result.payload !== undefined) {
+          currentPayload = result.payload
+        }
+
+        // Handle async operations
+        if (result.metadata?.middleware?.requiresAsync) {
+          const middlewareResult = await processMiddleware(
+            action,
+            currentPayload
+          )
+          if (!middlewareResult.ok) {
+            const overhead = performance.now() - startTime
+            metricsReport.sensor.middleware(
+              action.id,
+              'unknown',
+              'reject',
+              'pipeline-middleware'
+            )
+            return middlewareResult
           }
+          currentPayload = middlewareResult.payload
         }
-      )
-      if (!middlewareResult.ok) {
-        metricsReport.sensor.middleware(
-          action.id,
-          'unknown',
-          'reject',
-          'middleware-protection'
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        const overhead = performance.now() - startTime
+
+        log.error(
+          `Pipeline function ${i} failed for ${action.id}: ${errorMessage}`
         )
-        return middlewareResult
+        metricsReport.sensor.error(action.id, errorMessage, 'pipeline-function')
+
+        return {
+          ok: false,
+          payload: null,
+          message: `Pipeline function failed: ${errorMessage}`,
+          error: errorMessage
+        }
       }
     }
 
-    // All protections passed - dispatch to execution
-    metricsReport.sensor.log(action.id, 'dispatch', 'call-to-dispatch')
+    // All pipeline functions passed
+    const totalOverhead = performance.now() - startTime
+
+    metricsReport.sensor.log(action.id, 'info', 'pipeline-passed', {
+      stepsProcessed: pipeline.length,
+      overhead: totalOverhead
+    })
+
     return {
       ok: true,
       payload: currentPayload,
-      message: ''
+      message: 'Pipeline applied successfully'
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+    const totalOverhead = performance.now() - startTime
+
     log.error(`Pipeline application failed for ${action.id}: ${errorMessage}`)
     metricsReport.sensor.error(action.id, errorMessage, 'pipeline-application')
 
     return {
       ok: false,
       payload: null,
-      message: `Pipeline failed: ${errorMessage}`,
+      message: `Pipeline application failed: ${errorMessage}`,
       error: errorMessage
     }
   }

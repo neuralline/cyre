@@ -1,7 +1,5 @@
 // src/actions/index.ts
-
-// src/actions/throttle.ts
-// src/actions/throttle.ts
+// Individual action pipeline functions
 
 import type {
   IO,
@@ -10,21 +8,89 @@ import type {
   ActionPipelineFunction
 } from '../types/interface'
 import {io, middlewares} from '../context/state'
+import {metricsState} from '../context/metrics-state'
 import {log} from '../components/cyre-log'
 import timeKeeper from '../components/cyre-timekeeper'
-import {metricsState} from '../context/metrics-state'
+
+/*
+
+      C.Y.R.E. - A.C.T.I.O.N.S.
+      
+      Individual action pipeline functions following ActionPipelineFunction interface:
+      - Each function handles one specific protection/feature
+      - Functions can be composed into pipelines
+      - Clean separation of concerns
+      - Pure functional approach
+
+*/
+
+// Store debounce timers
+const debounceTimers = new Map<string, string>()
 
 /**
- * Apply throttle protection
- * Industry standard: First call executes, subsequent calls within interval are rejected
+ * System recuperation check - only critical actions during recuperation
  */
-export const applyThrottleProtection = async (
+export const useRecuperation: ActionPipelineFunction = (
   action: IO,
   payload: ActionPayload,
-  next: (payload?: ActionPayload) => Promise<CyreResponse>
-): Promise<CyreResponse> => {
+  timer: any
+): CyreResponse => {
+  const {breathing} = metricsState.get()
+
+  if (breathing.isRecuperating && action.priority?.level !== 'critical') {
+    return {
+      ok: false,
+      payload: null,
+      message: `System recuperating (${(
+        breathing.recuperationDepth * 100
+      ).toFixed(1)}% depth). Only critical actions allowed.`
+    }
+  }
+
+  return {
+    ok: true,
+    payload,
+    message: 'Recuperation check passed'
+  }
+}
+
+/**
+ * Block actions with repeat: 0
+ */
+export const useBlock: ActionPipelineFunction = (
+  action: IO,
+  payload: ActionPayload,
+  timer: any
+): CyreResponse => {
+  if (action.repeat === 0) {
+    return {
+      ok: false,
+      payload: null,
+      message: 'Action blocked: repeat is 0'
+    }
+  }
+
+  return {
+    ok: true,
+    payload,
+    message: 'Block check passed'
+  }
+}
+
+/**
+ * Throttle protection - industry standard implementation
+ */
+export const useThrottle: ActionPipelineFunction = (
+  action: IO,
+  payload: ActionPayload,
+  timer: any
+): CyreResponse => {
   if (!action.throttle) {
-    return next(payload)
+    return {
+      ok: true,
+      payload,
+      message: 'No throttle configured'
+    }
   }
 
   const now = Date.now()
@@ -43,40 +109,27 @@ export const applyThrottleProtection = async (
     }
   }
 
-  return next(payload)
+  return {
+    ok: true,
+    payload,
+    message: 'Throttle check passed'
+  }
 }
 
 /**
- * Check if action should be throttled
+ * Debounce protection - collapses rapid calls
  */
-export const useThrottle = (action: IO): boolean => {
-  if (!action.throttle) return false
-
-  const now = Date.now()
-  const metrics = io.getMetrics(action.id)
-  const lastExecutionTime = metrics?.lastExecutionTime || 0
-
-  return now - lastExecutionTime < action.throttle
-}
-
-// ========================================
-// src/actions/debounce.ts
-// ========================================
-
-// Store debounce timers
-const debounceTimers = new Map<string, string>()
-
-/**
- * Apply debounce protection
- * Collapses rapid calls into single execution with last payload
- */
-export const useDebounce = async (
+export const useDebounce: ActionPipelineFunction = (
   action: IO,
   payload: ActionPayload,
-  next: (payload?: ActionPayload) => Promise<CyreResponse>
-): Promise<CyreResponse> => {
+  timer: any
+): CyreResponse => {
   if (!action.debounce) {
-    return next(payload)
+    return {
+      ok: true,
+      payload,
+      message: 'No debounce configured'
+    }
   }
 
   // Cancel existing debounce timer
@@ -85,67 +138,39 @@ export const useDebounce = async (
     timeKeeper.forget(existingTimerId)
   }
 
-  // Create new debounce timer
+  // For debounce, we need to delay execution
+  // This will be handled by the pipeline executor
   const debounceTimerId = `${action.id}-debounce-${Date.now()}`
+  debounceTimers.set(action.id, debounceTimerId)
 
-  return new Promise(resolve => {
-    const timerResult = timeKeeper.keep(
-      action.debounce!,
-      async () => {
-        try {
-          // Execute after debounce delay
-          const result = await next(payload)
-
-          // Clean up timer reference
-          debounceTimers.delete(action.id)
-
-          resolve(result)
-        } catch (error) {
-          debounceTimers.delete(action.id)
-          resolve({
-            ok: false,
-            payload: null,
-            message: `Debounce execution failed: ${error}`
-          })
-        }
-      },
-      1, // Execute once
-      debounceTimerId
-    )
-
-    if (timerResult.kind === 'ok') {
-      // Store timer ID for potential cancellation
-      debounceTimers.set(action.id, debounceTimerId)
-
-      // Don't resolve here - let timer callback resolve
-      log.debug(
-        `Debounced ${action.id}: will execute after ${action.debounce}ms`
-      )
-    } else {
-      resolve({
-        ok: false,
-        payload: null,
-        message: `Debounce setup failed: ${timerResult.error.message}`
-      })
+  return {
+    ok: false, // Block immediate execution
+    payload: null,
+    message: `Debounced: will execute after ${action.debounce}ms`,
+    metadata: {
+      debounce: {
+        delay: action.debounce,
+        timerId: debounceTimerId,
+        payload: payload
+      }
     }
-  })
+  }
 }
 
-// ========================================
-// src/actions/change-detection.ts
-// ========================================
-
 /**
- * Apply change detection protection
- * Skip execution if payload hasn't changed from previous
+ * Change detection - skip if payload unchanged
  */
-export const useDetectChange = async (
+export const useDetectChange: ActionPipelineFunction = (
   action: IO,
   payload: ActionPayload,
-  next: (payload?: ActionPayload) => Promise<CyreResponse>
-): Promise<CyreResponse> => {
+  timer: any
+): CyreResponse => {
   if (!action.detectChanges) {
-    return next(payload)
+    return {
+      ok: true,
+      payload,
+      message: 'No change detection configured'
+    }
   }
 
   const hasChanged = io.hasChanged(action.id, payload)
@@ -153,70 +178,95 @@ export const useDetectChange = async (
   if (!hasChanged) {
     log.debug(`Change detection: no changes for ${action.id}`)
     return {
-      ok: true,
+      ok: false,
       payload: null,
       message: 'Execution skipped: No changes detected in payload'
     }
   }
 
-  // Update payload history for next comparison
-  const result = await next(payload)
-
-  // Only update history if execution was successful
-  if (result.ok) {
-    // The io.hasChanged call above already updates the history
-    // No additional action needed
+  return {
+    ok: true,
+    payload,
+    message: 'Change detection passed'
   }
-
-  return result
 }
 
 /**
- * Check if payload has changed
+ * Middleware processing - apply middleware chain
  */
-export const hasPayloadChanged = (
-  actionId: string,
-  payload: ActionPayload
-): boolean => {
-  return io.hasChanged(actionId, payload)
-}
-
-/**
- * Get previous payload
- */
-export const getPreviousPayload = (
-  actionId: string
-): ActionPayload | undefined => {
-  return io.getPrevious(actionId)
-}
-
-/**
- * Update payload history
- */
-export const updatePayloadHistory = (
-  actionId: string,
-  payload: ActionPayload
-): void => {
-  // This is handled internally by io.hasChanged()
-  // Just call it to trigger the update
-  io.hasChanged(actionId, payload)
-}
-
-// ========================================
-// src/actions/middleware.ts
-// ========================================
-
-/**
- * Apply middleware protection
- * Process action through registered middleware functions
- */
-export const useMiddleware = async (
+export const useMiddleware: ActionPipelineFunction = (
   action: IO,
   payload: ActionPayload,
-  next: (payload?: ActionPayload) => Promise<CyreResponse>
+  timer: any
+): CyreResponse => {
+  if (!action.middleware || action.middleware.length === 0) {
+    return {
+      ok: true,
+      payload,
+      message: 'No middleware configured'
+    }
+  }
+
+  // Middleware processing needs to be async, but ActionPipelineFunction is sync
+  // We'll handle this differently in the pipeline executor
+  return {
+    ok: true,
+    payload,
+    message: 'Middleware processing required',
+    metadata: {
+      middleware: {
+        ids: action.middleware,
+        requiresAsync: true
+      }
+    }
+  }
+}
+
+/**
+ * Build action pipeline based on action configuration
+ */
+export const buildActionPipeline = (action: IO): ActionPipelineFunction[] => {
+  const pipeline: ActionPipelineFunction[] = []
+
+  // System recuperation check (always included for non-critical actions)
+  pipeline.push(useRecuperation)
+
+  // Repeat: 0 check (always included)
+  pipeline.push(useBlock)
+
+  // Add conditional pipeline functions based on action configuration
+  if (action.throttle) {
+    pipeline.push(useThrottle)
+  }
+
+  if (action.debounce) {
+    pipeline.push(useDebounce)
+  }
+
+  if (action.detectChanges) {
+    pipeline.push(useDetectChange)
+  }
+
+  if (action.middleware && action.middleware.length > 0) {
+    pipeline.push(useMiddleware)
+  }
+
+  return pipeline
+}
+
+/**
+ * Process middleware chain (async helper function)
+ */
+export const processMiddleware = async (
+  action: IO,
+  payload: ActionPayload
 ): Promise<CyreResponse> => {
   if (!action.middleware || action.middleware.length === 0) {
-    return next(payload)
+    return {
+      ok: true,
+      payload,
+      message: 'No middleware to process'
+    }
   }
 
   let currentAction = action
@@ -262,102 +312,46 @@ export const useMiddleware = async (
     }
   }
 
-  // All middleware passed, proceed with transformed data
-  return next(currentPayload)
-}
-
-/**
- * Check if action has middleware
- */
-export const hasMiddleware = (action: IO): boolean => {
-  return !!(action.middleware && action.middleware.length > 0)
-}
-
-/**
- * Get middleware count
- */
-export const getMiddlewareCount = (action: IO): number => {
-  return action.middleware?.length || 0
-}
-
-/**
- * Validate middleware chain
- */
-export const validateMiddlewareChain = (
-  action: IO
-): {
-  valid: boolean
-  missing: string[]
-  errors: string[]
-} => {
-  const result = {
-    valid: true,
-    missing: [] as string[],
-    errors: [] as string[]
-  }
-
-  if (!action.middleware || action.middleware.length === 0) {
-    return result
-  }
-
-  for (const middlewareId of action.middleware) {
-    const middleware = middlewares.get(middlewareId)
-
-    if (!middleware) {
-      result.missing.push(middlewareId)
-      result.valid = false
-    } else if (typeof middleware.fn !== 'function') {
-      result.errors.push(`Invalid middleware function: ${middlewareId}`)
-      result.valid = false
-    }
-  }
-
-  return result
-}
-
-/**
- * Repeat zero check - don't execute actions with repeat: 0
- */
-export const useBlock: ActionPipelineFunction = (
-  action,
-  payload,
-  timer,
-  next
-): CyreResponse => {
-  if (action.repeat === 0 || !action.id) {
-    return {
-      ok: false,
-      payload: null,
-      message: 'Call blocked'
-    }
-  }
   return {
     ok: true,
-    payload: null,
-    message: `from block action`
+    payload: currentPayload,
+    message: 'All middleware processed successfully'
   }
 }
 
 /**
- * System recuperation check - only critical actions during recuperation
+ * Process debounce delay (async helper function)
  */
-export const useRecuperation: ActionPipelineFunction = (
-  action,
-  payload,
-  timer,
-  next
-) => {
-  const {breathing} = metricsState.get()
-  if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-    return {
-      ok: false,
-      payload: null,
-      message: `System recuperating. Only critical actions allowed.`
+export const processDebounce = async (
+  action: IO,
+  payload: ActionPayload,
+  debounceData: any
+): Promise<CyreResponse> => {
+  const {delay, timerId} = debounceData
+
+  return new Promise(resolve => {
+    const timerResult = timeKeeper.keep(
+      delay,
+      () => {
+        // Clean up timer reference
+        debounceTimers.delete(action.id)
+
+        resolve({
+          ok: true,
+          payload,
+          message: 'Debounce delay completed'
+        })
+      },
+      1, // Execute once
+      timerId
+    )
+
+    if (timerResult.kind === 'error') {
+      resolve({
+        ok: false,
+        payload: null,
+        message: `Debounce setup failed: ${timerResult.error.message}`
+      })
     }
-  }
-  return {
-    ok: true,
-    payload: null,
-    message: `System is fine`
-  }
+  })
 }
