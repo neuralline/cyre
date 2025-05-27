@@ -7,7 +7,7 @@ import {useDispatch} from './cyre-dispatch'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
-import timeKeeper from './cyre-timekeeper'
+import {TimeKeeper} from './cyre-timekeeper'
 
 /*
 
@@ -119,7 +119,7 @@ const scheduleCall = async (
     )
 
     // Schedule with timekeeper
-    const timekeeperResult = timeKeeper.keep(
+    const timekeeperResult = TimeKeeper.keep(
       interval,
       executionCallback,
       repeat,

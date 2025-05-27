@@ -10,8 +10,7 @@ import type {
 
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
-import dataDefinitions from './elements/data-definitions'
-import CyreChannel from './components/cyre-channels'
+import {registerSingleAction} from './components/cyre-channels'
 import {subscribe} from './components/cyre-on'
 import timeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, middlewares, timeline} from './context/state'
@@ -19,7 +18,6 @@ import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
 import {processCall} from './components/cyre-call'
-import {buildActionPipeline} from './actions'
 import {pipelineState} from './context/pipeline-state'
 
 /* 
@@ -27,26 +25,23 @@ import {pipelineState} from './context/pipeline-state'
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.0.0 2025
+    Version 4.0.2 2025
 
-    Updated with clean pipeline integration:
-    - Pipelines compiled and saved during action creation
-    - Fast path for actions without pipeline (zero overhead)
-    - Clean separation of concerns
-    - Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → [IntraLink → call()]
-
-    Example use:
+    example use:
       cyre.action({id: 'uber', payload: 44085648634})
       cyre.on('uber', number => {
           console.log('Calling Uber: ', number)
       })
       cyre.call('uber') 
 
-    Pipeline Features:
-    - Compile-time pipeline creation and caching
-    - Zero-overhead fast path for simple actions
-    - Individual action modules for clean separation
-    - Lightweight sensor-based metrics collection
+    Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
+    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
+
+
+    - Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+
+ 
+
 */
 
 /**
@@ -114,65 +109,6 @@ const action = (
       ok: false,
       message: `Action registration failed: ${errorMessage}`
     }
-  }
-}
-
-/**
- * Register single action with pipeline compilation
- */
-const registerSingleAction = (
-  attribute: IO
-): {ok: boolean; message: string; payload?: any} => {
-  try {
-    // Validate and create channel
-    const channelResult = CyreChannel(attribute, dataDefinitions)
-    if (!channelResult.ok || !channelResult.payload) {
-      metricsReport.sensor.error(
-        attribute.id || 'unknown',
-        channelResult.message,
-        'action-validation'
-      )
-      return {ok: false, message: channelResult.message}
-    }
-
-    const validatedAction = channelResult.payload
-
-    // Build and save pipeline during action creation
-    const pipeline = buildActionPipeline(validatedAction)
-    pipelineState.set(validatedAction.id, pipeline)
-
-    // Log pipeline creation
-    const pipelineInfo = pipelineState.isFastPath(validatedAction.id)
-      ? 'fast-path (zero overhead)'
-      : `${pipeline.length} pipeline functions`
-
-    log.debug(`Action ${validatedAction.id} registered with ${pipelineInfo}`)
-
-    metricsReport.sensor.log(
-      validatedAction.id,
-      'info',
-      'action-registration',
-      {
-        pipelineLength: pipeline.length,
-        isFastPath: pipelineState.isFastPath(validatedAction.id),
-        pipelineInfo
-      }
-    )
-
-    return {
-      ok: true,
-      message: `Action registered with ${pipelineInfo}`,
-      payload: validatedAction
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    log.error(`Failed to register action ${attribute.id}: ${msg}`)
-    metricsReport.sensor.error(
-      attribute.id || 'unknown',
-      msg,
-      'action-registration'
-    )
-    return {ok: false, message: msg}
   }
 }
 
@@ -294,41 +230,6 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * Clear system with comprehensive cleanup
- */
-const clear = (): void => {
-  try {
-    metricsReport.sensor.log('system', 'info', 'system-clear', {
-      timestamp: Date.now()
-    })
-
-    // Clear pipeline cache
-    pipelineState.clear()
-
-    // Clear existing state
-    io.clear()
-    subscribers.clear()
-    middlewares.clear()
-    timeline.clear()
-
-    // Clear history
-    historyState.clearAll()
-
-    // Reset metrics
-    metricsReport.reset()
-    metricsState.reset()
-
-    log.success('System cleared with complete cleanup')
-    metricsReport.sensor.log('system', 'success', 'system-clear', {
-      completed: true
-    })
-  } catch (error) {
-    log.error(`Clear operation failed: ${error}`)
-    metricsReport.sensor.error('system', String(error), 'system-clear')
-  }
-}
-
-/**
  * Middleware registration
  */
 const middleware = (
@@ -386,179 +287,36 @@ const middleware = (
   }
 }
 
-// Core methods - unchanged interfaces
-const on = subscribe
-const get = (id: string): IO | undefined => io.get(id)
-const hasChanged = (id: string, payload: ActionPayload): boolean =>
-  io.hasChanged(id, payload)
-const getPrevious = (id: string): ActionPayload | undefined =>
-  io.getPrevious(id)
-const updatePayloadHistory = (id: string, payload: ActionPayload): void =>
-  io.updatePayloadHistory(id, payload)
-const pause = (id?: string): void => {
-  timeKeeper.pause(id)
-  metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
-}
-const resume = (id?: string): void => {
-  timeKeeper.resume(id)
-  metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
-}
-const status = (): boolean => metricsState.get().hibernating
-
-const lock = (): {ok: boolean; message: string; payload: null} => {
-  isLocked = true
-  metricsState.lock()
-  metricsReport.sensor.log('system', 'critical', 'system-lock')
-  return {ok: true, message: 'System locked', payload: null}
-}
-
-const shutdown = (): void => {
+const clear = (): void => {
   try {
-    metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
+    metricsReport.sensor.log('system', 'info', 'system-clear', {
       timestamp: Date.now()
     })
 
-    metricsReport.shutdown()
-    clear()
+    // Clear pipeline cache
+    pipelineState.clear()
 
-    if (typeof process !== 'undefined' && process.exit) {
-      process.exit(0)
-    }
-  } catch (error) {
-    log.error(`Shutdown failed: ${error}`)
-    metricsReport.sensor.error('system', String(error), 'system-shutdown')
-  }
-}
+    // Clear existing state
+    io.clear()
+    subscribers.clear()
+    middlewares.clear()
+    timeline.clear()
 
-const initialize = (): {ok: boolean; payload: number; message: string} => {
-  if (isInitialized) {
-    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
-  }
-
-  try {
-    isInitialized = true
-    initializeBreathing()
-    timeKeeper.resume()
-
-    log.sys(MSG.QUANTUM_HEADER)
-    log.success('CYRE initialized with clean pipeline system')
-
-    metricsReport.sensor.log('system', 'success', 'system-initialization', {
-      timestamp: Date.now(),
-      features: [
-        'clean-pipeline',
-        'fast-path',
-        'sensor-metrics',
-        'breathing-system'
-      ]
-    })
-
-    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Initialization failed: ${errorMessage}`)
-    metricsReport.sensor.error('system', errorMessage, 'system-initialization')
-    return {ok: false, payload: 0, message: errorMessage}
-  }
-}
-
-// System monitoring methods
-const getBreathingState = () => metricsState.get().breathing
-
-const getPerformanceState = () => {
-  const systemStats = metricsReport.getSystemStats()
-  return {
-    totalProcessingTime: 0, // Legacy compatibility
-    totalCallTime: 0, // Legacy compatibility
-    totalStress: metricsState.get().stress.combined,
-    stress: metricsState.get().stress.combined,
-    callRate: systemStats.callRate,
-    totalCalls: systemStats.totalCalls,
-    totalExecutions: systemStats.totalExecutions
-  }
-}
-
-const getMetrics = (channelId?: string) => {
-  const state = metricsState.get()
-
-  if (channelId) {
-    const actionStats = metricsReport.getActionStats(channelId)
-    return {
-      hibernating: state.hibernating,
-      activeFormations: state.activeFormations,
-      inRecuperation: state.inRecuperation,
-      breathing: state.breathing,
-      formations: actionStats
-        ? [
-            {
-              id: channelId,
-              duration: 0,
-              executionCount: actionStats.calls,
-              status: 'active' as const,
-              nextExecutionTime: actionStats.lastCall,
-              isInRecuperation: state.inRecuperation,
-              breathingSync: state.breathing.currentRate
-            }
-          ]
-        : []
-    }
-  }
-
-  return {
-    hibernating: state.hibernating,
-    activeFormations: state.activeFormations,
-    inRecuperation: state.inRecuperation,
-    breathing: state.breathing,
-    formations: timeline.getAll().map(timer => ({
-      id: timer.id,
-      duration: timer.duration,
-      executionCount: timer.executionCount,
-      status: timer.status,
-      nextExecutionTime: timer.nextExecutionTime,
-      isInRecuperation: timer.isInRecuperation,
-      breathingSync: state.breathing.currentRate
-    }))
-  }
-}
-
-// History methods
-const getHistory = (actionId?: string) => {
-  return actionId ? historyState.getChannel(actionId) : historyState.getAll()
-}
-
-const clearHistory = (actionId?: string): void => {
-  if (actionId) {
-    historyState.clearChannel(actionId)
-    metricsReport.sensor.log(actionId, 'info', 'history-clear', {
-      scope: 'single'
-    })
-  } else {
+    // Clear history
     historyState.clearAll()
-    metricsReport.sensor.log('system', 'info', 'history-clear', {scope: 'all'})
+
+    // Reset metrics
+    metricsReport.reset()
+    metricsState.reset()
+
+    log.success('System cleared with complete cleanup')
+    metricsReport.sensor.log('system', 'success', 'system-clear', {
+      completed: true
+    })
+  } catch (error) {
+    log.error(`Clear operation failed: ${error}`)
+    metricsReport.sensor.error('system', String(error), 'system-clear')
   }
-}
-
-/**
- * Pipeline statistics for monitoring
- */
-const getPipelineStats = () => {
-  return pipelineState.getStats()
-}
-
-/**
- * Metrics export methods
- */
-const exportMetrics = (filter?: {
-  actionId?: string
-  eventType?: string
-  since?: number
-  limit?: number
-}) => {
-  return metricsReport.exportEvents(filter)
-}
-
-const getBasicMetricsReport = (): string => {
-  return metricsReport.getBasicReport()
 }
 
 /**
@@ -566,40 +324,186 @@ const getBasicMetricsReport = (): string => {
  */
 export const cyre = {
   // Core methods
-  initialize,
+  initialize: (): {ok: boolean; payload: number; message: string} => {
+    if (isInitialized) {
+      return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+    }
+
+    try {
+      isInitialized = true
+      initializeBreathing()
+      timeKeeper.resume()
+
+      log.sys(MSG.QUANTUM_HEADER)
+      log.success('CYRE initialized with clean pipeline system')
+
+      metricsReport.sensor.log('system', 'success', 'system-initialization', {
+        timestamp: Date.now(),
+        features: [
+          'clean-pipeline',
+          'fast-path',
+          'sensor-metrics',
+          'breathing-system'
+        ]
+      })
+
+      return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      log.error(`Initialization failed: ${errorMessage}`)
+      metricsReport.sensor.error(
+        'system',
+        errorMessage,
+        'system-initialization'
+      )
+      return {ok: false, payload: 0, message: errorMessage}
+    }
+  },
   action,
-  on,
+  on: subscribe,
   call,
-  get,
+
+  get: (id: string): IO | undefined => io.get(id),
   forget,
+  /**
+   * Clear system with comprehensive cleanup
+   */
   clear,
+
   middleware,
 
   // State methods
-  hasChanged,
-  getPrevious,
-  updatePayloadHistory,
+  hasChanged: (id: string, payload: ActionPayload): boolean =>
+    io.hasChanged(id, payload),
+  getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
+  updatePayload: (id: string, payload: ActionPayload): void =>
+    io.updatePayload(id, payload),
 
   // Control methods
-  pause,
-  resume,
-  lock,
-  shutdown,
-  status,
+  pause: (id?: string): void => {
+    timeKeeper.pause(id)
+    metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
+  },
+  resume: (id?: string): void => {
+    timeKeeper.resume(id)
+    metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
+  },
+  lock: (): {ok: boolean; message: string; payload: null} => {
+    isLocked = true
+    metricsState.lock()
+    metricsReport.sensor.log('system', 'critical', 'system-lock')
+    return {ok: true, message: 'System locked', payload: null}
+  },
+  shutdown: (): void => {
+    try {
+      metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
+        timestamp: Date.now()
+      })
+
+      metricsReport.shutdown()
+      clear()
+
+      if (typeof process !== 'undefined' && process.exit) {
+        process.exit(0)
+      }
+    } catch (error) {
+      log.error(`Shutdown failed: ${error}`)
+      metricsReport.sensor.error('system', String(error), 'system-shutdown')
+    }
+  },
+  status: (): boolean => metricsState.get().hibernating,
 
   // Monitoring methods
-  getBreathingState,
-  getPerformanceState,
-  getMetrics,
-  getHistory,
-  clearHistory,
+  getBreathingState: () => metricsState.get().breathing,
+  getPerformanceState: () => {
+    const systemStats = metricsReport.getSystemStats()
+    return {
+      totalProcessingTime: 0, // Legacy compatibility
+      totalCallTime: 0, // Legacy compatibility
+      totalStress: metricsState.get().stress.combined,
+      stress: metricsState.get().stress.combined,
+      callRate: systemStats.callRate,
+      totalCalls: systemStats.totalCalls,
+      totalExecutions: systemStats.totalExecutions
+    }
+  },
+  getMetrics: (channelId?: string) => {
+    const state = metricsState.get()
+
+    if (channelId) {
+      const actionStats = metricsReport.getActionStats(channelId)
+      return {
+        hibernating: state.hibernating,
+        activeFormations: state.activeFormations,
+        inRecuperation: state.inRecuperation,
+        breathing: state.breathing,
+        formations: actionStats
+          ? [
+              {
+                id: channelId,
+                duration: 0,
+                executionCount: actionStats.calls,
+                status: 'active' as const,
+                nextExecutionTime: actionStats.lastCall,
+                isInRecuperation: state.inRecuperation,
+                breathingSync: state.breathing.currentRate
+              }
+            ]
+          : []
+      }
+    }
+
+    return {
+      hibernating: state.hibernating,
+      activeFormations: state.activeFormations,
+      inRecuperation: state.inRecuperation,
+      breathing: state.breathing,
+      formations: timeline.getAll().map(timer => ({
+        id: timer.id,
+        duration: timer.duration,
+        executionCount: timer.executionCount,
+        status: timer.status,
+        nextExecutionTime: timer.nextExecutionTime,
+        isInRecuperation: timer.isInRecuperation,
+        breathingSync: state.breathing.currentRate
+      }))
+    }
+  },
+  // History methods
+  getHistory: (actionId?: string) => {
+    return actionId ? historyState.getChannel(actionId) : historyState.getAll()
+  },
+  clearHistory: (actionId?: string): void => {
+    if (actionId) {
+      historyState.clearChannel(actionId)
+      metricsReport.sensor.log(actionId, 'info', 'history-clear', {
+        scope: 'single'
+      })
+    } else {
+      historyState.clearAll()
+      metricsReport.sensor.log('system', 'info', 'history-clear', {
+        scope: 'all'
+      })
+    }
+  },
 
   // Pipeline monitoring
-  getPipelineStats,
+  getPipelineStats: () => {
+    return pipelineState.getStats()
+  },
 
-  // Metrics export
-  exportMetrics,
-  getBasicMetricsReport,
+  exportMetrics: (filter?: {
+    actionId?: string
+    eventType?: string
+    since?: number
+    limit?: number
+  }) => {
+    return metricsReport.exportEvents(filter)
+  },
+  getMetricsReport: (): string => {
+    return metricsReport.getBasicReport()
+  },
 
   //timer
   /**
@@ -643,6 +547,6 @@ export const cyre = {
 }
 
 // Initialize on import
-initialize()
+cyre.initialize()
 
 export default cyre

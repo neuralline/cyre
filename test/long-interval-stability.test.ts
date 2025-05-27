@@ -1,7 +1,7 @@
 // test/long-interval-stability.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src'
 import {TIMING} from '../src/config/cyre-config'
 
 /**

@@ -173,7 +173,7 @@ export const io = {
   },
 
   // NEW: Update payload history after successful execution
-  updatePayloadHistory: (id: StateKey, payload: ActionPayload): void => {
+  updatePayload: (id: StateKey, payload: ActionPayload): void => {
     try {
       payloadHistory.set(id, payload)
     } catch (error) {
