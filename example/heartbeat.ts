@@ -1,4 +1,4 @@
-// example/repeat.ts
+// example/heartbeat.ts
 import {cyre, log} from '../src'
 // Create an action with infinite repeat
 cyre.action({

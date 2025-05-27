@@ -1,4 +1,4 @@
-// src/types/system.ts
+// src/types/system.ts - Updated Timer interface
 // System, Timer, and Performance related types
 
 import {BREATHING} from '../config/cyre-config'
@@ -33,6 +33,7 @@ export interface TimerMetrics {
   }
 }
 
+// Enhanced Timer interface with delay/interval support
 export interface Timer {
   id: string
   startTime: number
@@ -51,6 +52,11 @@ export interface Timer {
   priority?: 'critical' | 'normal'
   originalDuration: number
   recuperationInterval?: NodeJS.Timeout
+
+  // New properties for delay/interval logic
+  delay?: number // Optional delay for first execution
+  interval?: number // Interval for subsequent executions
+  hasExecutedOnce?: boolean // Track if first execution completed
 }
 
 // System Metrics
@@ -115,6 +121,7 @@ export interface QuantumState {
 export interface TimekeeperMetrics {
   hibernating: boolean
   activeFormations: number
+  totalFormations: number
   inRecuperation: boolean
   breathing: BreathingState
   formations: Array<{
@@ -125,7 +132,25 @@ export interface TimekeeperMetrics {
     nextExecutionTime: number
     isInRecuperation: boolean
     breathingSync: number
+    delay?: number
+    interval?: number
+    hasExecutedOnce?: boolean
   }>
+  quartzStats: {
+    activeCount: number
+    activeIds: string[]
+    memoryUsage: number
+  }
+  environment: {
+    hasHrTime: boolean
+    hasPerformance: boolean
+    hasSetImmediate: boolean
+    isTest: boolean
+  }
+  memoryUsage: {
+    formations: number
+    quartz: number
+  }
 }
 
 // Action metrics for legacy compatibility

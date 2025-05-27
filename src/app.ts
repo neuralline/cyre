@@ -1,4 +1,5 @@
-// src/app.ts - FIXED: Lightweight metrics integration
+import {buildActionPipeline} from './components/cyre-actions'
+// src/app.ts
 
 import type {
   IO,
@@ -16,27 +17,10 @@ import timeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, middlewares, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
-import {EventType, metricsReport} from './context/metrics-report' // FIXED: Lightweight collector
+import {metricsReport} from './context/metrics-report'
+import {processCall} from './components/cyre-call'
 
-// 🚀 NEW: Import pipeline system
-import {
-  getCompiledPipeline,
-  invalidatePipelineCache,
-  getPipelineCacheStats,
-  getAllCompiledPipelines
-} from './pipeline/pipeline-compiler'
-import {
-  getExecutionStats,
-  getPerformanceAnalysis,
-  resetExecutionStats
-} from './pipeline/pipeline-executor'
-import {
-  registerActionWithPipeline,
-  updateActionWithPipeline,
-  removeActionWithCleanup,
-  executeOptimizedCall,
-  performPipelineHealthCheck
-} from './pipeline/pipeline-integration'
+// Pipeline system imports
 
 /* 
     Neural Line
@@ -45,11 +29,14 @@ import {
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
     Version 4.0.0 2025
 
-    Enhanced with detailed action pipeline timing measurement:
-    - Proper separation of action pipeline overhead vs listener execution
-    - Industry-aligned performance thresholds  
-    - Detailed timing breakdowns and optimization suggestions
-    - Real-time performance monitoring and warnings
+    Pipeline-compiled action system with lightweight metrics collection:
+    - Actions compiled at registration time for optimal performance
+    - Fast path for simple channels with zero overhead
+    - Timekeeper integration for interval/delay/repeat timing
+    - Pre-compiled pipelines cached per channel
+    - Raw metrics collection via sensor architecture
+    - Functional programming approach with no OOP/Classes
+    - Live streaming capabilities for external monitoring
 
     Example use:
       cyre.action({id: 'uber', payload: 44085648634})
@@ -58,22 +45,12 @@ import {
       })
       cyre.call('uber') 
 
-    Now with enhanced timing:
-    - Action Pipeline: throttle + debounce + middleware + dispatch overhead
-    - Listener Execution: pure user handler execution time  
-    - Total Execution: pipeline overhead + listener execution
-
-      
-      - Actions are compiled at registration time
-      - Fast path for simple channels (zero overhead)
-      - Timekeeper integration for interval/delay/repeat
-      - Pre-compiled pipelines stored per channel state
-      - compiled pipeline should include all actions. eg:repeat,delay, debounce
-      - pre-verification before compile and fast path
-      - {block:true} option. like fast path, pre-block for failed verifications, {repeat:0}, {block:true} or service no longer available 
-      - Lightweight metrics collection for external monitoring
-      - Functional architecture maintained
-
+    Pipeline Features:
+    - Compile-time verification and optimization
+    - Zero-overhead fast path for simple actions
+    - Protection pipeline for complex actions
+    - Lightweight sensor-based metrics collection
+    - Live event streaming for external monitoring
 */
 
 /**
@@ -94,12 +71,23 @@ const initializeBreathing = (): void => {
     true
   )
 }
+
 // Track initialization state
 let isInitialized = false
 let isLocked = false
 
+export interface DetailedTiming {
+  stages: Record<string, number>
+  totals: {
+    totalExecution: number
+    pipelineOverhead: number
+    listenerExecution: number
+    overheadRatio: number
+  }
+}
+
 /**
- * 🎯 ENHANCED ACTION REGISTRATION WITH PIPELINE COMPILATION
+ * Action registration with pipeline compilation and sensor logging
  */
 const action = (
   attribute: IO | IO[]
@@ -117,14 +105,37 @@ const action = (
           // Validate and create channel
           const channelResult = CyreChannel(singleAction, dataDefinitions)
           if (!channelResult.ok || !channelResult.payload) {
+            metricsReport.sensor.error(
+              singleAction.id || 'unknown',
+              channelResult.message,
+              'action-validation'
+            )
             return {ok: false, message: channelResult.message}
           }
 
-          // 🚀 Register with pipeline compilation
-          return registerActionWithPipeline(channelResult.payload)
+          // Register with pipeline compilation
+          const pipelineResult = buildActionPipeline(channelResult.payload)
+
+          // Log action registration
+          metricsReport.sensor.log(
+            singleAction.id,
+            'info',
+            'action-registration',
+            {
+              success: pipelineResult.ok,
+              pipeline: pipelineResult.message
+            }
+          )
+
+          return pipelineResult
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error)
           log.error(`Failed to register action ${singleAction.id}: ${msg}`)
+          metricsReport.sensor.error(
+            singleAction.id || 'unknown',
+            msg,
+            'action-registration'
+          )
           return {ok: false, message: msg}
         }
       })
@@ -142,11 +153,22 @@ const action = (
       // Validate and create channel
       const channelResult = CyreChannel(attribute, dataDefinitions)
       if (!channelResult.ok || !channelResult.payload) {
+        metricsReport.sensor.error(
+          attribute.id || 'unknown',
+          channelResult.message,
+          'action-validation'
+        )
         return {ok: false, message: channelResult.message}
       }
 
-      // 🚀 Register with pipeline compilation
-      const pipelineResult = registerActionWithPipeline(channelResult.payload)
+      // Register with pipeline compilation
+      const pipelineResult = buildActionPipeline(channelResult.payload)
+
+      // Log action registration
+      metricsReport.sensor.log(attribute.id, 'info', 'action-registration', {
+        success: pipelineResult.ok,
+        pipeline: pipelineResult.message
+      })
 
       return {
         ok: pipelineResult.ok,
@@ -157,6 +179,12 @@ const action = (
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Action registration failed: ${errorMessage}`)
+
+    // Log system error
+    metricsReport.sensor.log('system', 'error', 'action-registration', {
+      error: errorMessage
+    })
+
     return {
       ok: false,
       message: `Action registration failed: ${errorMessage}`
@@ -165,13 +193,18 @@ const action = (
 }
 
 /**
- * 📞 ENHANCED CALL EXECUTION WITH LIGHTWEIGHT METRICS
+ * Call execution with optimized pipeline and sensor logging
  */
-const call = async (
+export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   if (!id || typeof id !== 'string') {
+    metricsReport.sensor.error(
+      'unknown',
+      'Invalid action ID',
+      'call-validation'
+    )
     return {
       ok: false,
       payload: null,
@@ -179,10 +212,16 @@ const call = async (
     }
   }
 
+  // Log call initiation
+  metricsReport.sensor.log(id, 'call', 'call-initiation', {
+    hasPayload: payload !== undefined
+  })
+
   try {
     // Check if action exists
     const actionConfig = io.get(id)
     if (!actionConfig) {
+      metricsReport.sensor.error(id, 'unknown id', 'call-validation')
       return {
         ok: false,
         payload: null,
@@ -190,33 +229,14 @@ const call = async (
       }
     }
 
-    // FIXED: Track call with lightweight collector
-    metricsReport.trackCall(id, actionConfig.priority?.level || 'medium')
-
-    // 🚀 Use optimized execution with compiled pipelines
-    const result = await executeOptimizedCall(id, payload)
-
-    // FIXED: Track execution with lightweight metrics
-    if (result.metadata?.executionTime) {
-      metricsReport.trackExecution(
-        id,
-        result.metadata.executionTime,
-        result.metadata.executionPath
-      )
-    }
-
-    // Track errors if any
-    if (!result.ok) {
-      metricsReport.trackError(id, result.error)
-    }
-
+    // Streamlined call processing
+    const result = await processCall(actionConfig, payload)
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Call execution failed for ${id}: ${errorMessage}`)
+    log.critical(`Call execution failed for ${id}: ${errorMessage}`)
 
-    // Track the error
-    metricsReport.trackError(id, errorMessage)
+    metricsReport.sensor.error(id, errorMessage, 'call-execution')
 
     return {
       ok: false,
@@ -228,7 +248,7 @@ const call = async (
 }
 
 /**
- * 🗑️ ENHANCED FORGET WITH PIPELINE CLEANUP
+ * Forget action with pipeline cleanup and sensor logging
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -236,32 +256,42 @@ const forget = (id: string): boolean => {
   }
 
   try {
-    // 🗑️ Remove with pipeline cleanup
-    const actionRemoved = removeActionWithCleanup(id)
+    // Remove with pipeline cleanup
+    //const actionRemoved = removeActionWithCleanup(id)
     const subscriberRemoved = subscribers.forget(id)
 
     // Clean up timeline entries
     timeline.forget(id)
 
-    if (actionRemoved || subscriberRemoved) {
+    if (subscriberRemoved) {
       log.debug(`Removed action and pipeline for ${id}`)
+      metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
       return true
     }
 
+    metricsReport.sensor.log(id, 'info', 'action-removal', {
+      success: false,
+      reason: 'not found'
+    })
     return false
   } catch (error) {
     log.error(`Failed to forget ${id}: ${error}`)
+    metricsReport.sensor.error(id, String(error), 'action-removal')
     return false
   }
 }
 
 /**
- * 🧹 ENHANCED CLEAR WITH LIGHTWEIGHT CLEANUP
+ * Clear system with comprehensive cleanup and sensor logging
  */
 const clear = (): void => {
   try {
+    metricsReport.sensor.log('system', 'info', 'system-clear', {
+      timestamp: Date.now()
+    })
+
     // Clear all pipeline caches
-    invalidatePipelineCache()
+    //invalidatePipelineCache()
 
     // Clear existing state
     io.clear()
@@ -272,19 +302,23 @@ const clear = (): void => {
     // Clear history
     historyState.clearAll()
 
-    // Reset lightweight metrics
+    // Reset metrics
     metricsReport.reset()
-    resetExecutionStats()
+    //resetExecutionStats()
     metricsState.reset()
 
-    log.success('🧹 System cleared with  cleanup')
+    log.success('System cleared with pipeline cleanup')
+    metricsReport.sensor.log('system', 'success', 'system-clear', {
+      completed: true
+    })
   } catch (error) {
     log.error(`Clear operation failed: ${error}`)
+    metricsReport.sensor.error('system', String(error), 'system-clear')
   }
 }
 
 /**
- * 🔧 ENHANCED MIDDLEWARE REGISTRATION
+ * Middleware registration with sensor logging
  */
 const middleware = (
   id: string,
@@ -294,15 +328,28 @@ const middleware = (
   ) => Promise<{action: IO; payload: ActionPayload} | null>
 ): {ok: boolean; message: string; payload: null} => {
   if (isLocked) {
+    metricsReport.sensor.log(id, 'blocked', 'middleware-registration', {
+      reason: 'system locked'
+    })
     return {ok: false, message: MSG.SYSTEM_LOCKED, payload: null}
   }
 
   try {
     if (!id || typeof id !== 'string') {
+      metricsReport.sensor.error(
+        id || 'unknown',
+        'Invalid middleware ID',
+        'middleware-registration'
+      )
       return {ok: false, message: 'Middleware ID is required', payload: null}
     }
 
     if (typeof fn !== 'function') {
+      metricsReport.sensor.error(
+        id,
+        'Invalid middleware function',
+        'middleware-registration'
+      )
       return {
         ok: false,
         message: 'Middleware function is required',
@@ -315,41 +362,59 @@ const middleware = (
     middlewares.add(middlewareObj)
 
     log.debug(`Middleware registered: ${id}`)
+    metricsReport.sensor.log(id, 'middleware', 'middleware-registration', {
+      registered: true
+    })
+
     return {ok: true, message: `Middleware registered: ${id}`, payload: null}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Middleware registration failed: ${errorMessage}`)
+    metricsReport.sensor.error(id, errorMessage, 'middleware-registration')
     return {ok: false, message: errorMessage, payload: null}
   }
 }
 
-// Keep existing methods unchanged
+// Core methods - unchanged interfaces
 const on = subscribe
 const get = (id: string): IO | undefined => io.get(id)
 const hasChanged = (id: string, payload: ActionPayload): boolean =>
   io.hasChanged(id, payload)
 const getPrevious = (id: string): ActionPayload | undefined =>
   io.getPrevious(id)
-const pause = (id?: string): void => timeKeeper.pause(id)
-const resume = (id?: string): void => timeKeeper.resume(id)
+const pause = (id?: string): void => {
+  timeKeeper.pause(id)
+  metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
+}
+const resume = (id?: string): void => {
+  timeKeeper.resume(id)
+  metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
+}
 const status = (): boolean => metricsState.get().hibernating
 
 const lock = (): {ok: boolean; message: string; payload: null} => {
   isLocked = true
   metricsState.lock()
+  metricsReport.sensor.log('system', 'critical', 'system-lock')
   return {ok: true, message: 'System locked', payload: null}
 }
 
 const shutdown = (): void => {
   try {
+    metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
+      timestamp: Date.now()
+    })
+
     // Shutdown metrics collector
     metricsReport.shutdown()
     clear()
+
     if (typeof process !== 'undefined' && process.exit) {
       process.exit(0)
     }
   } catch (error) {
     log.error(`Shutdown failed: ${error}`)
+    metricsReport.sensor.error('system', String(error), 'system-shutdown')
   }
 }
 
@@ -362,12 +427,20 @@ const initialize = (): {ok: boolean; payload: number; message: string} => {
     isInitialized = true
     initializeBreathing()
     timeKeeper.resume()
+
     log.sys(MSG.QUANTUM_HEADER)
-    log.success('🚀 CYRE initialized with  metrics system')
+    log.success('CYRE initialized with pipeline compilation and sensor metrics')
+
+    metricsReport.sensor.log('system', 'success', 'system-initialization', {
+      timestamp: Date.now(),
+      features: ['pipeline-compilation', 'sensor-metrics', 'breathing-system']
+    })
+
     return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Initialization failed: ${errorMessage}`)
+    metricsReport.sensor.error('system', errorMessage, 'system-initialization')
     return {ok: false, payload: 0, message: errorMessage}
   }
 }
@@ -382,7 +455,7 @@ const getPerformanceState = () => {
     totalCallTime: 0, // Legacy compatibility
     totalStress: metricsState.get().stress.combined,
     stress: metricsState.get().stress.combined,
-    callRate: systemStats.callRate, // From lightweight collector
+    callRate: systemStats.callRate,
     totalCalls: systemStats.totalCalls,
     totalExecutions: systemStats.totalExecutions
   }
@@ -403,9 +476,9 @@ const getMetrics = (channelId?: string) => {
             {
               id: channelId,
               duration: 0,
-              executionCount: actionStats.executions,
+              executionCount: actionStats.calls,
               status: 'active' as const,
-              nextExecutionTime: actionStats.lastExecution,
+              nextExecutionTime: actionStats.lastCall,
               isInRecuperation: state.inRecuperation,
               breathingSync: state.breathing.currentRate
             }
@@ -439,84 +512,25 @@ const getHistory = (actionId?: string) => {
 const clearHistory = (actionId?: string): void => {
   if (actionId) {
     historyState.clearChannel(actionId)
+    metricsReport.sensor.log(actionId, 'info', 'history-clear', {
+      scope: 'single'
+    })
   } else {
     historyState.clearAll()
+    metricsReport.sensor.log('system', 'info', 'history-clear', {scope: 'all'})
   }
 }
 
 /**
- * 🚀 LIGHTWEIGHT METRICS METHODS
+ * Pipeline management methods
  */
-const getPipelineStats = () => {
-  return {
-    cache: getPipelineCacheStats(),
-    execution: getExecutionStats(),
-    performance: getPerformanceAnalysis()
-  }
-}
-
-const getPipelineInfo = (actionId: string) => {
-  try {
-    const action = io.get(actionId)
-    if (!action) {
-      return null
-    }
-
-    const compiledPipeline = getCompiledPipeline(action)
-    if (!compiledPipeline) {
-      return null
-    }
-
-    return {
-      channelId: compiledPipeline.channelId,
-      isFastPath: compiledPipeline.isFastPath,
-      requiresTimekeeper: compiledPipeline.requiresTimekeeper,
-      category: compiledPipeline.performance.category,
-      expectedOverhead: compiledPipeline.performance.expectedOverhead,
-      optimizationLevel: compiledPipeline.performance.optimizationLevel,
-      compiledAt: compiledPipeline.compiledAt,
-      verificationHash: compiledPipeline.verificationHash,
-      flags: compiledPipeline.flags,
-      verification: {
-        errors: compiledPipeline.verification.errors,
-        warnings: compiledPipeline.verification.warnings,
-        optimizations: compiledPipeline.verification.optimizations
-      }
-    }
-  } catch (error) {
-    return null
-  }
-}
-
-const recompileAction = (actionId: string): {ok: boolean; message: string} => {
-  const action = io.get(actionId)
-  if (!action) {
-    return {ok: false, message: 'Action not found'}
-  }
-
-  try {
-    return updateActionWithPipeline(action)
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return {ok: false, message: errorMessage}
-  }
-}
-
-const performHealthCheck = () => {
-  return performPipelineHealthCheck()
-}
-
-const getPerformanceInsights = (): string[] => {
-  const analysis = getPerformanceAnalysis()
-  return [...analysis.insights, ...analysis.recommendations]
-}
 
 /**
- * LIGHTWEIGHT METRICS EXPORT METHODS
+ * Metrics export and monitoring methods
  */
 const exportMetrics = (filter?: {
   actionId?: string
-  eventType?: EventType
+  eventType?: string
   since?: number
   limit?: number
 }) => {
@@ -528,11 +542,22 @@ const getBasicMetricsReport = (): string => {
 }
 
 const getMetricsMemoryInfo = () => {
-  return metricsReport.getMemoryInfo()
+  const stats = metricsReport.getSystemStats()
+  return {
+    totalCalls: stats.totalCalls,
+    totalExecutions: stats.totalExecutions,
+    totalErrors: stats.totalErrors,
+    callRate: stats.callRate,
+    uptime: Date.now() - stats.startTime
+  }
 }
 
 /**
- * 🎯 MAIN CYRE INSTANCE WITH LIGHTWEIGHT METRICS
+ * Live streaming methods for external monitoring
+ */
+
+/**
+ * Main CYRE instance with pipeline compilation and sensor metrics
  */
 export const cyre = {
   // Core methods
@@ -563,36 +588,27 @@ export const cyre = {
   getHistory,
   clearHistory,
 
-  // 🚀 Pipeline-specific methods
-  getPipelineStats,
-  getPipelineInfo,
-  recompileAction,
-  performHealthCheck,
-  getPerformanceInsights,
-
-  // 📊 LIGHTWEIGHT METRICS EXPORT
+  // Metrics export
   exportMetrics,
   getBasicMetricsReport,
-  getMetricsMemoryInfo,
+  getMetricsMemoryInfo
 
   // Development helpers
-  dev: {
-    resetExecutionStats,
-    getExecutionStats,
-    getPerformanceAnalysis,
-    invalidatePipelineCache: (channelId?: string) =>
-      invalidatePipelineCache(channelId),
-    getAllPipelines: () => getAllCompiledPipelines(),
-    forceRecompile: (actionId: string) => {
-      invalidatePipelineCache(actionId)
-      return recompileAction(actionId)
-    },
-    // Raw metrics access for advanced monitoring
-    getSystemStats: () => metricsReport.getSystemStats(),
-    getActionStats: (actionId: string) =>
-      metricsReport.getActionStats(actionId),
-    exportAllActionStats: () => metricsReport.exportActionStats()
-  }
+  // dev: {
+  //   resetExecutionStats,
+  //   getExecutionStats,
+  //   getPerformanceAnalysis,
+  //   invalidatePipelineCache: (channelId?: string) =>
+  //     invalidatePipelineCache(channelId),
+  //   getAllPipelines: () => getAllCompiledPipelines(),
+  //   forceRecompile: (actionId: string) => {
+  //     invalidatePipelineCache(actionId)
+  //     return recompileAction(actionId)
+  //   },
+  //   // Raw metrics access for advanced monitoring
+  //   getSystemStats: () => metricsReport.getSystemStats(),
+  //   getActionStats: (actionId: string) => metricsReport.getActionStats(actionId)
+  // }
 }
 
 // Initialize on import

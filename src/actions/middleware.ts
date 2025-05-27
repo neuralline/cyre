@@ -1,24 +1,22 @@
 // src/actions/middleware.ts
-// FIXED: Middleware protection mechanism with proper payload transformation and next() handling
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {middlewares} from '../context/state'
 import {log} from '../components/cyre-log'
-import {metricsReport} from '../context/metrics-report'
 
 /*
 
     C.Y.R.E - A.C.T.I.O.N.S - M.I.D.D.L.E.W.A.R.E
 
-    FIXED: Proper middleware chaining with correct next() handling
+    Proper middleware chaining with correct next() handling
     The issue was that middleware was calling next() but the result wasn't being returned properly
 
 */
 
 /**
- * FIXED: Middleware protection function with proper payload transformation and next() calling
+ * Middleware protection function with proper payload transformation and next() calling
  */
-export const applyMiddlewareProtection = async (
+export const middlewareAction = async (
   action: IO,
   payload: ActionPayload,
   next: (transformedPayload?: ActionPayload) => Promise<CyreResponse>
@@ -45,7 +43,7 @@ export const applyMiddlewareProtection = async (
     try {
       log.debug(`Applying middleware '${middlewareId}' to action ${action.id}`)
 
-      // FIXED: Create a proper next function for this middleware
+      // Create a proper next function for this middleware
       const middlewareNext = async (
         processedPayload: ActionPayload
       ): Promise<CyreResponse> => {
@@ -53,7 +51,7 @@ export const applyMiddlewareProtection = async (
           `Middleware '${middlewareId}' called next() with processed payload`
         )
 
-        // CRITICAL FIX: Actually call the next middleware or final handler
+        // Actually call the next middleware or final handler
         // The middleware next() should continue the chain, not call the original next directly
         currentPayload = processedPayload
 
@@ -68,7 +66,7 @@ export const applyMiddlewareProtection = async (
             ...currentAction,
             middleware: remainingMiddleware
           }
-          return applyMiddlewareProtection(subAction, processedPayload, next)
+          return middlewareAction(subAction, processedPayload, next)
         } else {
           // No more middleware - call the final handler
           log.debug(
@@ -83,12 +81,20 @@ export const applyMiddlewareProtection = async (
         middleware.fn(currentAction, currentPayload)
       )
 
-      // CRITICAL FIX: Check the result type properly
+      // Check the result type properly
       if (result === null || result === undefined) {
         log.debug(
           `Middleware '${middlewareId}' rejected action by returning null/undefined`
         )
-        metricsReport.trackMiddlewareRejection(action.id)
+
+        // Track middleware rejection - import here to avoid circular deps
+        try {
+          const {metricsReport} = await import('../context/metrics-report')
+          metricsReport.trackMiddlewareRejection(action.id)
+        } catch (error) {
+          // Metrics not available - continue without tracking
+        }
+
         return {
           ok: false,
           payload: null,
@@ -96,14 +102,14 @@ export const applyMiddlewareProtection = async (
         }
       }
 
-      // FIXED: Handle different middleware return patterns
+      // Handle different middleware return patterns
       if (typeof result === 'object' && 'ok' in result) {
         // Middleware returned a CyreResponse directly
         if (!result.ok) {
           log.debug(
             `Middleware '${middlewareId}' rejected action with response`
           )
-          metricsReport.trackMiddlewareRejection(action.id)
+
           return result as CyreResponse
         }
 
@@ -130,7 +136,15 @@ export const applyMiddlewareProtection = async (
         log.warn(
           `Middleware '${middlewareId}' returned unexpected format, treating as rejection`
         )
-        metricsReport.trackMiddlewareRejection(action.id)
+
+        // Track middleware rejection - import here to avoid circular deps
+        try {
+          const {metricsReport} = await import('../context/metrics-report')
+          metricsReport.trackMiddlewareRejection(action.id)
+        } catch (error) {
+          // Metrics not available - continue without tracking
+        }
+
         return {
           ok: false,
           payload: null,
@@ -143,7 +157,15 @@ export const applyMiddlewareProtection = async (
       )
     } catch (error) {
       log.error(`Middleware '${middlewareId}' failed: ${error}`)
-      metricsReport.trackMiddlewareRejection(action.id)
+
+      // Track middleware rejection - import here to avoid circular deps
+      try {
+        const {metricsReport} = await import('../context/metrics-report')
+        metricsReport.trackMiddlewareRejection(action.id)
+      } catch (error) {
+        // Metrics not available - continue without tracking
+      }
+
       return {
         ok: false,
         payload: null,
@@ -159,57 +181,4 @@ export const applyMiddlewareProtection = async (
     `All middleware completed for ${action.id}, executing final handler`
   )
   return next(currentPayload)
-}
-
-/**
- * Check if action has middleware configured
- */
-export const hasMiddleware = (action: IO): boolean => {
-  return Boolean(
-    action.middleware &&
-      Array.isArray(action.middleware) &&
-      action.middleware.length > 0
-  )
-}
-
-/**
- * Get middleware count for an action
- */
-export const getMiddlewareCount = (action: IO): number => {
-  if (!hasMiddleware(action)) return 0
-  return action.middleware!.length
-}
-
-/**
- * Validate middleware chain for an action
- */
-export const validateMiddlewareChain = (
-  action: IO
-): {
-  valid: boolean
-  missing: string[]
-  errors: string[]
-} => {
-  const result = {
-    valid: true,
-    missing: [] as string[],
-    errors: [] as string[]
-  }
-
-  if (!hasMiddleware(action)) {
-    return result
-  }
-
-  for (const middlewareId of action.middleware!) {
-    const middleware = middlewares.get(middlewareId)
-    if (!middleware) {
-      result.valid = false
-      result.missing.push(middlewareId)
-    } else if (typeof middleware.fn !== 'function') {
-      result.valid = false
-      result.errors.push(`Middleware '${middlewareId}' has invalid function`)
-    }
-  }
-
-  return result
 }

@@ -1,9 +1,8 @@
 // src/actions/debounce.ts
-// FIXED: Lightweight metrics integration
+// Lightweight metrics integration
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io} from '../context/state'
-import {metricsReport} from '../context/metrics-report' // FIXED: Lightweight collector
 import timeKeeper from '../components/cyre-timekeeper'
 import {log} from '../components/cyre-log'
 
@@ -12,29 +11,42 @@ import {log} from '../components/cyre-log'
     C.Y.R.E- A.C.T.I.O.N.S - D.E.B.O.U.N.C.E
 
     Collapses rapid calls into a single delayed execution
-    FIXED: Uses lightweight metrics collection
+    Uses lightweight metrics collection
 
 */
 
 /**
  * Debounce protection - collapses rapid calls
  */
-export const applyDebounceProtection = async (
+export const debounce = async (
   action: IO,
-  payload: ActionPayload,
-  next: (transformedPayload?: ActionPayload) => Promise<CyreResponse>
+  payload: ActionPayload
 ): Promise<CyreResponse> => {
   if (!action.debounce) {
-    return next(payload)
+    return {
+      ok: false,
+      payload: null,
+      error: true,
+      message: `Error debounce not defined`
+    }
   }
 
   // Skip if this is a debounce-bypass execution
   if (action._bypassDebounce) {
-    return next(payload)
+    return {
+      ok: true,
+      payload: null,
+      message: `bypassed debounce: will execute after ${action.debounce}ms`
+    }
   }
 
-  // FIXED: Track debounce with lightweight collector
-  metricsReport.trackProtection(action.id, 'debounce')
+  // Track debounce with lightweight collector - import here to avoid circular deps
+  try {
+    const {metricsReport} = await import('../context/metrics-report')
+    metricsReport.trackProtection(action.id, 'debounce')
+  } catch (error) {
+    // Metrics not available - continue without tracking
+  }
 
   // Cancel any existing debounce timer
   if (action.debounceTimerId) {
@@ -49,13 +61,17 @@ export const applyDebounceProtection = async (
   // Create unique timer ID
   const timerId = `${action.id}-debounce-${Date.now()}`
 
-  // CRITICAL FIX: Return the debounce response immediately, execute later
+  // Return the debounce response immediately, execute later
   const timerResult = timeKeeper.keep(
     action.debounce,
     async () => {
       try {
         // Execute with debounce bypassed
-        const result = await next(payload)
+        return {
+          ok: true,
+          payload: null,
+          message: `bypassed debounce: will execute after ${action.debounce}ms`
+        }
         // Note: This result won't be returned to the original caller
         // as the debounce has already responded
       } catch (error) {
@@ -87,26 +103,5 @@ export const applyDebounceProtection = async (
     ok: true,
     payload: null,
     message: `Debounced: will execute after ${action.debounce}ms`
-  }
-}
-
-/**
- * Check if action has pending debounce timer
- */
-export const hasPendingDebounce = (action: IO): boolean => {
-  return Boolean(action.debounceTimerId)
-}
-
-/**
- * Cancel existing debounce timer for an action
- */
-export const cancelDebounceTimer = (action: IO): void => {
-  if (action.debounceTimerId) {
-    timeKeeper.forget(action.debounceTimerId)
-
-    // Update action in store without timer ID
-    const updatedAction = {...action}
-    delete updatedAction.debounceTimerId
-    io.set(updatedAction)
   }
 }

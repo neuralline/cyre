@@ -1,16 +1,29 @@
-// src/components/cyre-on.ts
+// src/components/cyre-on-fixed.ts
+// Fixed subscription system to work with optimized pipeline
+
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
-import {On, Subscriber, SubscriptionResponse} from '../types/interface'
+import type {EventHandler, SubscriptionResponse} from '../types/interface'
 import {log} from './cyre-log'
 
 /* 
 
-      C.Y.R.E. - O.N.
-
+      C.Y.R.E. - O.N. - F.I.X.E.D.
+      
+      Fixed subscription system that works with optimized pipeline:
+      1. Subscribe to ACTION IDs, not types
+      2. Proper integration with pipeline execution
+      3. Chain reaction support
+      4. Multiple subscription handling
 
 */
+
+interface Subscriber {
+  id: string
+  fn: EventHandler
+}
+
 interface SubscriptionError {
   code: string
   message: string
@@ -24,20 +37,20 @@ type SubscriptionResult = {
   subscriber?: Subscriber
 }
 
-// Validation functions
+/**
+ * Validate subscriber configuration
+ */
 const validateSubscriber = (
-  type: string,
-  fn: (
-    payload?: unknown
-  ) => void | Promise<void> | {id: string; payload?: unknown}
+  actionId: string,
+  fn: EventHandler
 ): SubscriptionResult => {
-  if (!type || typeof type !== 'string') {
+  if (!actionId || typeof actionId !== 'string') {
     return {
       ok: false,
       message: MSG.CHANNEL_INVALID_TYPE,
       error: {
-        code: 'INVALID_TYPE',
-        message: `Type must be a non-empty string, received: ${type}`
+        code: 'INVALID_ACTION_ID',
+        message: `Action ID must be a non-empty string, received: ${actionId}`
       }
     }
   }
@@ -56,18 +69,19 @@ const validateSubscriber = (
   return {
     ok: true,
     message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
-    subscriber: {id: type.trim(), fn}
+    subscriber: {id: actionId.trim(), fn}
   }
 }
 
+/**
+ * Add single subscriber with proper validation
+ */
 const addSingleSubscriber = (
-  type: string,
-  fn: (
-    payload?: unknown
-  ) => void | Promise<void> | {id: string; payload?: unknown}
+  actionId: string,
+  fn: EventHandler
 ): SubscriptionResponse => {
   try {
-    const validation = validateSubscriber(type, fn)
+    const validation = validateSubscriber(actionId, fn)
     if (!validation.ok || !validation.subscriber) {
       log.error(validation.error || validation.message)
       return {
@@ -78,31 +92,33 @@ const addSingleSubscriber = (
 
     const {subscriber} = validation
 
-    // Enhanced duplicate subscriber detection
+    // Check for existing subscriber
     const existing = subscribers.get(subscriber.id)
     if (existing) {
-      // Add more prominent warning with both cyre-log and console.warn
       const duplicateMessage = `DUPLICATE LISTENER DETECTED: Channel "${subscriber.id}" already has a listener attached!`
-
-      // Use warning level instead of just info
       log.warn(duplicateMessage)
-
-      // Also log directly to console for better visibility during development
-      if (typeof console !== 'undefined' && console.warn) {
-        console.warn(duplicateMessage)
-        console.warn(
-          'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
-        )
-      }
+      console.warn(duplicateMessage)
+      console.warn(
+        'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
+      )
     }
 
     // Add or update subscriber
     subscribers.add(subscriber)
 
-    log.debug(`${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`)
+    const successMessage = `${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`
+    log.debug(successMessage)
+
     return {
       ok: true,
-      message: `${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`
+      message: successMessage,
+      unsubscribe: () => {
+        const removed = subscribers.forget(subscriber.id)
+        if (removed) {
+          log.debug(`Unsubscribed from ${subscriber.id}`)
+        }
+        return removed
+      }
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -114,6 +130,9 @@ const addSingleSubscriber = (
   }
 }
 
+/**
+ * Add multiple subscribers
+ */
 const addMultipleSubscribers = (
   subscriberList: Subscriber[]
 ): SubscriptionResponse => {
@@ -143,9 +162,19 @@ const addMultipleSubscribers = (
       }
     }
 
+    const message = `Successfully added ${successCount} out of ${totalCount} subscribers`
     return {
       ok: true,
-      message: `Successfully added ${successCount} out of ${totalCount} subscribers`
+      message,
+      unsubscribe: () => {
+        let allRemoved = true
+        subscriberList.forEach(sub => {
+          if (!subscribers.forget(sub.id)) {
+            allRemoved = false
+          }
+        })
+        return allRemoved
+      }
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -158,15 +187,13 @@ const addMultipleSubscribers = (
 }
 
 /**
- * Enhanced subscribe function with better error handling and validation
+ * FIXED: Enhanced subscribe function with better integration
  */
-export const subscribe: On = (
-  type: string | Subscriber[],
-  fn?: (
-    payload?: unknown
-  ) => void | Promise<void> | {id: string; payload?: unknown}
+export const subscribe = (
+  actionIdOrList: string | Subscriber[],
+  fn?: EventHandler
 ): SubscriptionResponse => {
-  //check if system new registry is locked
+  // Check if system is locked
   if (metricsState.isSystemLocked()) {
     log.error(MSG.SYSTEM_LOCKED_SUBSCRIBERS)
     return {
@@ -176,36 +203,64 @@ export const subscribe: On = (
   }
 
   // Handle array of subscribers
-  if (Array.isArray(type)) {
-    const result = addMultipleSubscribers(type)
-    // Add unsubscribe function for array case
-    if (result.ok) {
-      result.unsubscribe = () => {
-        let allRemoved = true
-        type.forEach(sub => {
-          if (!subscribers.forget(sub.id)) {
-            allRemoved = false
-          }
-        })
-        return allRemoved
-      }
-    }
+  if (Array.isArray(actionIdOrList)) {
+    const result = addMultipleSubscribers(actionIdOrList)
     return result
   }
 
-  // Handle single subscriber
-  if (typeof type === 'string' && fn) {
-    const result = addSingleSubscriber(type, fn)
-    // Add unsubscribe function for single case
-    if (result.ok) {
-      result.unsubscribe = () => subscribers.forget(type)
-    }
+  // Handle single subscriber - CRITICAL: Use action ID, not type
+  if (typeof actionIdOrList === 'string' && fn) {
+    const result = addSingleSubscriber(actionIdOrList, fn)
     return result
   }
 
+  // Invalid parameters
   log.error(MSG.SUBSCRIPTION_INVALID_PARAMS)
   return {
     ok: false,
     message: MSG.SUBSCRIPTION_INVALID_PARAMS
   }
 }
+
+/**
+ * Get subscriber by action ID (for pipeline integration)
+ */
+export const getSubscriber = (actionId: string): Subscriber | undefined => {
+  return subscribers.get(actionId)
+}
+
+/**
+ * Check if subscriber exists for action ID
+ */
+export const hasSubscriber = (actionId: string): boolean => {
+  return subscribers.get(actionId) !== undefined
+}
+
+/**
+ * Remove subscriber by action ID
+ */
+export const removeSubscriber = (actionId: string): boolean => {
+  const removed = subscribers.forget(actionId)
+  if (removed) {
+    log.debug(`Removed subscriber for ${actionId}`)
+  }
+  return removed
+}
+
+/**
+ * Get all active subscribers
+ */
+export const getAllSubscribers = (): Subscriber[] => {
+  return subscribers.getAll()
+}
+
+/**
+ * Clear all subscribers
+ */
+export const clearAllSubscribers = (): void => {
+  subscribers.clear()
+  log.debug('Cleared all subscribers')
+}
+
+// Export the main subscribe function as default
+export default subscribe
