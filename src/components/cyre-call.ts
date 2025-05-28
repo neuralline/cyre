@@ -1,78 +1,69 @@
 // src/components/cyre-call.ts
-// Clean call processing with proper flow separation
+// Simplified call processing with built-in protections only
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
-import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
-import {executeMiddlewareChain} from '../middleware/executor'
+import {applyBuiltInProtections} from './cyre-actions'
 
 /*
 
-      C.Y.R.E. - C.A.L.L.
+      C.Y.R.E - C.A.L.L
       
-      Clean call processing following intended flow:
-      call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → [IntraLink → call()]
-      
-      - Removed inline protections (now in pipeline)
-      - Clear separation between normal and scheduled calls
+      Simplified call processing with built-in protections:
+      - Clean execution flow: call() → built-in protections → dispatch()
+      - No external middleware in core
       - Proper timekeeper integration
-      - Clean error handling
+      - Clear error handling
 
 */
 
 /**
- * Main call processing function - clean and focused
- */
-/**
- * Process call with unified middleware integration
+ * Process call with built-in protections only
  */
 export const processCall = async (
   action: IO,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   try {
-    // Execute unified middleware chain
-    const middlewareResult = await executeMiddlewareChain(action, payload)
+    // Apply built-in protections
+    const protectionResult = await applyBuiltInProtections(action, payload)
 
-    if (!middlewareResult.ok) {
-      // Middleware blocked execution or failed
+    if (!protectionResult.ok) {
       return {
         ok: false,
-        payload: middlewareResult.payload,
-        message: middlewareResult.message,
-        metadata: middlewareResult.metadata
-      }
-    }
-
-    // Handle delayed execution (debounce)
-    if (middlewareResult.delayed) {
-      return {
-        ok: true,
-        payload: middlewareResult.payload,
-        message: middlewareResult.message,
+        payload: protectionResult.payload,
+        message: protectionResult.message,
         metadata: {
-          ...middlewareResult.metadata,
-          executionPath: 'delayed',
-          delayed: true
+          executionPath: 'blocked-by-protection',
+          ...protectionResult.metadata
         }
       }
     }
 
-    // Middleware passed - dispatch to execution
-    return await useDispatch(action, middlewareResult.payload)
+    // Handle delayed execution (debounce)
+    if (protectionResult.delayed) {
+      return {
+        ok: true,
+        payload: protectionResult.payload,
+        message: protectionResult.message,
+        metadata: {
+          executionPath: 'delayed-by-protection',
+          delayed: true,
+          duration: protectionResult.duration,
+          ...protectionResult.metadata
+        }
+      }
+    }
+
+    // Built-in protections passed - dispatch to execution
+    return await useDispatch(action, protectionResult.payload)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(
-      `Middleware call processing failed for ${action.id}: ${errorMessage}`
-    )
-    metricsReport.sensor.error(
-      action.id,
-      errorMessage,
-      'middleware-call-processing'
-    )
+    log.error(`Call processing failed for ${action.id}: ${errorMessage}`)
+    metricsReport.sensor.error(action.id, errorMessage, 'call-processing')
 
     return {
       ok: false,
@@ -91,28 +82,28 @@ export const scheduleCall = async (
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   try {
-    // Create execution callback that runs middleware then dispatches
+    // Create execution callback that applies protections then dispatches
     const executionCallback = async () => {
-      // Execute middleware chain for each execution
-      const middlewareResult = await executeMiddlewareChain(action, payload)
+      // Apply built-in protections for each execution
+      const protectionResult = await applyBuiltInProtections(action, payload)
 
-      if (!middlewareResult.ok) {
+      if (!protectionResult.ok || protectionResult.blocked) {
         log.debug(
-          `Scheduled execution blocked by middleware for ${action.id}: ${middlewareResult.message}`
+          `Scheduled execution blocked by protection for ${action.id}: ${protectionResult.message}`
         )
         return
       }
 
       // Handle delayed execution within scheduled calls
-      if (middlewareResult.delayed) {
+      if (protectionResult.delayed) {
         log.debug(
-          `Scheduled execution delayed by middleware for ${action.id}: ${middlewareResult.duration}ms`
+          `Scheduled execution delayed by protection for ${action.id}: ${protectionResult.duration}ms`
         )
         return
       }
 
-      // Middleware passed - dispatch to execution
-      await useDispatch(action, middlewareResult.payload)
+      // Protections passed - dispatch to execution
+      await useDispatch(action, protectionResult.payload)
     }
 
     // Configure timing parameters

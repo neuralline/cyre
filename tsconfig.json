@@ -50,7 +50,7 @@
       "cyre/*": ["src/*"]
     }
   },
-  "include": ["src/**/*", "test/**/*", "example/timekeeper-integration.ts"],
+  "include": ["src/**/*", "test/**/*"],
   "exclude": [
     "node_modules",
     "dist",

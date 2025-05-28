@@ -48,8 +48,6 @@ export const executeMiddlewareChain = async (
 
   try {
     // Check for fast path (no middleware)
-
-    const chain = middlewareState.getChain(action.id)?.middlewares || []
     if (middlewareState.isFastPath(action.id)) {
       metricsReport.sensor.log(action.id, 'info', 'middleware-fast-path')
 
@@ -61,8 +59,8 @@ export const executeMiddlewareChain = async (
     }
 
     // Get middleware chain
-
-    if (!chain || chain.length === 0) {
+    const chain = middlewareState.getChain(action.id)
+    if (!chain || chain.middlewares.length === 0) {
       return {
         ok: true,
         payload: payload || action.payload,
@@ -71,7 +69,7 @@ export const executeMiddlewareChain = async (
     }
 
     // Get middleware entries
-    const middlewareEntries = middlewareState.getEntries(chain)
+    const middlewareEntries = middlewareState.getEntries(chain.middlewares)
     if (middlewareEntries.length === 0) {
       log.warn(`No valid middleware found for chain: ${action.id}`)
       return {

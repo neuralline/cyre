@@ -1,22 +1,14 @@
 // src/app.ts
-// Fixed integration with working unified middleware system
 
 import type {IO, ActionPayload, CyreResponse} from './types/interface'
-
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
-import dataDefinitions from './elements/data-definitions'
-import CyreChannel from './components/cyre-channels'
 import {subscribe} from './components/cyre-on'
 import {TimeKeeper} from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
-import {middlewareState} from './middleware/state'
-import {executeMiddlewareChain} from './middleware/executor'
-import {useDispatch} from './components/cyre-dispatch'
-import type {ExternalMiddlewareFunction} from './types/interface'
 import {registerSingleAction} from './components/cyre-actions'
 import {processCall, scheduleCall} from './components/cyre-call'
 
@@ -42,26 +34,6 @@ import {processCall, scheduleCall} from './components/cyre-call'
 
  
 
-    Fixed with working unified middleware system:
-    - Single middleware execution chain
-    - Built-in protections as internal middleware
-    - External middleware without state access
-    - Zero overhead fast path for simple actions
-    - Proper integration with existing call flow
-
-    Example use:
-      cyre.action({id: 'uber', payload: 44085648634})
-      cyre.on('uber', number => {
-          console.log('Calling Uber: ', number)
-      })
-      cyre.call('uber') 
-
-    Middleware Features:
-    - Unified middleware system (internal + external)
-    - Zero-overhead fast path for actions without protections
-    - Per-action middleware chain compilation
-    - Built-in protections: throttle, debounce, change detection, etc.
-    - External middleware without internal state access
 */
 
 /**
@@ -88,7 +60,7 @@ let isInitialized = false
 let isLocked = false
 
 /**
- * Action registration with middleware chain compilation
+ * Action registration - simplified without external middleware
  */
 const action = (
   attribute: IO | IO[]
@@ -100,7 +72,6 @@ const action = (
 
   try {
     if (Array.isArray(attribute)) {
-      // Handle array of actions
       const results = attribute.map(singleAction => {
         return registerSingleAction(singleAction)
       })
@@ -110,11 +81,10 @@ const action = (
 
       return {
         ok: successful > 0,
-        message: `Registered ${successful}/${total} actions with middleware compilation`,
+        message: `Registered ${successful}/${total} actions`,
         payload: results
       }
     } else {
-      // Handle single action
       return registerSingleAction(attribute)
     }
   } catch (error) {
@@ -133,7 +103,7 @@ const action = (
 }
 
 /**
- * Call execution with clean flow and IntraLink handling
+ * Call execution - simplified flow
  */
 export const call = async (
   id: string,
@@ -152,13 +122,11 @@ export const call = async (
     }
   }
 
-  // Log call initiation
   metricsReport.sensor.log(id, 'call', 'call-initiation', {
     hasPayload: payload !== undefined
   })
 
   try {
-    // Check if channel exists
     const actionConfig = io.get(id)
     if (!actionConfig) {
       metricsReport.sensor.error(id, 'unknown id', 'call-validation')
@@ -169,7 +137,7 @@ export const call = async (
       }
     }
 
-    // Check if action requires timekeeper (has timing properties)
+    // Check if action requires timekeeper
     const requiresTimekeeper = !!(
       actionConfig.interval ||
       actionConfig.delay !== undefined ||
@@ -191,10 +159,7 @@ export const call = async (
       const chainLink = result.metadata.intraLink
 
       try {
-        // Recursively call the linked action
         const chainResult = await call(chainLink.id, chainLink.payload)
-
-        // Return original result but include chain information
         return {
           ...result,
           metadata: {
@@ -204,7 +169,6 @@ export const call = async (
         }
       } catch (chainError) {
         log.error(`IntraLink execution failed: ${chainError}`)
-        // Return original result even if chain fails
         return result
       }
     }
@@ -226,7 +190,7 @@ export const call = async (
 }
 
 /**
- * Forget action with middleware cleanup
+ * Forget action - simplified cleanup
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -234,18 +198,12 @@ const forget = (id: string): boolean => {
   }
 
   try {
-    // Clean up middleware chain
-    const middlewareRemoved = middlewareState.forgetChain(id)
-
-    // Remove action and subscriber
     const actionRemoved = io.forget(id)
     const subscriberRemoved = subscribers.forget(id)
-
-    // Clean up timeline entries
     timeline.forget(id)
 
-    if (actionRemoved || subscriberRemoved || middlewareRemoved) {
-      log.debug(`Removed action, middleware chain, and subscriber for ${id}`)
+    if (actionRemoved || subscriberRemoved) {
+      log.debug(`Removed action and subscriber for ${id}`)
       metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
       return true
     }
@@ -263,64 +221,22 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * External middleware registration (user-facing API)
+ * Clear system - simplified
  */
-const middleware = (
-  id: string,
-  fn: ExternalMiddlewareFunction
-): {ok: boolean; message: string; payload: null} => {
-  if (isLocked) {
-    metricsReport.sensor.log(id, 'blocked', 'middleware-registration', {
-      reason: 'system locked'
-    })
-    return {ok: false, message: MSG.SYSTEM_LOCKED, payload: null}
-  }
-
-  try {
-    const result = middlewareState.registerExternal(id, fn)
-
-    if (result.ok) {
-      metricsReport.sensor.log(id, 'middleware', 'middleware-registration', {
-        registered: true
-      })
-    } else {
-      metricsReport.sensor.error(id, result.message, 'middleware-registration')
-    }
-
-    return {
-      ok: result.ok,
-      message: result.message,
-      payload: null
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Middleware registration failed: ${errorMessage}`)
-    metricsReport.sensor.error(id, errorMessage, 'middleware-registration')
-    return {ok: false, message: errorMessage, payload: null}
-  }
-}
 const clear = (): void => {
   try {
     metricsReport.sensor.log('system', 'info', 'system-clear', {
       timestamp: Date.now()
     })
 
-    // Clear middleware chains
-    middlewareState.clearChains()
-
-    // Clear existing state
     io.clear()
     subscribers.clear()
     timeline.clear()
-
-    // Clear history
     historyState.clearAll()
-
-    // Reset metrics
     metricsReport.reset()
     metricsState.reset()
 
-    log.success('System cleared with complete cleanup')
+    log.success('System cleared')
     metricsReport.sensor.log('system', 'success', 'system-clear', {
       completed: true
     })
@@ -331,7 +247,7 @@ const clear = (): void => {
 }
 
 /**
- * Main CYRE instance with clean pipeline integration
+ * Main CYRE instance - simplified and clean
  */
 export const cyre = {
   // Core methods
@@ -346,14 +262,13 @@ export const cyre = {
       TimeKeeper.resume()
 
       log.sys(MSG.QUANTUM_HEADER)
-      log.success('CYRE initialized with clean pipeline system')
+      log.success('Cyre initialized')
 
       metricsReport.sensor.log('system', 'success', 'system-initialization', {
         timestamp: Date.now(),
         features: [
-          'clean-pipeline',
-          'fast-path',
-          'sensor-metrics',
+          'simplified-core',
+          'built-in-protections',
           'breathing-system'
         ]
       })
@@ -371,18 +286,13 @@ export const cyre = {
       return {ok: false, payload: 0, message: errorMessage}
     }
   },
+
   action,
   on: subscribe,
   call,
-
   get: (id: string): IO | undefined => io.get(id),
   forget,
-  /**
-   * Clear system with comprehensive cleanup
-   */
   clear,
-
-  middleware,
 
   // State methods
   hasChanged: (id: string, payload: ActionPayload): boolean =>
@@ -424,6 +334,7 @@ export const cyre = {
       metricsReport.sensor.error('system', String(error), 'system-shutdown')
     }
   },
+
   status: (): boolean => metricsState.get().hibernating,
 
   // Monitoring methods
@@ -431,8 +342,8 @@ export const cyre = {
   getPerformanceState: () => {
     const systemStats = metricsReport.getSystemStats()
     return {
-      totalProcessingTime: 0, // Legacy compatibility
-      totalCallTime: 0, // Legacy compatibility
+      totalProcessingTime: 0,
+      totalCallTime: 0,
       totalStress: metricsState.get().stress.combined,
       stress: metricsState.get().stress.combined,
       callRate: systemStats.callRate,
@@ -440,6 +351,7 @@ export const cyre = {
       totalExecutions: systemStats.totalExecutions
     }
   },
+
   getMetrics: (channelId?: string) => {
     const state = metricsState.get()
 
@@ -482,6 +394,7 @@ export const cyre = {
       }))
     }
   },
+
   // History methods
   getHistory: (actionId?: string) => {
     return actionId ? historyState.getChannel(actionId) : historyState.getAll()
@@ -500,11 +413,6 @@ export const cyre = {
     }
   },
 
-  // Pipeline monitoring
-  getPipelineStats: () => {
-    return pipelineState.getStats()
-  },
-
   exportMetrics: (filter?: {
     actionId?: string
     eventType?: string
@@ -517,24 +425,14 @@ export const cyre = {
     return metricsReport.getBasicReport()
   },
 
-  //timer
-  /**
-   * Set a timer with proper error handling
-   * @returns Object indicating success and optional timerId/message
-   */
+  // Timer utilities
   setTimer: (
     duration: number,
     callback: () => void,
     timerId: string
   ): {ok: boolean; message?: string} => {
     try {
-      const result = TimeKeeper.keep(
-        duration,
-        callback,
-        1, // Execute once
-        timerId
-      )
-
+      const result = TimeKeeper.keep(duration, callback, 1, timerId)
       return result.kind === 'ok'
         ? {ok: true}
         : {ok: false, message: result.error.message}

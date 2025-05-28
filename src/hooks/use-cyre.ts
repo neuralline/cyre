@@ -1,4 +1,4 @@
-// src/hooks/use-cyre.ts - FIXED version
+// src/hooks/use-cyre.ts
 
 import {cyre} from '../app'
 import type {
@@ -13,24 +13,43 @@ import {
   CyreHookOptions,
   CyreMiddleware,
   ChannelConfig,
-  HistoryEntry,
-  Result,
+  ChannelHistoryEntry,
+  HookResult,
   SubscriptionWithCleanup
 } from '../types/interface'
 
+/*
+
+      C.Y.R.E - H.O.O.K
+      
+      Enhanced useCyre hook with unlimited channel-specific middleware:
+      - Each channel has its own middleware chain
+      - Unlimited middleware support per channel
+      - Channel isolation - middleware only applies to specific channel
+      - Proper cleanup and error handling
+
+*/
+
+interface ChannelMiddleware {
+  id: string
+  fn: CyreMiddleware
+  enabled: boolean
+}
+
+interface ChannelMiddlewareChain {
+  middlewares: ChannelMiddleware[]
+  executionCount: number
+}
+
 /**
- * FIXED: Creates a Cyre channel with enhanced capabilities
- *
- * The key fix is in the middleware registration to match the core CYRE system
+ * Enhanced useCyre with unlimited channel-specific middleware
  */
 export function useCyre<TPayload = ActionPayload>(
   options: CyreHookOptions<TPayload> = {}
 ): CyreHook<TPayload> {
-  // Use name/tag from options, or generate a default identifier
   const channelName = options.name || options.tag || 'channel'
   const channelId = `${channelName}-${crypto.randomUUID()}`
 
-  // Configure debugging
   const debugEnabled = options.debug === true
   const debugLog = debugEnabled
     ? (message: string, data?: any) =>
@@ -40,10 +59,16 @@ export function useCyre<TPayload = ActionPayload>(
         )
     : () => {}
 
-  // Initialize state tracking
-  let isInitialized = false
+  // Channel-specific middleware chain
+  const middlewareChain: ChannelMiddlewareChain = {
+    middlewares: [],
+    executionCount: 0
+  }
 
-  // Initialize subscription tracking
+  let isInitialized = false
+  let middlewareCounter = 0
+
+  // Subscription tracking
   interface ChannelSubscription {
     id: string
     handler: EventHandler
@@ -53,9 +78,118 @@ export function useCyre<TPayload = ActionPayload>(
   let subscriptionCounter = 0
 
   /**
-   * Initialize the channel action with configuration
+   * Execute channel-specific middleware chain
    */
-  const initialize = (config: ChannelConfig = {}): Result<boolean, Error> => {
+  const executeMiddlewareChain = async (
+    payload: TPayload
+  ): Promise<CyreResponse> => {
+    const enabledMiddlewares = middlewareChain.middlewares.filter(
+      m => m.enabled
+    )
+
+    if (enabledMiddlewares.length === 0) {
+      debugLog('No middleware - direct execution')
+      return {
+        ok: true,
+        payload,
+        message: 'No middleware to execute'
+      }
+    }
+
+    debugLog(`Executing ${enabledMiddlewares.length} middleware functions`)
+
+    let currentPayload = payload
+    const executionId = `${channelId}-exec-${++middlewareChain.executionCount}`
+
+    try {
+      for (let i = 0; i < enabledMiddlewares.length; i++) {
+        const middleware = enabledMiddlewares[i]
+
+        debugLog(
+          `Executing middleware ${i + 1}/${enabledMiddlewares.length}: ${
+            middleware.id
+          }`
+        )
+
+        // Create next function for this middleware
+        const next = async (nextPayload?: TPayload): Promise<CyreResponse> => {
+          return {
+            ok: true,
+            payload: nextPayload !== undefined ? nextPayload : currentPayload,
+            message: 'Middleware processing complete'
+          }
+        }
+
+        try {
+          const result = await middleware.fn(currentPayload, next)
+
+          if (!result.ok) {
+            debugLog(
+              `Middleware ${middleware.id} blocked execution: ${result.message}`
+            )
+            return {
+              ok: false,
+              payload: result.payload,
+              message: `Middleware ${middleware.id} blocked: ${result.message}`,
+              error: result.error
+            }
+          }
+
+          // Update payload for next middleware
+          if (result.payload !== null && result.payload !== undefined) {
+            currentPayload = result.payload as TPayload
+            debugLog(`Middleware ${middleware.id} transformed payload`)
+          }
+        } catch (middlewareError) {
+          const errorMessage =
+            middlewareError instanceof Error
+              ? middlewareError.message
+              : String(middlewareError)
+
+          debugLog(`Middleware ${middleware.id} error: ${errorMessage}`)
+
+          return {
+            ok: false,
+            payload: null,
+            message: `Middleware ${middleware.id} error: ${errorMessage}`,
+            error: errorMessage
+          }
+        }
+      }
+
+      debugLog('All middleware executed successfully')
+
+      return {
+        ok: true,
+        payload: currentPayload,
+        message: `${enabledMiddlewares.length} middleware functions executed`,
+        metadata: {
+          executionId,
+          middlewareCount: enabledMiddlewares.length,
+          middlewares: enabledMiddlewares.map(m => m.id)
+        }
+      }
+    } catch (chainError) {
+      const errorMessage =
+        chainError instanceof Error ? chainError.message : String(chainError)
+
+      debugLog(`Middleware chain error: ${errorMessage}`)
+
+      return {
+        ok: false,
+        payload: null,
+        message: `Middleware chain error: ${errorMessage}`,
+        error: errorMessage
+      }
+    }
+  }
+
+  /**
+   * Initialize channel configuration
+   */
+  const initialize = (
+    config: ChannelConfig = {}
+  ): HookResult<boolean, Error> => {
     try {
       if (isInitialized) {
         debugLog('Channel already initialized, updating configuration')
@@ -63,20 +197,14 @@ export function useCyre<TPayload = ActionPayload>(
         debugLog('Initializing channel')
       }
 
-      // Collect middleware IDs from action config if present
-      const existingMiddleware = config.middleware || []
-
       cyre.action({
         ...config,
         id: channelId,
-        // Apply protection options
         throttle: options.protection?.throttle,
         debounce: options.protection?.debounce,
         detectChanges: options.protection?.detectChanges,
         priority: options.priority,
-        payload: config.payload ?? options.initialPayload ?? {},
-        // Ensure middleware array is preserved
-        middleware: existingMiddleware
+        payload: config.payload ?? options.initialPayload ?? {}
       })
 
       isInitialized = true
@@ -99,83 +227,38 @@ export function useCyre<TPayload = ActionPayload>(
     initialize()
   }
 
-  // Create the channel object
+  // Create the enhanced channel object
   const channel: CyreHook<TPayload> = {
-    /** The unique ID for this channel */
     id: channelId,
-
-    /** The friendly name for this channel */
     name: channelName,
 
     /**
-     * Initialize or update the channel configuration
+     * Initialize or update channel configuration
      */
-    action: (config: ChannelConfig): Result<boolean, Error> => {
-      try {
-        if (isInitialized) {
-          debugLog('Channel already initialized, updating configuration')
-        } else {
-          debugLog('Initializing channel')
-        }
-
-        // Get existing action to preserve middleware
-        const existingAction = cyre.get(channelId)
-        const existingMiddleware = existingAction?.middleware || []
-
-        // Merge middleware
-        cyre.action({
-          ...config,
-          id: channelId,
-          // Apply protection options
-          throttle: options.protection?.throttle,
-          debounce: options.protection?.debounce,
-          detectChanges: options.protection?.detectChanges,
-          priority: options.priority,
-          payload: config.payload ?? options.initialPayload ?? {},
-          // Preserve existing middleware - this is the key fix
-          middleware: config.middleware
-            ? [...existingMiddleware, ...config.middleware]
-            : existingMiddleware
-        })
-
-        isInitialized = true
-        debugLog(`Initialization complete`)
-        return {success: true, value: true}
-      } catch (error) {
-        debugLog('Initialization failed', error)
-        return {
-          success: false,
-          error:
-            error instanceof Error
-              ? error
-              : new Error('Channel initialization failed')
-        }
-      }
+    action: (config: ChannelConfig): HookResult<boolean, Error> => {
+      return initialize(config)
     },
 
     /**
-     * Subscribe to events on this channel with unsubscribe capability
+     * Subscribe to channel events
      */
     on: (handler: EventHandler): SubscriptionWithCleanup => {
       const subscriptionId = `${channelId}-sub-${++subscriptionCounter}`
       debugLog(`Creating subscription: ${subscriptionId}`)
 
-      // Register with Cyre
+      // Register with core CYRE directly - middleware is handled in call
       const response = cyre.on(channelId, handler)
 
-      // Track locally for cleanup capability
       if (response.ok) {
         subscriptions.push({
           id: subscriptionId,
-          handler
+          handler: handler
         })
-
         debugLog(`Subscription active, total: ${subscriptions.length}`)
       } else {
         debugLog(`Subscription failed: ${response.message}`)
       }
 
-      // Return enhanced response with unsubscribe capability
       return {
         ...response,
         unsubscribe: () => {
@@ -193,7 +276,7 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Trigger the channel action with optional payload
+     * Call channel - middleware is executed here before calling core
      */
     call: async (payload?: TPayload): Promise<CyreResponse> => {
       if (!isInitialized) {
@@ -212,10 +295,20 @@ export function useCyre<TPayload = ActionPayload>(
       debugLog('Calling with payload', finalPayload)
 
       try {
-        // Call the action
-        const response = await cyre.call(channelId, finalPayload)
+        // Execute middleware chain first
+        const middlewareResult = await executeMiddlewareChain(finalPayload)
 
-        // Log the result
+        if (!middlewareResult.ok) {
+          debugLog(`Middleware blocked execution: ${middlewareResult.message}`)
+          return middlewareResult
+        }
+
+        // Then call core CYRE with processed payload
+        const response = await cyre.call(
+          channelId,
+          middlewareResult.payload as TPayload
+        )
+
         if (response.ok) {
           debugLog('Call succeeded')
         } else {
@@ -237,11 +330,11 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Safely call the channel with automatic error handling
+     * Safe call with error handling
      */
     safeCall: async (
       payload?: TPayload
-    ): Promise<Result<CyreResponse, Error>> => {
+    ): Promise<HookResult<CyreResponse, Error>> => {
       try {
         debugLog('Making safe call with payload', payload)
         const response = await channel.call(payload)
@@ -257,19 +350,26 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Get current channel state
+     * Get current channel configuration
      */
     get: (): IO | undefined => {
       return cyre.get(channelId)
     },
 
     /**
-     * Remove the channel and its resources
+     * Remove channel and cleanup middleware
      */
     forget: (): boolean => {
-      debugLog('Forgetting channel')
+      debugLog('Forgetting channel and cleaning up middleware')
+
+      // Clear all middleware
+      middlewareChain.middlewares.length = 0
+      middlewareChain.executionCount = 0
+
       const result = cyre.forget(channelId)
       if (result) isInitialized = false
+
+      debugLog('Channel forgotten, middleware cleared')
       return result
     },
 
@@ -290,7 +390,7 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Check if payload has changed from previous
+     * Check if payload has changed
      */
     hasChanged: (payload: TPayload): boolean => {
       return cyre.hasChanged(channelId, payload)
@@ -307,11 +407,25 @@ export function useCyre<TPayload = ActionPayload>(
      * Get channel performance metrics
      */
     metrics: () => {
-      return cyre.getMetrics(channelId)
+      const coreMetrics = cyre.getMetrics(channelId)
+
+      return {
+        ...coreMetrics,
+        middleware: {
+          totalMiddleware: middlewareChain.middlewares.length,
+          enabledMiddleware: middlewareChain.middlewares.filter(m => m.enabled)
+            .length,
+          executionCount: middlewareChain.executionCount,
+          middlewares: middlewareChain.middlewares.map(m => ({
+            id: m.id,
+            enabled: m.enabled
+          }))
+        }
+      }
     },
 
     /**
-     * Get breathing metrics for this channel
+     * Get breathing state
      */
     getBreathingState: () => {
       return cyre.getBreathingState()
@@ -325,98 +439,29 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * FIXED: Register middleware using the direct CYRE API pattern that works
+     * Add unlimited middleware to channel
      */
-    middleware: (middleware: CyreMiddleware<TPayload>): void => {
-      debugLog('Adding middleware')
+    middleware: (middlewareFn: CyreMiddleware<TPayload>): void => {
+      const middlewareId = `${channelId}-middleware-${++middlewareCounter}`
 
-      // Generate a unique ID for this middleware
-      const middlewareId = `${channelId}-middleware-${crypto
-        .randomUUID()
-        .slice(0, 8)}`
+      debugLog(`Adding middleware: ${middlewareId}`)
 
-      // FIXED: Use the core CYRE middleware API that we know works
-      const response = cyre.middleware(
-        middlewareId,
-        async (action, actionPayload) => {
-          // Only apply to this channel's actions
-          if (action.id !== channelId) {
-            return {action, payload: actionPayload}
-          }
-
-          debugLog(`Executing middleware ${middlewareId}`)
-
-          try {
-            // Create a proper next function that returns the expected format
-            const next = async (
-              processedPayload: TPayload
-            ): Promise<CyreResponse> => {
-              debugLog('Middleware calling next with processed payload')
-              return {
-                ok: true,
-                payload: processedPayload,
-                message: 'Middleware processing complete'
-              }
-            }
-
-            // Call the channel middleware
-            const result = await middleware(actionPayload as TPayload, next)
-
-            // Handle the middleware result
-            if (result.ok) {
-              debugLog('Middleware transformation successful')
-              return {
-                action,
-                payload:
-                  result.payload !== null ? result.payload : actionPayload
-              }
-            } else {
-              debugLog('Middleware rejected the action')
-              return null // This tells the core system to reject the action
-            }
-          } catch (error) {
-            debugLog('Middleware error', error)
-            return null // Reject on error
-          }
-        }
-      )
-
-      if (response.ok) {
-        // Get the current action configuration
-        const action = cyre.get(channelId)
-
-        if (action) {
-          // Create proper middleware array
-          const currentMiddleware = Array.isArray(action.middleware)
-            ? action.middleware
-            : []
-          const updatedMiddleware = [...currentMiddleware, middlewareId]
-
-          // Update the action with the new middleware array
-          cyre.action({
-            ...action,
-            middleware: updatedMiddleware
-          })
-
-          debugLog(
-            `Middleware registered and added to action, middleware array: [${updatedMiddleware.join(
-              ', '
-            )}]`
-          )
-        } else {
-          debugLog('Cannot add middleware: Action not found')
-        }
-      } else {
-        debugLog(`Failed to register middleware: ${response.message}`)
+      const middlewareEntry: ChannelMiddleware = {
+        id: middlewareId,
+        fn: middlewareFn,
+        enabled: true
       }
+
+      middlewareChain.middlewares.push(middlewareEntry)
+
+      debugLog(`Middleware added. Total: ${middlewareChain.middlewares.length}`)
     },
 
     /**
-     * Get execution history using core history system via cyre API
+     * Get execution history
      */
-    getHistory: (): ReadonlyArray<HistoryEntry<TPayload>> => {
+    getHistory: (): ReadonlyArray<ChannelHistoryEntry<TPayload>> => {
       const rawHistory = cyre.getHistory(channelId)
-      // Convert to expected format
       return rawHistory.map(entry => ({
         timestamp: entry.timestamp,
         payload: entry.payload as TPayload,
@@ -430,7 +475,7 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Clear execution history using core history system via public API
+     * Clear execution history
      */
     clearHistory: (): void => {
       debugLog('Clearing history')
@@ -438,12 +483,114 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Get the count of active subscriptions
+     * Get subscription count
      */
     getSubscriptionCount: (): number => {
       return subscriptions.length
     }
   }
 
-  return channel
+  // Add enhanced middleware management methods
+  return {
+    ...channel,
+
+    /**
+     * Enable/disable specific middleware
+     */
+    enableMiddleware: (middlewareId: string): boolean => {
+      const middleware = middlewareChain.middlewares.find(
+        m => m.id === middlewareId
+      )
+      if (middleware) {
+        middleware.enabled = true
+        debugLog(`Enabled middleware: ${middlewareId}`)
+        return true
+      }
+      return false
+    },
+
+    disableMiddleware: (middlewareId: string): boolean => {
+      const middleware = middlewareChain.middlewares.find(
+        m => m.id === middlewareId
+      )
+      if (middleware) {
+        middleware.enabled = false
+        debugLog(`Disabled middleware: ${middlewareId}`)
+        return true
+      }
+      return false
+    },
+
+    /**
+     * Remove specific middleware
+     */
+    removeMiddleware: (middlewareId: string): boolean => {
+      const index = middlewareChain.middlewares.findIndex(
+        m => m.id === middlewareId
+      )
+      if (index >= 0) {
+        middlewareChain.middlewares.splice(index, 1)
+        debugLog(
+          `Removed middleware: ${middlewareId}. Remaining: ${middlewareChain.middlewares.length}`
+        )
+        return true
+      }
+      return false
+    },
+
+    /**
+     * Clear all middleware
+     */
+    clearMiddleware: (): void => {
+      const count = middlewareChain.middlewares.length
+      middlewareChain.middlewares.length = 0
+      debugLog(`Cleared all middleware (${count} removed)`)
+    },
+
+    /**
+     * Get middleware information
+     */
+    getMiddlewareInfo: () => ({
+      total: middlewareChain.middlewares.length,
+      enabled: middlewareChain.middlewares.filter(m => m.enabled).length,
+      disabled: middlewareChain.middlewares.filter(m => !m.enabled).length,
+      executionCount: middlewareChain.executionCount,
+      middlewares: middlewareChain.middlewares.map(m => ({
+        id: m.id,
+        enabled: m.enabled
+      }))
+    }),
+
+    /**
+     * Add multiple middleware at once
+     */
+    addMiddleware: (middlewares: CyreMiddleware<TPayload>[]): string[] => {
+      const addedIds: string[] = []
+
+      middlewares.forEach(fn => {
+        const middlewareId = `${channelId}-middleware-${++middlewareCounter}`
+
+        const middlewareEntry: ChannelMiddleware = {
+          id: middlewareId,
+          fn,
+          enabled: true
+        }
+
+        middlewareChain.middlewares.push(middlewareEntry)
+        addedIds.push(middlewareId)
+      })
+
+      debugLog(
+        `Added ${addedIds.length} middleware functions. Total: ${middlewareChain.middlewares.length}`
+      )
+      return addedIds
+    }
+  } as CyreHook<TPayload> & {
+    enableMiddleware: (id: string) => boolean
+    disableMiddleware: (id: string) => boolean
+    removeMiddleware: (id: string) => boolean
+    clearMiddleware: () => void
+    getMiddlewareInfo: () => any
+    addMiddleware: (middlewares: CyreMiddleware<TPayload>[]) => string[]
+  }
 }

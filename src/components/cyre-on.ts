@@ -1,5 +1,4 @@
 // src/components/cyre-on-fixed.ts
-// Fixed subscription system to work with optimized pipeline
 
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
@@ -9,7 +8,7 @@ import {log} from './cyre-log'
 
 /* 
 
-      C.Y.R.E. - O.N. - F.I.X.E.D.
+      C.Y.R.E - O.N
       
       Fixed subscription system that works with optimized pipeline:
       1. Subscribe to ACTION IDs, not types

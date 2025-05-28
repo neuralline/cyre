@@ -1,350 +1,331 @@
 // src/middleware/state.ts
-// Fixed middleware state management with proper fast path detection
+// Updated to include built-in debounce middleware
 
 import {createStore} from '../context/create-store'
-import {
-  getBuiltinMiddleware,
-  isBuiltinMiddleware,
-  buildMiddlewareChain,
-  needsMiddleware
-} from './builtin'
-import {log} from '../components/cyre-log'
 import type {
   IO,
-  StateKey,
+  ActionPayload,
   MiddlewareEntry,
   MiddlewareChain,
+  ChainExecutionResult,
   ExternalMiddlewareFunction,
-  BuiltinMiddlewareFunction
+  BuiltinMiddlewareFunction,
+  InternalMiddlewareContext
 } from '../types/interface'
+import {log} from '../components/cyre-log'
+import {metricsReport} from '../context/metrics-report'
+import {io} from '../context/state'
+import {metricsState} from '../context/metrics-state'
+import TimeKeeper from '../components/cyre-timekeeper'
+import {useDispatch} from '../components/cyre-dispatch'
+import {BuiltinMiddlewareId} from './../types/middleware'
 
 /*
 
-      C.Y.R.E. - M.I.D.D.L.E.W.A.R.E - S.T.A.T.E.
+      C.Y.R.E. - M.I.D.D.L.E.W.A.R.E - S.T.A.T.E
       
-      Fixed middleware state management:
-      - Proper fast path detection for zero overhead
-      - Separate built-in and external middleware registries
-      - Per-action middleware chain compilation and caching
-      - Fixed statistics tracking
+      Updated middleware state with integrated built-in middleware:
+      - Register built-in debounce middleware
+      - Auto-compile chains with debounce when needed
+      - Maintain existing external middleware functionality
 
 */
 
 // Stores
-const externalMiddlewareStore = createStore<MiddlewareEntry>()
-const middlewareChainStore = createStore<MiddlewareChain>()
+const middlewareRegistry = createStore<MiddlewareEntry>()
+const compiledChains = createStore<MiddlewareChain>()
 
-// Fast path tracking
-const fastPathActions = new Set<StateKey>()
+// Built-in debounce middleware implementation
+const debounceMiddleware: BuiltinMiddlewareFunction = async (context, next) => {
+  const {action, payload} = context
+  const debounceTime = action.debounce
 
-/**
- * Register external middleware (user-facing API)
- */
-const registerExternalMiddleware = (
-  id: string,
-  fn: ExternalMiddlewareFunction,
-  description?: string
-): {ok: boolean; message: string} => {
+  if (!debounceTime || debounceTime <= 0) {
+    return next(payload)
+  }
+
   try {
-    // Prevent users from registering built-in middleware IDs
-    if (isBuiltinMiddleware(id)) {
-      return {
-        ok: false,
-        message: `Cannot register middleware with reserved built-in ID: ${id}`
-      }
+    // Get current action state
+    const currentAction = io.get(action.id)
+    if (!currentAction) {
+      return next(payload)
     }
 
-    if (!id || typeof id !== 'string') {
-      return {
-        ok: false,
-        message: 'Middleware ID must be a non-empty string'
-      }
+    // Cancel existing debounce timer if it exists
+    if (currentAction.debounceTimerId) {
+      TimeKeeper.forget(currentAction.debounceTimerId)
+      log.debug(`Cancelled existing debounce timer for ${action.id}`)
     }
 
-    if (typeof fn !== 'function') {
-      return {
-        ok: false,
-        message: 'Middleware function is required'
-      }
+    // Generate unique timer ID
+    const timerId = `${action.id}-debounce-${Date.now()}`
+
+    // Update IO state with new timer ID and latest payload
+    const updatedAction = {
+      ...currentAction,
+      debounceTimerId: timerId,
+      payload: payload // Store latest payload for execution
+    }
+    io.set(updatedAction)
+
+    // Create debounce timer that will execute dispatch directly
+    const timerResult = TimeKeeper.keep(
+      debounceTime,
+      async () => {
+        try {
+          // Get the latest action state when timer executes
+          const actionAtExecution = io.get(action.id)
+          if (!actionAtExecution) {
+            return
+          }
+
+          // Clear the timer ID
+          const clearedAction = {
+            ...actionAtExecution,
+            debounceTimerId: undefined
+          }
+          io.set(clearedAction)
+
+          log.debug(
+            `Debounce timer fired for ${action.id} after ${debounceTime}ms`
+          )
+
+          // Execute dispatch directly with stored payload
+          await useDispatch(actionAtExecution, actionAtExecution.payload)
+        } catch (error) {
+          log.error(`Debounce execution failed for ${action.id}: ${error}`)
+        }
+      },
+      1, // Execute once
+      timerId
+    )
+
+    if (timerResult.kind === 'error') {
+      // Timer creation failed, fall back to immediate execution
+      const failedAction = {...updatedAction, debounceTimerId: undefined}
+      io.set(failedAction)
+      return next(payload)
     }
 
-    const middleware: MiddlewareEntry = {
-      id,
-      type: 'external',
-      fn,
-      description
-    }
+    log.debug(
+      `Debounce timer created for ${action.id}: ${debounceTime}ms delay`
+    )
 
-    externalMiddlewareStore.set(id, middleware)
-    log.debug(`External middleware registered: ${id}`)
+    metricsReport.sensor.log(action.id, 'debounce', 'debounce-middleware', {
+      debounceTime,
+      timerId,
+      collapsed: !!currentAction.debounceTimerId
+    })
 
+    // Return delay result - this prevents immediate execution
     return {
-      ok: true,
-      message: `Middleware registered: ${id}`
+      type: 'delay',
+      duration: debounceTime,
+      payload,
+      metadata: {
+        debounced: true,
+        timerId
+      }
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Failed to register middleware ${id}: ${errorMessage}`)
-    return {
-      ok: false,
-      message: `Registration failed: ${errorMessage}`
-    }
+    log.error(`Debounce middleware error for ${action.id}: ${error}`)
+    return next(payload)
   }
 }
 
-/**
- * Get middleware entry by ID (handles both built-in and external)
- */
-const getMiddleware = (id: string): MiddlewareEntry | undefined => {
-  if (isBuiltinMiddleware(id)) {
-    const builtinFn = getBuiltinMiddleware(id)
-    if (builtinFn) {
+// Built-in throttle middleware implementation
+const throttleMiddleware: BuiltinMiddlewareFunction = async (context, next) => {
+  const {action, payload} = context
+  const throttleTime = action.throttle
+
+  if (!throttleTime || throttleTime <= 0) {
+    return next(payload)
+  }
+
+  try {
+    const currentAction = io.get(action.id)
+    if (!currentAction) {
+      return next(payload)
+    }
+
+    const now = Date.now()
+    const lastExecution = currentAction.lastThrottleExecution || 0
+    const timeSinceLastExecution = now - lastExecution
+
+    if (timeSinceLastExecution < throttleTime) {
+      const remainingTime = throttleTime - timeSinceLastExecution
+
+      metricsReport.sensor.log(action.id, 'throttle', 'throttle-middleware', {
+        remainingTime
+      })
+
       return {
-        id,
-        type: 'builtin',
-        fn: builtinFn,
-        description: `Built-in middleware: ${id.replace('builtin:', '')}`
+        type: 'block',
+        reason: `Throttled: ${remainingTime}ms remaining`,
+        metadata: {throttled: true, remainingTime}
       }
     }
-  }
 
-  return externalMiddlewareStore.get(id)
-}
-
-/**
- * Compile middleware chain for an action - FIXED
- */
-const compileMiddlewareChain = (action: IO): MiddlewareChain => {
-  // Check if action needs middleware first
-  const actionNeedsMiddleware = needsMiddleware(action)
-
-  if (!actionNeedsMiddleware) {
-    // This is a fast path action
-    return {
-      actionId: action.id,
-      middlewares: [],
-      compiled: true,
-      fastPath: true
+    // Update throttle execution timestamp
+    const updatedAction = {
+      ...currentAction,
+      lastThrottleExecution: now
     }
-  }
+    io.set(updatedAction)
 
-  // Build middleware chain for actions that need protection
-  const middlewareIds = buildMiddlewareChain(action)
-
-  const chain: MiddlewareChain = {
-    actionId: action.id,
-    middlewares: middlewareIds,
-    compiled: true,
-    fastPath: false
-  }
-
-  return chain
-}
-
-/**
- * Store compiled middleware chain for an action - FIXED
- */
-const setMiddlewareChain = (action: IO): void => {
-  const chain = compileMiddlewareChain(action)
-  middlewareChainStore.set(action.id, chain)
-
-  // Update fast path tracking
-  if (chain.fastPath) {
-    fastPathActions.add(action.id)
-  } else {
-    fastPathActions.delete(action.id)
-  }
-
-  const chainInfo = chain.fastPath
-    ? 'fast-path (zero overhead)'
-    : `${chain.middlewares.length} middleware functions`
-
-  log.debug(`Middleware chain compiled for ${action.id}: ${chainInfo}`)
-}
-
-/**
- * Get compiled middleware chain for an action
- */
-const getMiddlewareChain = (
-  actionId: StateKey
-): MiddlewareChain | undefined => {
-  return middlewareChainStore.get(actionId)
-}
-
-/**
- * Get all middleware entries for a chain
- */
-const getMiddlewareEntries = (middlewareIds: string[]): MiddlewareEntry[] => {
-  const entries: MiddlewareEntry[] = []
-
-  for (const id of middlewareIds) {
-    const middleware = getMiddleware(id)
-    if (middleware) {
-      entries.push(middleware)
-    } else {
-      log.warn(`Middleware not found: ${id}`)
-    }
-  }
-
-  return entries
-}
-
-/**
- * Check if action uses fast path (no middleware) - FIXED
- */
-const isFastPath = (actionId: StateKey): boolean => {
-  return fastPathActions.has(actionId)
-}
-
-/**
- * Check if action has middleware chain
- */
-const hasMiddlewareChain = (actionId: StateKey): boolean => {
-  return middlewareChainStore.get(actionId) !== undefined
-}
-
-/**
- * Remove middleware chain for an action
- */
-const forgetMiddlewareChain = (actionId: StateKey): boolean => {
-  fastPathActions.delete(actionId)
-  return middlewareChainStore.forget(actionId)
-}
-
-/**
- * Remove external middleware
- */
-const forgetExternalMiddleware = (id: string): boolean => {
-  if (isBuiltinMiddleware(id)) {
-    log.warn(`Cannot remove built-in middleware: ${id}`)
-    return false
-  }
-
-  const removed = externalMiddlewareStore.forget(id)
-  if (removed) {
-    log.debug(`External middleware removed: ${id}`)
-  }
-  return removed
-}
-
-/**
- * Clear all middleware chains
- */
-const clearMiddlewareChains = (): void => {
-  middlewareChainStore.clear()
-  fastPathActions.clear()
-}
-
-/**
- * Clear all external middleware
- */
-const clearExternalMiddleware = (): void => {
-  externalMiddlewareStore.clear()
-}
-
-/**
- * Get middleware statistics - FIXED
- */
-const getMiddlewareStats = () => {
-  const allChains = middlewareChainStore.getAll()
-  const totalActions = allChains.length
-  const fastPathCount = fastPathActions.size
-  const middlewareActions = totalActions - fastPathCount
-  const externalMiddlewareCount = externalMiddlewareStore.getAll().length
-
-  return {
-    totalActions,
-    fastPathActions: fastPathCount,
-    middlewareActions,
-    fastPathPercentage:
-      totalActions > 0 ? Math.round((fastPathCount / totalActions) * 100) : 0,
-    externalMiddlewareCount,
-    chains: allChains.map(chain => ({
-      actionId: chain.actionId,
-      middlewareCount: chain.middlewares.length,
-      fastPath: chain.fastPath,
-      middlewares: chain.middlewares
-    }))
+    return next(payload)
+  } catch (error) {
+    log.error(`Throttle middleware error for ${action.id}: ${error}`)
+    return next(payload)
   }
 }
 
-/**
- * Validate middleware chain integrity
- */
-const validateMiddlewareChain = (
-  actionId: StateKey
-): {
-  valid: boolean
-  issues: string[]
-  warnings: string[]
-} => {
-  const chain = getMiddlewareChain(actionId)
-  const issues: string[] = []
-  const warnings: string[] = []
+// Register built-in middleware on initialization
+const initializeBuiltinMiddleware = () => {
+  middlewareRegistry.set(BuiltinMiddlewareId.DEBOUNCE, {
+    id: BuiltinMiddlewareId.DEBOUNCE,
+    type: 'builtin',
+    fn: debounceMiddleware,
+    description: 'Built-in debounce protection'
+  })
 
-  if (!chain) {
-    issues.push(`No middleware chain found for action: ${actionId}`)
-    return {valid: false, issues, warnings}
-  }
+  middlewareRegistry.set(BuiltinMiddlewareId.THROTTLE, {
+    id: BuiltinMiddlewareId.THROTTLE,
+    type: 'builtin',
+    fn: throttleMiddleware,
+    description: 'Built-in throttle protection'
+  })
 
-  // Fast path actions are always valid
-  if (chain.fastPath) {
-    return {valid: true, issues: [], warnings: []}
-  }
-
-  // Check if all middleware in chain exist
-  for (const middlewareId of chain.middlewares) {
-    const middleware = getMiddleware(middlewareId)
-    if (!middleware) {
-      issues.push(`Missing middleware: ${middlewareId}`)
-    }
-  }
-
-  // Check for potential ordering issues
-  const hasThrottle = chain.middlewares.includes('builtin:throttle')
-  const hasDebounce = chain.middlewares.includes('builtin:debounce')
-
-  if (hasThrottle && hasDebounce) {
-    const throttleIndex = chain.middlewares.indexOf('builtin:throttle')
-    const debounceIndex = chain.middlewares.indexOf('builtin:debounce')
-
-    if (throttleIndex > debounceIndex) {
-      warnings.push('Throttle middleware should typically come before debounce')
-    }
-  }
-
-  return {
-    valid: issues.length === 0,
-    issues,
-    warnings
-  }
+  log.debug('Built-in middleware initialized')
 }
 
-/**
- * Export middleware state interface
- */
+// Initialize built-in middleware immediately
+initializeBuiltinMiddleware()
+
 export const middlewareState = {
-  // External middleware management (user-facing)
-  registerExternal: registerExternalMiddleware,
-  forgetExternal: forgetExternalMiddleware,
-  clearExternal: clearExternalMiddleware,
+  /**
+   * Register external middleware
+   */
+  registerExternal: (
+    id: string,
+    fn: ExternalMiddlewareFunction
+  ): {ok: boolean; message: string} => {
+    try {
+      const entry: MiddlewareEntry = {
+        id,
+        type: 'external',
+        fn,
+        description: `External middleware: ${id}`
+      }
 
-  // Chain management (internal)
-  setChain: setMiddlewareChain,
-  getChain: getMiddlewareChain,
-  getEntries: getMiddlewareEntries,
-  hasChain: hasMiddlewareChain,
-  forgetChain: forgetMiddlewareChain,
-  clearChains: clearMiddlewareChains,
+      middlewareRegistry.set(id, entry)
+      log.debug(`External middleware registered: ${id}`)
 
-  // Fast path detection
-  isFastPath,
+      return {ok: true, message: `Middleware ${id} registered`}
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      log.error(`Failed to register middleware ${id}: ${msg}`)
+      return {ok: false, message: msg}
+    }
+  },
 
-  // Utilities
-  getStats: getMiddlewareStats,
-  validate: validateMiddlewareChain,
+  /**
+   * Compile middleware chain for an action (auto-includes built-ins)
+   */
+  setChain: (action: IO): void => {
+    try {
+      const middlewares: string[] = []
 
-  // Internal helpers (not exposed to users)
-  _getMiddleware: getMiddleware,
-  _needsMiddleware: needsMiddleware
+      // Auto-add built-in middleware based on action properties
+      if (action.throttle && action.throttle > 0) {
+        middlewares.push(BuiltinMiddlewareId.THROTTLE)
+      }
+
+      if (action.debounce && action.debounce > 0) {
+        middlewares.push(BuiltinMiddlewareId.DEBOUNCE)
+      }
+
+      // Add external middleware from action config
+      if (action.middleware && Array.isArray(action.middleware)) {
+        middlewares.push(...action.middleware)
+      }
+
+      // Create compiled chain
+      const chain: MiddlewareChain = {
+        actionId: action.id,
+        middlewares,
+        compiled: true,
+        fastPath: middlewares.length === 0
+      }
+
+      compiledChains.set(action.id, chain)
+
+      log.debug(
+        `Middleware chain compiled for ${action.id}: ${middlewares.length} middleware functions`
+      )
+    } catch (error) {
+      log.error(`Failed to compile middleware chain for ${action.id}: ${error}`)
+    }
+  },
+
+  /**
+   * Get compiled chain for action
+   */
+  getChain: (actionId: string): MiddlewareChain | undefined => {
+    return compiledChains.get(actionId)
+  },
+
+  /**
+   * Check if action uses fast path (no middleware)
+   */
+  isFastPath: (actionId: string): boolean => {
+    const chain = compiledChains.get(actionId)
+    return chain?.fastPath ?? true
+  },
+
+  /**
+   * Get middleware entry by ID
+   */
+  getEntry: (middlewareId: string): MiddlewareEntry | undefined => {
+    return middlewareRegistry.get(middlewareId)
+  },
+
+  /**
+   * Remove compiled chain
+   */
+  forgetChain: (actionId: string): boolean => {
+    return compiledChains.forget(actionId)
+  },
+
+  /**
+   * Clear all compiled chains
+   */
+  clearChains: (): void => {
+    compiledChains.clear()
+  },
+
+  /**
+   * Get statistics
+   */
+  getStats: () => {
+    const allChains = compiledChains.getAll()
+    const fastPathCount = allChains.filter(c => c.fastPath).length
+
+    return {
+      totalActions: allChains.length,
+      fastPathActions: fastPathCount,
+      middlewareActions: allChains.length - fastPathCount,
+      fastPathPercentage:
+        allChains.length > 0 ? (fastPathCount / allChains.length) * 100 : 0,
+      externalMiddlewareCount: middlewareRegistry
+        .getAll()
+        .filter(m => m.type === 'external').length,
+      chains: allChains.map(chain => ({
+        actionId: chain.actionId,
+        middlewareCount: chain.middlewares.length,
+        fastPath: chain.fastPath,
+        middlewares: chain.middlewares
+      }))
+    }
+  }
 }

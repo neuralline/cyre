@@ -226,17 +226,6 @@ export const io = {
       }
 
       actionMetrics.set(id, updatedMetrics)
-
-      // Sync with enhanced metrics if execution time is provided
-      if (executionTime !== undefined) {
-        import('../context/metrics-report')
-          .then(({metricsReport}) => {
-            metricsReport.trackExecution(id, executionTime)
-          })
-          .catch(err => {
-            log.error(`Could not sync execution with enhanced metrics: ${err}`)
-          })
-      }
     } catch (error) {
       log.error(`Failed to track execution for ${id}: ${error}`)
     }

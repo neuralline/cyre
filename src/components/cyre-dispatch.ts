@@ -1,5 +1,4 @@
 // src/components/cyre-dispatch.ts
-// Updated dispatch logic with unified middleware integration
 
 import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
@@ -11,7 +10,7 @@ import {metricsReport} from '../context/metrics-report'
 
 /*
 
-      C.Y.R.E. - D.I.S.P.A.T.C.H.
+      C.Y.R.E - D.I.S.P.A.T.C.H
       
       Updated dispatch logic with middleware integration:
       - Find subscriber and execute

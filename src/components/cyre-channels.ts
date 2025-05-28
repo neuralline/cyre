@@ -1,17 +1,15 @@
 // src/components/cyre-channel.ts
-// Channel creation, validation, and management
 
 import {io} from '../context/state'
 import {IO} from '../types/interface'
 import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
-import {metricsReport} from '../context/metrics-report'
-import dataDefinitions from '../elements/data-definitions'
-import {middlewareState} from '../middleware/state'
 
 /*
 
-      C.Y.R.E. - C.H.A.N.N.E.L.S.
+      C.Y.R.E - C.H.A.N.N.E.L.S
+
+      handles channel creations
 
 */
 

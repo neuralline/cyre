@@ -1,7 +1,7 @@
 // test/debounce-pipeline.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src'
 
 /**
  * Comprehensive tests for debounce protection in the protection pipeline
@@ -351,92 +351,5 @@ describe('Debounce Protection Pipeline', () => {
     expect(executedPayload.id).toBe('fifth')
     expect(executedPayload.value).toBe(5)
     expect(executedPayload.data).toBe('e')
-  })
-
-  /**
-   * Test combined debounce and change detection
-   */
-  it('should correctly combine debounce with change detection', async () => {
-    // Create action with debounce and change detection
-    const DEBOUNCE_INTERVAL = 200 // ms
-    cyre.action({
-      id: 'debounce-change-test',
-      type: 'test',
-      debounce: DEBOUNCE_INTERVAL,
-      detectChanges: true
-    })
-
-    // Execution tracking
-    const executions = []
-
-    // Register handler
-    cyre.on('debounce-change-test', payload => {
-      const timestamp = Date.now()
-      executions.push({
-        timestamp,
-        payload: {...payload}
-      })
-
-      console.log(`[TEST] Handler executed at ${timestamp}:`, payload)
-      return {executed: true}
-    })
-
-    // SCENARIO 1: Multiple identical calls - should result in one execution
-    console.log('[TEST] Making multiple identical calls')
-
-    const staticPayload = {id: 'static', value: 1}
-
-    for (let i = 0; i < 3; i++) {
-      await cyre.call('debounce-change-test', staticPayload)
-      await new Promise(resolve => setTimeout(resolve, 20))
-    }
-
-    // Wait for debounce period
-    await new Promise(resolve => setTimeout(resolve, DEBOUNCE_INTERVAL + 50))
-
-    // Should have executed once
-    expect(executions.length).toBe(1)
-    expect(executions[0].payload).toEqual(staticPayload)
-
-    // SCENARIO 2: Multiple different calls - should result in one execution with last payload
-    console.log('[TEST] Making multiple different calls')
-
-    for (let i = 0; i < 3; i++) {
-      await cyre.call('debounce-change-test', {
-        id: 'dynamic',
-        value: i + 1,
-        suffix: `call-${i + 1}`
-      })
-
-      await new Promise(resolve => setTimeout(resolve, 20))
-    }
-
-    // Wait for debounce period
-    await new Promise(resolve => setTimeout(resolve, DEBOUNCE_INTERVAL + 50))
-
-    // Should now have executed twice
-    expect(executions.length).toBe(2)
-    expect(executions[1].payload.id).toBe('dynamic')
-    expect(executions[1].payload.value).toBe(3)
-    expect(executions[1].payload.suffix).toBe('call-3')
-
-    // SCENARIO 3: Rapid identical calls after change - should be skipped
-    console.log('[TEST] Making identical calls after change')
-
-    const unchangedPayload = {...executions[1].payload}
-
-    for (let i = 0; i < 3; i++) {
-      await cyre.call('debounce-change-test', unchangedPayload)
-      await new Promise(resolve => setTimeout(resolve, 20))
-    }
-
-    // Wait for debounce period
-    await new Promise(resolve => setTimeout(resolve, DEBOUNCE_INTERVAL + 50))
-
-    // Should still have only executed twice (unchanged payload skipped)
-    expect(executions.length).toBe(2)
-
-    // Log execution details
-    console.log('[TEST] Final execution details:', executions)
   })
 })

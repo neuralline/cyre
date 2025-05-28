@@ -1,5 +1,4 @@
 // src/components/cyre-execute.ts
-// Clean execution logic focused purely on handler execution
 
 import {io} from '../context/state'
 import {IO, ActionPayload} from '../types/interface'

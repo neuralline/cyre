@@ -12,7 +12,7 @@ export enum LogLevel {
 }
 /* 
 
-      C.Y.R.E. - L.O.G.
+      C.Y.R.E - L.O.G
       
 
 */

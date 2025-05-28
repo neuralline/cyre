@@ -65,6 +65,7 @@ export interface SubscriptionResponse {
 /**
  * Configuration object for CYRE actions - permissive
  */
+
 export interface IO {
   /** Unique identifier for this action */
   id: string
@@ -88,6 +89,8 @@ export interface IO {
   log?: boolean
   /** ID of the debounce timer if one is active */
   debounceTimerId?: string
+  /** Timestamp of last throttle execution */
+  lastThrottleExecution?: number
   /** Priority level for execution during system stress */
   priority?: PriorityConfig
   /** Middleware functions to process action before execution */
@@ -99,7 +102,6 @@ export interface IO {
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
 }
-
 /**
  * Action pipeline function type - flexible
  */
