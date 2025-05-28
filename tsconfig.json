@@ -55,7 +55,7 @@
     "node_modules",
     "dist",
     "src/ssr",
-    "src/streams",
+    "src/stream",
     "coverage",
     "**/*.d.ts"
   ]

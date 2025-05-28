@@ -226,7 +226,7 @@ const debounceProtection = async (
   if (!action.debounce || action.debounce <= 0) {
     return {
       ok: true,
-      message: 'No debounce configured',
+      message: 'Debounce not required',
       payload
     }
   }
@@ -240,7 +240,7 @@ const debounceProtection = async (
 
   // Create unique timer ID
   const timerId = `${action.id}-debounce-${Date.now()}`
-
+  
   // Store the timer ID with the action
 
   io.set({
@@ -301,13 +301,14 @@ const debounceProtection = async (
 
   return {
     ok: true,
-    message: `Debounced - will execute in ${action.debounce}ms`,
+    message: `Debounced - will execute in ${action.debounce}ms (maxWait: ${action.maxWait}ms)`,
     delayed: true,
     duration: action.debounce,
     payload,
     metadata: {
       protection: 'debounce',
       debounceMs: action.debounce,
+      maxWait: action.maxWait,
       delayed: true,
       timerId
     }

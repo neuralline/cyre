@@ -145,24 +145,35 @@ const dataDefinitions = {
     }
   },
 
-  throttle: (attribute: number = 0) => {
-    return Number.isInteger(attribute)
+  debounce: (attribute: number = 0) => {
+    return Number.isInteger(attribute) && attribute >= 0
       ? {ok: true, payload: attribute}
       : {
           ok: false,
           payload: 100,
-          message: `'${attribute}'  action.throttle value must be a number`,
+          message: `'${attribute}' action.debounce value must be a non-negative number`,
           required: false
         }
   },
 
-  debounce: (attribute: number = 0) => {
-    return Number.isInteger(attribute)
+  maxWait: (attribute: number = 0) => {
+    return Number.isInteger(attribute) && attribute >= 0
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: 0,
+          message: `'${attribute}' action.maxWait value must be a non-negative number`,
+          required: false
+        }
+  },
+
+  throttle: (attribute: number = 0) => {
+    return Number.isInteger(attribute) && attribute >= 0
       ? {ok: true, payload: attribute}
       : {
           ok: false,
           payload: 100,
-          message: `'${attribute}'  action.debounce value must be a number`,
+          message: `'${attribute}' action.throttle value must be a non-negative number`,
           required: false
         }
   },
