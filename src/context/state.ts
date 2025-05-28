@@ -80,8 +80,8 @@ export const io = {
       // Record call in quantum state
       metricsState.recordCall(ioState.priority?.level)
     } catch (error) {
-      log.error(
-        `Failed to set IO: ${
+      log.critical(
+        `IO state corruption detected: ${
           error instanceof Error ? error.message : String(error)
         }`
       )
@@ -138,13 +138,19 @@ export const io = {
 
   // Forget all channels and clear all related records
   clear: (): void => {
-    ioStore.getAll().forEach(item => {
-      if (item.id) cleanupAction(item.id)
-    })
-    payloadHistory.clear()
-    actionMetrics.clear()
-    ioStore.clear()
-    metricsState.reset()
+    try {
+      ioStore.getAll().forEach(item => {
+        if (item.id) cleanupAction(item.id)
+      })
+      payloadHistory.clear()
+      actionMetrics.clear()
+      ioStore.clear()
+      metricsState.reset()
+    } catch (error) {
+      // CRITICAL: Clear failure can cause memory leaks
+      log.critical(`System clear failed: ${error}`)
+      throw error
+    }
   },
 
   // Get all io state

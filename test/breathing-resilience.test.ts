@@ -1,4 +1,4 @@
-// src/test/breathing-resilience.test.ts
+// test/breathing-resilience.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/app'

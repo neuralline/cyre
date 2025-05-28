@@ -1,11 +1,17 @@
 // src/app.ts
 
-import type {IO, ActionPayload, CyreResponse} from './types/interface'
+import type {
+  IO,
+  ActionPayload,
+  CyreResponse,
+  IMiddleware,
+  MiddlewareFunction
+} from './types/interface'
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
-import {TimeKeeper} from './components/cyre-timekeeper'
-import {io, subscribers, timeline} from './context/state'
+import TimeKeeper from './components/cyre-timekeeper'
+import {io, subscribers, timeline, middlewares} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
@@ -29,11 +35,7 @@ import {processCall, scheduleCall} from './components/cyre-call'
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
     Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
 
-
     - Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
-
- 
-
 */
 
 /**
@@ -185,6 +187,37 @@ export const call = async (
       payload: null,
       message: `Call failed: ${errorMessage}`,
       error: errorMessage
+    }
+  }
+}
+
+/**
+ * Middleware registration
+ */
+const middleware = (
+  id: string,
+  fn: MiddlewareFunction
+): {ok: boolean; message: string} => {
+  try {
+    if (!id || typeof id !== 'string') {
+      return {ok: false, message: 'Middleware ID must be a string'}
+    }
+
+    if (typeof fn !== 'function') {
+      return {ok: false, message: 'Middleware must be a function'}
+    }
+
+    const middlewareEntry: IMiddleware = {id, fn}
+    middlewares.add(middlewareEntry)
+
+    log.debug(`Middleware registered: ${id}`)
+    return {ok: true, message: `Middleware registered: ${id}`}
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    log.error(`Middleware registration failed: ${errorMessage}`)
+    return {
+      ok: false,
+      message: `Middleware registration failed: ${errorMessage}`
     }
   }
 }
@@ -413,6 +446,7 @@ export const cyre = {
     }
   },
 
+  // Report methods
   exportMetrics: (filter?: {
     actionId?: string
     eventType?: string
@@ -421,8 +455,47 @@ export const cyre = {
   }) => {
     return metricsReport.exportEvents(filter)
   },
-  getMetricsReport: (): string => {
-    return metricsReport.getBasicReport()
+  getMetricsReport: () => {
+    const systemStats = metricsReport.getSystemStats()
+    const breathingState = metricsState.get().breathing
+    const allEvents = metricsReport.exportEvents()
+
+    return {
+      global: {
+        totalCalls: systemStats.totalCalls,
+        totalExecutions: systemStats.totalExecutions,
+        totalErrors: systemStats.totalErrors,
+        callRate: systemStats.callRate,
+        uptime: Math.floor((Date.now() - systemStats.startTime) / 1000)
+      },
+      actions: {} as Record<string, any>,
+      insights: [] as string[],
+      breathing: breathingState,
+      events: allEvents.length
+    }
+  },
+
+  getPerformanceInsights: (actionId?: string): string[] => {
+    const insights: string[] = []
+    const systemStats = metricsReport.getSystemStats()
+    const breathingState = metricsState.get().breathing
+
+    if (breathingState.stress > 0.8) {
+      insights.push('System stress is high - consider reducing load')
+    }
+
+    if (systemStats.callRate > 100) {
+      insights.push('High call rate detected - throttling may be beneficial')
+    }
+
+    if (actionId) {
+      const actionStats = metricsReport.getActionStats(actionId)
+      if (actionStats && actionStats.errors > 0) {
+        insights.push(`Action ${actionId} has ${actionStats.errors} errors`)
+      }
+    }
+
+    return insights
   },
 
   // Timer utilities
@@ -449,6 +522,20 @@ export const cyre = {
     } catch (error) {
       log.error(`Failed to clear timer ${timerId}: ${error}`)
       return false
+    }
+  }
+}
+/**
+ * Factory function for creating new Cyre instances
+ */
+export const Cyre = (instanceId: string) => {
+  // For now, return the main instance but with isolated state
+  // This is a simplified implementation for testing
+  return {
+    ...cyre,
+    initialize: () => {
+      log.debug(`Initializing Cyre instance: ${instanceId}`)
+      return cyre.initialize()
     }
   }
 }

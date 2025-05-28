@@ -6,16 +6,38 @@
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
     Version 4 2025
+
+
+
+
+    CYRE TARGET: is to make Cyre the least call-to-execution overhead per channel still having cutting edge features 
+
+CYRE TODO: * multi .on subscribers to single .action channel 
+* single .on subscriber to multi .action channels 
+* add queue option to .action. if true .call to that channel will be queued until .on subscriber registered
+* improved react and nextjs support with hooks
+* * useCyre can take optional ID. if set, it uses that id instead of generated id. in that way cyre.call can access that useCyre remotely
+* * complete experimental cyre/ssr
+* * complete experimental cyre/stream
+* * improve action pipeline. each channel in cyre are independent. so action pipeline should proactively compile actions that apply to specific channel when that channel run. the rest should run with zero overhead. 
+* * Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
+* * more test coverage
+* * improve efficiency
+* * publish to NPM these are my current todo list. what do you think? any todo suggestions?
+
+- instead of endless cyre.api create system channels for users to subscribe for example on initialize, on error, on stress high etc
+
+
 */
 
 // Import the cyre instance and related utilities from app.ts
-import {cyre} from './app'
+import {cyre, Cyre} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
 import {log} from './components/cyre-log'
 
 // Main exports - ensure these are properly exported
-export {cyre, log, useCyre, cyreCompose}
+export {Cyre, cyre, log, useCyre, cyreCompose}
 
 // Export utility components
 //export {pipe, memoize, isEqual, tryCatch} from './libs/utils'

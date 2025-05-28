@@ -1,489 +1,599 @@
 // src/context/metrics-report.ts
-// Unified metrics system with timestamp-based analysis and minimal specialized sensors
+// Raw metrics collection with sensor-based architecture
 
 import {createStore} from './create-store'
 import type {ActionId, Priority, StateKey} from '../types/interface'
 import {log} from '../components/cyre-log'
-import {metricsState} from './metrics-state'
 
 /*
 
       C.Y.R.E - M.E.T.R.I.C.S - R.E.P.O.R.T
       
-      Simplified unified sensor architecture:
-      - Single sensor.log() for most events with EventType classification
-      - Timestamp-based timing analysis (no complex timing objects)
-      - Specialized sensors only for multi-state updates or data processing
-      - Eliminates redundant historyState (IO state + metrics handles this)
-      - Functional approach with minimal overhead
+      Raw metrics collection with sensor architecture:
+      - Generalized sensor.log() for most events
+      - Custom sensors for complex events requiring specific data
+      - Live streaming capabilities for external monitoring
+      - Minimal processing - raw data export focused
+      - Essential stats only for Cyre breathing system
+      - call-to-dispatch and dispatch-to-execute tracking
 
 */
 
 export type EventType =
-  | 'call'
-  | 'dispatch'
-  | 'execution'
-  | 'error'
-  | 'throttle'
-  | 'debounce'
-  | 'skip'
-  | 'middleware'
-  | 'intralink'
-  | 'timeout'
-  | 'system'
+  | 'call' // Action call initiated
+  | 'dispatch' // Call dispatched to listener
+  | 'execution' // Action executed successfully
+  | 'error' // Execution error
+  | 'throttle' // Call throttled
+  | 'debounce' // Call debounced
+  | 'skip' // Execution skipped (change detection)
+  | 'middleware' // Middleware processed
+  | 'intralink' // Chain reaction processed
+  | 'timeout' // Execution timeout
+  | 'system' // System-level events
+  | 'warning'
+  | 'critical'
+  | 'success'
   | 'info'
   | 'debug'
   | 'delayed'
+  | 'repeat'
   | 'blocked'
+  | 'unknown id'
+  | 'no subscriber'
+  | 'other'
 
-// Simple event structure - timestamp-based timing
-export interface MetricEvent {
-  id: string
-  timestamp: number
-  actionId: ActionId
-  eventType: EventType
-  location?: string
-  priority?: Priority
-  metadata?: Record<string, any>
+// Core metric event structure
+export interface RawMetricEvent {
+  id: string // Unique event ID
+  timestamp: number // When event occurred
+  actionId: ActionId // Which action
+  eventType: EventType // What happened
+  location?: string // Where in pipeline (optional)
+  priority?: Priority // Action priority
+  metadata?: Record<string, any> // Event-specific data
 }
 
-// System performance (calculated from events)
+// Live streaming interfaces
+export interface EventFilter {
+  actionIds?: string[]
+  eventTypes?: EventType[]
+  since?: number
+  priority?: Priority[]
+  location?: string
+}
+
+export interface LiveQuery extends EventFilter {
+  limit?: number
+  offset?: number
+}
+
+// Stream subscription for live monitoring
+export interface StreamSubscription {
+  id: string
+  filter: EventFilter
+  callback: (event: RawMetricEvent) => void
+  active: boolean
+}
+
+// Essential system stats (breathing system only)
 export interface SystemStats {
   totalCalls: number
   totalExecutions: number
   totalErrors: number
-  callRate: number
+  callRate: number // For breathing system stress calculation
+  lastCallTime: number
   startTime: number
+}
+
+// Minimal action stats (breathing system only)
+export interface ActionStats {
+  id: ActionId
+  calls: number
+  errors: number
+  lastCall: number
 }
 
 // Configuration
 const RETENTION_CONFIG = {
-  MAX_EVENTS: 1000,
-  CLEANUP_INTERVAL: 30000,
-  TIMING_WINDOW: 60000 // 1 minute for timing calculations
+  MAX_EVENTS: 2000,
+  MAX_ACTIONS: 1000,
+  CLEANUP_INTERVAL: 30000, // 30 seconds
+  LIVE_BUFFER_SIZE: 500 // Events to keep for live streaming
 }
 
-// Storage
-const eventStore = createStore<MetricEvent>()
+// Stores
+const eventStore = createStore<RawMetricEvent>()
+const actionStatsStore = createStore<ActionStats>()
+const streamStore = createStore<StreamSubscription>()
+
+// System stats (single object)
+let systemStats: SystemStats = {
+  totalCalls: 0,
+  totalExecutions: 0,
+  totalErrors: 0,
+  callRate: 0,
+  lastCallTime: Date.now(),
+  startTime: Date.now()
+}
+
+// Event sequence and live buffer
 let eventSequence = 0
-let systemStartTime = Date.now()
+const liveEventBuffer: RawMetricEvent[] = []
+
+// Stream management
+let streamIdCounter = 0
 
 /**
- * Core unified sensor - handles logging, metrics state, and event storage
+ * Core sensor interface - generalized logging
  */
-const unifiedSensor = (
+const sensorLog = (
   actionId: ActionId,
   eventType: EventType,
   location?: string,
   metadata?: Record<string, any>
 ): void => {
-  const timestamp = Date.now()
-
   try {
-    // 1. Store metric event
-    const event: MetricEvent = {
-      id: `evt-${++eventSequence}`,
-      timestamp,
+    const event: RawMetricEvent = {
+      id: `evt-${eventSequence++}`,
+      timestamp: Date.now(),
       actionId,
       eventType,
       location,
       metadata
     }
+
+    // Store event
     eventStore.set(event.id, event)
 
-    // 2. Update metrics state (breathing system)
-    if (eventType === 'call') {
-      metricsState.recordCall(metadata?.priority || 'medium')
+    // Add to live buffer
+    liveEventBuffer.push(event)
+    if (liveEventBuffer.length > RETENTION_CONFIG.LIVE_BUFFER_SIZE) {
+      liveEventBuffer.shift()
     }
 
-    // 3. Log to console (with appropriate log level)
-    const logLevel = getLogLevel(eventType)
-    const message = formatLogMessage(actionId, eventType, location, metadata)
+    // Update basic stats for breathing system
+    updateSystemStats(event)
+    updateActionStats(event)
 
-    switch (logLevel) {
-      case 'error':
-        log.error(message)
-        break
-      case 'warn':
-        log.warn(message)
-        break
-      case 'critical':
-        log.critical(message)
-        break
-      case 'debug':
-        log.debug(message)
-        break
-      default:
-        log.info(message)
-    }
-
-    // 4. Periodic cleanup
-    if (eventSequence % 100 === 0) {
-      cleanup()
-    }
+    // Notify live streams
+    notifyStreams(event)
   } catch (error) {
-    log.error(`Unified sensor failed: ${error}`)
+    log.error(`Sensor logging failed: ${error}`)
   }
 }
 
 /**
- * Map event types to log levels
+ * Custom sensors for complex events with call-to-dispatch and dispatch-to-execute tracking
  */
-const getLogLevel = (
-  eventType: EventType
-): 'error' | 'warn' | 'critical' | 'debug' | 'info' => {
-  switch (eventType) {
-    case 'error':
-    case 'timeout':
-      return 'error'
-    case 'blocked':
-    case 'throttle':
-      return 'warn'
-    case 'system':
-      return 'critical'
-    case 'debug':
-      return 'debug'
-    default:
-      return 'info'
-  }
-}
-
-/**
- * Format log message consistently
- */
-const formatLogMessage = (
+const sensorExecution = (
   actionId: ActionId,
-  eventType: EventType,
+  duration: number,
+  category?: string,
+  location?: string
+): void => {
+  sensorLog(actionId, 'execution', location, {duration, category})
+}
+
+const sensorThrottle = (
+  actionId: ActionId,
+  remaining: number,
+  location?: string
+): void => {
+  sensorLog(actionId, 'throttle', location, {remaining})
+}
+
+const sensorDebounce = (
+  actionId: ActionId,
+  delay: number,
+  collapsed: number,
+  location?: string
+): void => {
+  sensorLog(actionId, 'debounce', location, {delay, collapsed})
+}
+
+const sensorError = (
+  actionId: ActionId,
+  error: string,
   location?: string,
-  metadata?: Record<string, any>
-): string => {
-  const parts = [eventType.toUpperCase()]
+  stack?: string
+): void => {
+  sensorLog(actionId, 'error', location, {error, stack})
+}
 
-  if (location) parts.push(`[${location}]`)
-  parts.push(actionId)
+const sensorMiddleware = (
+  actionId: ActionId,
+  middlewareId: string,
+  result: 'accept' | 'reject' | 'transform',
+  location?: string
+): void => {
+  sensorLog(actionId, 'middleware', location, {middlewareId, result})
+}
 
-  if (metadata) {
-    const metaParts = []
-    if (metadata.duration) metaParts.push(`${metadata.duration.toFixed(2)}ms`)
-    if (metadata.remaining) metaParts.push(`${metadata.remaining}ms remaining`)
-    if (metadata.error) metaParts.push(metadata.error)
-    if (metaParts.length > 0) parts.push(`(${metaParts.join(', ')})`)
-  }
+const sensorIntralink = (
+  fromActionId: ActionId,
+  toActionId: ActionId,
+  location?: string
+): void => {
+  sensorLog(fromActionId, 'intralink', location, {toActionId})
+}
 
-  return parts.join(' ')
+const sensorTimeout = (
+  actionId: ActionId,
+  timeout: number,
+  location?: string
+): void => {
+  sensorLog(actionId, 'timeout', location, {timeout})
 }
 
 /**
- * Specialized sensor: Call lifecycle tracking
- * Updates multiple states: event log + IO metrics + breathing state
+ * Call-to-dispatch tracking sensor
  */
-const callLifecycleSensor = (
+const sensorCallToDispatch = (
   actionId: ActionId,
-  stage: 'start' | 'dispatch' | 'execute' | 'complete' | 'error',
   metadata?: Record<string, any>
 ): void => {
-  const timestamp = Date.now()
+  sensorLog(actionId, 'dispatch', 'call-to-dispatch', metadata)
+}
 
-  // Determine event type and location
-  const eventMap = {
-    start: {eventType: 'call' as EventType, location: 'call-initiation'},
-    dispatch: {eventType: 'dispatch' as EventType, location: 'call-dispatch'},
-    execute: {
-      eventType: 'execution' as EventType,
-      location: 'handler-execution'
-    },
-    complete: {
-      eventType: 'execution' as EventType,
-      location: 'call-completion'
-    },
-    error: {eventType: 'error' as EventType, location: 'execution-error'}
-  }
-
-  const {eventType, location} = eventMap[stage]
-
-  // Use unified sensor for logging and event storage
-  unifiedSensor(actionId, eventType, location, {
-    ...metadata,
-    stage,
-    timestamp
+/**
+ * Dispatch-to-execute tracking sensor
+ */
+const sensorDispatchToExecute = (
+  actionId: ActionId,
+  executionTime?: number,
+  metadata?: Record<string, any>
+): void => {
+  sensorLog(actionId, 'execution', 'dispatch-to-execute', {
+    executionTime,
+    ...metadata
   })
-
-  // Update IO state metrics if execution completed
-  if (stage === 'complete' || stage === 'error') {
-    import('./state')
-      .then(({io}) => {
-        io.trackExecution(actionId, metadata?.duration)
-      })
-      .catch(err => log.error(`Failed to update IO metrics: ${err}`))
-  }
 }
 
 /**
- * Specialized sensor: Protection events with state updates
- * Handles throttle/debounce/skip with proper state management
+ * Update system stats (breathing system needs)
  */
-const protectionSensor = (
-  actionId: ActionId,
-  protectionType: 'throttle' | 'debounce' | 'skip',
-  blocked: boolean,
-  metadata?: Record<string, any>
-): void => {
-  const eventType = blocked ? 'blocked' : protectionType
+const updateSystemStats = (event: RawMetricEvent): void => {
+  switch (event.eventType) {
+    case 'call':
+      systemStats.totalCalls++
+      systemStats.lastCallTime = event.timestamp
+      break
+    case 'execution':
+      systemStats.totalExecutions++
+      break
+    case 'error':
+      systemStats.totalErrors++
+      break
+  }
 
-  // Log protection event
-  unifiedSensor(actionId, eventType, `${protectionType}-protection`, metadata)
+  // Calculate call rate for breathing system
+  const now = Date.now()
+  const recentCalls = liveEventBuffer.filter(
+    e => e.eventType === 'call' && e.timestamp > now - 1000
+  ).length
+  systemStats.callRate = recentCalls
+}
 
-  // Update breathing state if system is under protection pressure
-  if (
-    blocked &&
-    (protectionType === 'throttle' || protectionType === 'debounce')
-  ) {
-    const currentState = metricsState.get()
-    if (currentState.stress.combined < 0.5) {
-      // Only if not already stressed
-      metricsState.update({
-        stress: {
-          ...currentState.stress,
-          combined: Math.min(1, currentState.stress.combined + 0.1)
-        }
-      })
+/**
+ * Update action stats (breathing system needs)
+ */
+const updateActionStats = (event: RawMetricEvent): void => {
+  let stats = actionStatsStore.get(event.actionId)
+
+  if (!stats) {
+    stats = {
+      id: event.actionId,
+      calls: 0,
+      errors: 0,
+      lastCall: 0
     }
   }
+
+  switch (event.eventType) {
+    case 'call':
+      stats.calls++
+      stats.lastCall = event.timestamp
+      break
+    case 'error':
+      stats.errors++
+      break
+  }
+
+  actionStatsStore.set(event.actionId, stats)
 }
 
 /**
- * Calculate timing analysis from events (timestamp-based)
+ * Live streaming - notify active streams
  */
-const calculateTimingAnalysis = (
-  actionId: ActionId,
-  timeWindow = RETENTION_CONFIG.TIMING_WINDOW
-) => {
-  const now = Date.now()
-  const events = eventStore
-    .getAll()
-    .filter(e => e.actionId === actionId && e.timestamp > now - timeWindow)
-    .sort((a, b) => a.timestamp - b.timestamp)
+const notifyStreams = (event: RawMetricEvent): void => {
+  const activeStreams = streamStore.getAll().filter(s => s.active)
 
-  const callEvents = events.filter(e => e.eventType === 'call')
-  const dispatchEvents = events.filter(e => e.eventType === 'dispatch')
-  const executionEvents = events.filter(e => e.eventType === 'execution')
-  const errorEvents = events.filter(e => e.eventType === 'error')
-
-  // Calculate timing pairs
-  const timings = callEvents
-    .map(callEvent => {
-      const dispatchEvent = dispatchEvents.find(
-        d =>
-          d.timestamp >= callEvent.timestamp &&
-          d.timestamp <= callEvent.timestamp + 1000 // within 1 second
-      )
-      const executionEvent = executionEvents.find(
-        e =>
-          e.timestamp >= callEvent.timestamp &&
-          e.timestamp <= callEvent.timestamp + 1000
-      )
-
-      if (!executionEvent) return null
-
-      return {
-        callToDispatch: dispatchEvent
-          ? dispatchEvent.timestamp - callEvent.timestamp
-          : 0,
-        dispatchToExecution:
-          dispatchEvent && executionEvent
-            ? executionEvent.timestamp - dispatchEvent.timestamp
-            : 0,
-        totalTime: executionEvent.timestamp - callEvent.timestamp,
-        handlerTime: executionEvent.metadata?.duration || 0
+  for (const stream of activeStreams) {
+    try {
+      if (matchesFilter(event, stream.filter)) {
+        stream.callback(event)
       }
-    })
-    .filter(Boolean)
-
-  if (timings.length === 0) {
-    return {
-      avgCallToDispatch: 0,
-      avgDispatchToExecution: 0,
-      avgTotalTime: 0,
-      avgHandlerTime: 0,
-      avgPipelineOverhead: 0,
-      sampleCount: 0
+    } catch (error) {
+      log.error(`Stream notification failed for ${stream.id}: ${error}`)
+      // Deactivate problematic stream
+      stream.active = false
+      streamStore.set(stream.id, stream)
     }
   }
-
-  const totals = timings.reduce(
-    (acc, timing) => {
-      acc.callToDispatch += timing.callToDispatch
-      acc.dispatchToExecution += timing.dispatchToExecution
-      acc.totalTime += timing.totalTime
-      acc.handlerTime += timing.handlerTime
-      return acc
-    },
-    {callToDispatch: 0, dispatchToExecution: 0, totalTime: 0, handlerTime: 0}
-  )
-
-  const count = timings.length
-  const avgTotalTime = totals.totalTime / count
-  const avgHandlerTime = totals.handlerTime / count
-
-  return {
-    avgCallToDispatch: totals.callToDispatch / count,
-    avgDispatchToExecution: totals.dispatchToExecution / count,
-    avgTotalTime,
-    avgHandlerTime,
-    avgPipelineOverhead: avgTotalTime - avgHandlerTime,
-    sampleCount: count
-  }
 }
 
 /**
- * Get system statistics from events
+ * Check if event matches filter
  */
-const getSystemStats = (): SystemStats => {
-  const events = eventStore.getAll()
-  const now = Date.now()
-  const last10Seconds = events.filter(e => e.timestamp > now - 10000)
-
-  return {
-    totalCalls: events.filter(e => e.eventType === 'call').length,
-    totalExecutions: events.filter(e => e.eventType === 'execution').length,
-    totalErrors: events.filter(e => e.eventType === 'error').length,
-    callRate: Math.floor(
-      last10Seconds.filter(e => e.eventType === 'call').length / 10
-    ),
-    startTime: systemStartTime
+const matchesFilter = (event: RawMetricEvent, filter: EventFilter): boolean => {
+  if (filter.actionIds && !filter.actionIds.includes(event.actionId)) {
+    return false
   }
+
+  if (filter.eventTypes && !filter.eventTypes.includes(event.eventType)) {
+    return false
+  }
+
+  if (filter.since && event.timestamp < filter.since) {
+    return false
+  }
+
+  if (
+    filter.priority &&
+    event.priority &&
+    !filter.priority.includes(event.priority)
+  ) {
+    return false
+  }
+
+  if (filter.location && event.location !== filter.location) {
+    return false
+  }
+
+  return true
 }
 
 /**
- * Cleanup old events
+ * Create live stream subscription
+ */
+const createStream = (
+  filter: EventFilter,
+  callback: (event: RawMetricEvent) => void
+): string => {
+  const streamId = `stream-${++streamIdCounter}`
+
+  const subscription: StreamSubscription = {
+    id: streamId,
+    filter,
+    callback,
+    active: true
+  }
+
+  streamStore.set(streamId, subscription)
+  return streamId
+}
+
+/**
+ * Remove stream subscription
+ */
+const removeStream = (streamId: string): boolean => {
+  const stream = streamStore.get(streamId)
+  if (stream) {
+    stream.active = false
+    streamStore.set(streamId, stream)
+    return streamStore.forget(streamId)
+  }
+  return false
+}
+
+/**
+ * Cleanup old data
  */
 const cleanup = (): void => {
   try {
+    // Clean old events
     const allEvents = eventStore.getAll()
     if (allEvents.length > RETENTION_CONFIG.MAX_EVENTS) {
       eventStore.clear()
       const recentEvents = allEvents
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, RETENTION_CONFIG.MAX_EVENTS)
-      recentEvents.forEach(event => eventStore.set(event.id, event))
+
+      recentEvents.forEach(event => {
+        eventStore.set(event.id, event)
+      })
     }
+
+    // Clean old action stats
+    const allStats = actionStatsStore.getAll()
+    if (allStats.length > RETENTION_CONFIG.MAX_ACTIONS) {
+      actionStatsStore.clear()
+      const recentStats = allStats
+        .sort((a, b) => b.lastCall - a.lastCall)
+        .slice(0, RETENTION_CONFIG.MAX_ACTIONS)
+
+      recentStats.forEach(stat => {
+        actionStatsStore.set(stat.id, stat)
+      })
+    }
+
+    // Clean inactive streams
+    const activeStreams = streamStore.getAll().filter(s => s.active)
+    streamStore.clear()
+    activeStreams.forEach(stream => {
+      streamStore.set(stream.id, stream)
+    })
   } catch (error) {
     log.error(`Metrics cleanup failed: ${error}`)
   }
 }
 
+// Cleanup timer
+let cleanupTimer: NodeJS.Timeout | undefined
+
 /**
- * Main metrics interface - simplified and unified
+ * Main metrics interface with sensor architecture
  */
 export const metricsReport = {
-  // Core unified sensor (90% of usage)
+  // Sensor interface
   sensor: {
-    log: unifiedSensor
+    log: sensorLog,
+    execution: sensorExecution,
+    throttle: sensorThrottle,
+    debounce: sensorDebounce,
+    error: sensorError,
+    middleware: sensorMiddleware,
+    intralink: sensorIntralink,
+    timeout: sensorTimeout,
+    callToDispatch: sensorCallToDispatch,
+    dispatchToExecute: sensorDispatchToExecute
   },
 
-  // Specialized sensors (10% of usage - multi-state updates)
-  callLifecycle: callLifecycleSensor,
-  protection: protectionSensor,
-
-  // Convenience methods for common events
-  trackCall: (actionId: ActionId, priority?: Priority) =>
-    callLifecycleSensor(actionId, 'start', {priority}),
-
-  trackDispatch: (actionId: ActionId) =>
-    callLifecycleSensor(actionId, 'dispatch'),
-
-  trackExecution: (actionId: ActionId, duration?: number) =>
-    callLifecycleSensor(actionId, 'execute', {duration}),
-
-  trackError: (actionId: ActionId, error: string) =>
-    callLifecycleSensor(actionId, 'error', {error}),
-
-  trackThrottle: (actionId: ActionId, blocked: boolean, remaining?: number) =>
-    protectionSensor(actionId, 'throttle', blocked, {remaining}),
-
-  trackDebounce: (actionId: ActionId, blocked: boolean, delay?: number) =>
-    protectionSensor(actionId, 'debounce', blocked, {delay}),
-
-  trackSkip: (actionId: ActionId, reason: string) =>
-    protectionSensor(actionId, 'skip', true, {reason}),
-
-  // Analysis and reporting
-  getTimingAnalysis: calculateTimingAnalysis,
-  getSystemStats,
-
-  getActionStats: (actionId: ActionId) => {
-    const events = eventStore.getAll().filter(e => e.actionId === actionId)
-    return {
-      totalCalls: events.filter(e => e.eventType === 'call').length,
-      totalExecutions: events.filter(e => e.eventType === 'execution').length,
-      totalErrors: events.filter(e => e.eventType === 'error').length,
-      totalThrottles: events.filter(e => e.eventType === 'throttle').length,
-      totalDebounces: events.filter(e => e.eventType === 'debounce').length,
-      avgExecutionTime: (() => {
-        const execEvents = events.filter(
-          e => e.eventType === 'execution' && e.metadata?.duration
-        )
-        if (execEvents.length === 0) return 0
-        const total = execEvents.reduce(
-          (sum, e) => sum + (e.metadata?.duration || 0),
-          0
-        )
-        return total / execEvents.length
-      })()
-    }
+  // Live streaming
+  createStream,
+  removeStream,
+  trackExecution: (actionId: string, duration: number, category?: string) => {
+    sensorExecution(actionId, duration, category, 'execution')
   },
 
-  // Data export
-  exportEvents: (filter?: {
-    actionIds?: string[]
-    eventTypes?: EventType[]
-    since?: number
-    limit?: number
-  }): MetricEvent[] => {
+  trackError: (actionId: string, error: string, location?: string) => {
+    sensorError(actionId, error, location)
+  },
+
+  trackProtection: (actionId: string, protectionType: string) => {
+    sensorLog(actionId, protectionType as EventType, 'protection')
+  },
+
+  trackMiddlewareRejection: (actionId: string) => {
+    sensorMiddleware(actionId, 'unknown', 'reject', 'middleware-rejection')
+  },
+
+  trackThrottle: (actionId: string) => {
+    sensorThrottle(actionId, 0, 'throttle-protection')
+  },
+
+  trackDebounce: (actionId: string) => {
+    sensorDebounce(actionId, 0, 1, 'debounce-protection')
+  },
+
+  trackChangeDetectionSkip: (actionId: string) => {
+    sensorLog(actionId, 'skip', 'change-detection')
+  },
+  // Data export (raw)
+  exportEvents: (query?: LiveQuery): RawMetricEvent[] => {
     let events = eventStore.getAll()
 
-    if (filter) {
-      if (filter.actionIds) {
-        events = events.filter(e => filter.actionIds!.includes(e.actionId))
+    if (query) {
+      if (query.actionIds) {
+        events = events.filter(e => query.actionIds!.includes(e.actionId))
       }
-      if (filter.eventTypes) {
-        events = events.filter(e => filter.eventTypes!.includes(e.eventType))
+      if (query.eventTypes) {
+        events = events.filter(e => query.eventTypes!.includes(e.eventType))
       }
-      if (filter.since) {
-        events = events.filter(e => e.timestamp >= filter.since!)
+      if (query.since) {
+        events = events.filter(e => e.timestamp >= query.since!)
+      }
+      if (query.priority) {
+        events = events.filter(
+          e => e.priority && query.priority!.includes(e.priority)
+        )
+      }
+      if (query.location) {
+        events = events.filter(e => e.location === query.location)
       }
     }
 
+    // Sort by timestamp (newest first)
     events.sort((a, b) => b.timestamp - a.timestamp)
-    return filter?.limit ? events.slice(0, filter.limit) : events
+
+    // Apply pagination
+    if (query?.offset) {
+      events = events.slice(query.offset)
+    }
+    if (query?.limit) {
+      events = events.slice(0, query.limit)
+    }
+
+    return events
   },
 
+  // Live events (from buffer)
+  getLiveEvents: (query?: LiveQuery): RawMetricEvent[] => {
+    let events = [...liveEventBuffer]
+
+    if (query && (matchesFilter as any)) {
+      events = events.filter(event => matchesFilter(event, query))
+    }
+
+    return events.slice(0, query?.limit || 100)
+  },
+
+  // Essential stats for breathing system
+  getSystemStats: (): SystemStats => ({...systemStats}),
+  getActionStats: (actionId: ActionId): ActionStats | undefined => {
+    return actionStatsStore.get(actionId)
+  },
+  getActionMetrics: (actionId: ActionId): ActionStats | undefined => {
+    return actionStatsStore.get(actionId)
+  },
+
+  // Basic reporting
   getBasicReport: (): string => {
-    const stats = getSystemStats()
+    const stats = systemStats
     const uptime = Math.floor((Date.now() - stats.startTime) / 1000)
+    const actionCount = actionStatsStore.getAll().length
     const eventCount = eventStore.getAll().length
+    const streamCount = streamStore.getAll().filter(s => s.active).length
 
     return `CYRE Metrics Report
 ===================
 Uptime: ${uptime}s
+Actions Tracked: ${actionCount}
 Total Calls: ${stats.totalCalls}
 Total Executions: ${stats.totalExecutions}
 Total Errors: ${stats.totalErrors}
 Call Rate: ${stats.callRate}/sec
-Events Collected: ${eventCount}`
+Events Collected: ${eventCount}
+Live Streams: ${streamCount}`
   },
 
   // System management
+  initialize: (): void => {
+    systemStats.startTime = Date.now()
+    cleanupTimer = setInterval(cleanup, RETENTION_CONFIG.CLEANUP_INTERVAL)
+  },
+
   reset: (): void => {
     eventStore.clear()
+    actionStatsStore.clear()
+    streamStore.clear()
+    liveEventBuffer.length = 0
+    systemStats = {
+      totalCalls: 0,
+      totalExecutions: 0,
+      totalErrors: 0,
+      callRate: 0,
+      lastCallTime: Date.now(),
+      startTime: Date.now()
+    }
     eventSequence = 0
-    systemStartTime = Date.now()
   },
 
   shutdown: (): void => {
-    cleanup()
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer)
+      cleanupTimer = undefined
+    }
+    // Deactivate all streams
+    const allStreams = streamStore.getAll()
+    allStreams.forEach(stream => {
+      stream.active = false
+      streamStore.set(stream.id, stream)
+    })
+    streamStore.clear()
   }
 }
 
-// Auto-cleanup
-setInterval(cleanup, RETENTION_CONFIG.CLEANUP_INTERVAL)
+// Initialize on load
+metricsReport.initialize()

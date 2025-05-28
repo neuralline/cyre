@@ -7,7 +7,8 @@ import CyreChannel from './cyre-channels'
 import dataDefinitions from '../elements/data-definitions'
 import {io} from '../context/state'
 import {metricsState} from '../context/metrics-state'
-import {TimeKeeper} from '../components/cyre-timekeeper'
+import TimeKeeper from '../components/cyre-timekeeper'
+import {useDispatch} from './cyre-dispatch'
 
 interface ProtectionResult {
   ok: boolean
@@ -153,7 +154,7 @@ const blockZeroRepeatProtection = async (
     metricsReport.sensor.log(action.id, 'blocked', 'zero-repeat-protection')
 
     return {
-      ok: false,
+      ok: false, // Changed to false to actually block execution
       message: `Action registered with repeat: 0 - execution blocked`,
       blocked: true,
       metadata: {
@@ -216,7 +217,7 @@ const throttleProtection = async (
 }
 
 /**
- * Debounce protection - proper implementation without imports
+ * Debounce protection - using IO state and TimeKeeper
  */
 const debounceProtection = async (
   action: IO,
@@ -230,21 +231,21 @@ const debounceProtection = async (
     }
   }
 
-  const currentPayload = payload || action.payload
+  const currentPayload = payload || action.payload || undefined
 
   // Clear existing debounce timer if it exists
-  const existingState = debounceState.get(action.id)
-  if (existingState) {
-    TimeKeeper.forget(existingState.timerId)
+  if (action.debounceTimerId) {
+    TimeKeeper.forget(action.debounceTimerId)
   }
 
   // Create unique timer ID
   const timerId = `${action.id}-debounce-${Date.now()}`
 
-  // Store debounce state
-  debounceState.set(action.id, {
-    timerId,
-    lastPayload: currentPayload
+  // Store the timer ID with the action
+
+  io.set({
+    ...action,
+    debounceTimerId: timerId
   })
 
   // Set new debounce timer using TimeKeeper
@@ -257,14 +258,19 @@ const debounceProtection = async (
         const executePayload = storedState?.lastPayload || currentPayload
 
         // Clean up debounce state
-        debounceState.delete(action.id)
+        io.set({
+          ...action,
+          debounceTimerId: undefined
+        })
 
         // Execute the debounced call through dispatch
-        const {useDispatch} = await import('./cyre-dispatch')
         await useDispatch(action, executePayload)
       } catch (error) {
-        log.error(`Debounced execution failed for ${action.id}: ${error}`)
-        debounceState.delete(action.id)
+        io.set({
+          ...action,
+          debounceTimerId: undefined
+        })
+        log.critical(`Debounced execution failed for ${action.id}: ${error}`)
       }
     },
     1, // Execute once
@@ -275,7 +281,10 @@ const debounceProtection = async (
     log.error(
       `Failed to create debounce timer for ${action.id}: ${timerResult.error.message}`
     )
-    debounceState.delete(action.id)
+    io.set({
+      ...action,
+      debounceTimerId: undefined
+    })
     return {
       ok: false,
       message: `Debounce timer failed: ${timerResult.error.message}`,
@@ -295,7 +304,7 @@ const debounceProtection = async (
     message: `Debounced - will execute in ${action.debounce}ms`,
     delayed: true,
     duration: action.debounce,
-    payload: currentPayload,
+    payload,
     metadata: {
       protection: 'debounce',
       debounceMs: action.debounce,
@@ -429,13 +438,17 @@ export const getBuiltInProtections = (): string[] => {
 }
 
 /**
- * Clear debounce state for action (cleanup)
+ * Clear debounce state for action (cleanup) - using TimeKeeper
  */
 export const clearDebounceState = (actionId: string): void => {
-  const state = debounceState.get(actionId)
-  if (state) {
-    TimeKeeper.forget(state.timerId)
-    debounceState.delete(actionId)
+  const action = io.get(actionId)
+  if (action?.debounceTimerId) {
+    TimeKeeper.forget(action.debounceTimerId)
+
+    // Clear the timer ID from action
+    const updatedAction = {...action}
+    delete updatedAction.debounceTimerId
+    io.set(updatedAction)
   }
 }
 
