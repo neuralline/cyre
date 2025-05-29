@@ -47,14 +47,14 @@ interface ChannelMiddlewareChain {
 export function useCyre<TPayload = ActionPayload>(
   options: CyreHookOptions<TPayload> = {}
 ): CyreHook<TPayload> {
-  const channelName = options.name || options.tag || 'channel'
-  const channelId = `${channelName}-${crypto.randomUUID()}`
+  const hookName = options.name || options.tag || 'channel'
+  const channelId = options.channelId || `${hookName}-${crypto.randomUUID()}`
 
   const debugEnabled = options.debug === true
   const debugLog = debugEnabled
     ? (message: string, data?: any) =>
         console.log(
-          `[${channelName}:${channelId.slice(-8)}] ${message}`,
+          `[${name}:${channelId.slice(-8)}] ${message}`,
           data !== undefined ? data : ''
         )
     : () => {}
@@ -230,11 +230,8 @@ export function useCyre<TPayload = ActionPayload>(
   // Create the enhanced channel object
   const channel: CyreHook<TPayload> = {
     id: channelId,
-    name: channelName,
+    name: hookName,
 
-    /**
-     * Initialize or update channel configuration
-     */
     action: (config: ChannelConfig): HookResult<boolean, Error> => {
       return initialize(config)
     },
@@ -325,26 +322,6 @@ export function useCyre<TPayload = ActionPayload>(
           ok: false,
           payload: null,
           message: `Call error: ${errorMessage}`
-        }
-      }
-    },
-
-    /**
-     * Safe call with error handling
-     */
-    safeCall: async (
-      payload?: TPayload
-    ): Promise<HookResult<CyreResponse, Error>> => {
-      try {
-        debugLog('Making safe call with payload', payload)
-        const response = await channel.call(payload)
-        debugLog('Safe call succeeded', response)
-        return {success: true, value: response}
-      } catch (error) {
-        debugLog('Safe call failed', error)
-        return {
-          success: false,
-          error: error instanceof Error ? error : new Error(String(error))
         }
       }
     },

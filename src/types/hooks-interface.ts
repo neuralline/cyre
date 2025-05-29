@@ -27,6 +27,8 @@ export interface ProtectionOptions {
  * Configuration options for creating a Cyre channel
  */
 export interface CyreHookOptions<TPayload = ActionPayload> {
+  /** dedicated channel id. listeners to this cyre channel can be triggered by this id */
+  channelId?: string
   /** Friendly name identifier for this channel (for debugging) */
   name?: string
   /** Alternative name for backwards compatibility */

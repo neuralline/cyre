@@ -5,6 +5,7 @@ import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
+import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {metricsReport} from './context/metrics-report'
 import {
@@ -14,32 +15,13 @@ import {
 import {processCall, scheduleCall} from './components/cyre-call'
 import {stateMachineService} from './state-machine/state-machine-service'
 import {
-  persistentState,
+  persistence,
   createLocalStorageAdapter,
   type CyreConfig,
   type PersistentState
 } from './context/persistent-state'
-import {io, subscribers, timeline} from './context/state'
 
-/* 
-    Neural Line
-    Reactive event manager
-    C.Y.R.E ~/`SAYER`/
-    Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.1.0 2025
-
-        example use:
-        cyre.action({id: 'uber', payload: 44085648634})
-        cyre.on('uber', number => {
-            console.log('Calling Uber @', number)
-        })
-        cyre.call('uber') 
-
-    Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
-    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
-
-    Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
-
+/*
 
       C.Y.R.E - A.P.P
       
@@ -50,14 +32,11 @@ import {io, subscribers, timeline} from './context/state'
 
 */
 
-// Track initialization
+// Track initialization state
 let isInitialized = false
-let storageAdapter = createLocalStorageAdapter()
-let autoSaveEnabled = false
-let saveKey = 'cyre-state'
 
 /**
- * Initialize breathing system
+ * Initialize the breathing system
  */
 const initializeBreathing = (): void => {
   TimeKeeper.keep(
@@ -76,20 +55,7 @@ const initializeBreathing = (): void => {
 }
 
 /**
- * Auto-save state when enabled
- */
-const autoSave = async (): Promise<void> => {
-  if (!autoSaveEnabled) return
-  try {
-    const state = persistentState.serialize()
-    await storageAdapter.save(saveKey, state)
-  } catch (error) {
-    log.error(`Auto-save failed: ${error}`)
-  }
-}
-
-/**
- * Action registration with persistent state
+ * Action registration - simplified without external middleware
  */
 const action = (
   attribute: IO | IO[]
@@ -104,49 +70,45 @@ const action = (
       const results = attribute.map(singleAction => {
         const result = registerSingleAction(singleAction)
         if (result.ok) {
-          persistentState.setAction(singleAction)
-          autoSave()
+          persistence.autoSave() // Auto-save after action registration
         }
         return result
       })
 
       const successful = results.filter(r => r.ok).length
+      const total = results.length
+
       return {
         ok: successful > 0,
-        message: `Registered ${successful}/${results.length} actions`,
+        message: `Registered ${successful}/${total} actions`,
         payload: results
       }
     } else {
       const result = registerSingleAction(attribute)
       if (result.ok) {
-        persistentState.setAction(attribute)
-        autoSave()
+        persistence.autoSave() // Auto-save after action registration
       }
       return result
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Action registration failed: ${errorMessage}`)
-    return {ok: false, message: `Action registration failed: ${errorMessage}`}
+
+    metricsReport.sensor.log('system', 'error', 'action-registration', {
+      error: errorMessage
+    })
+
+    return {
+      ok: false,
+      message: `Action registration failed: ${errorMessage}`
+    }
   }
 }
 
 /**
- * Subscription with persistent state
+ * Call execution - simplified flow
  */
-const on = (actionId: string, handler: Function): any => {
-  const result = subscribe(actionId, handler)
-  if (result.ok) {
-    persistentState.setSubscriber(actionId)
-    autoSave()
-  }
-  return result
-}
-
-/**
- * Call execution with persistent state
- */
-const call = async (
+export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
@@ -168,17 +130,22 @@ const call = async (
   })
 
   try {
-    // Get action from persistent state
-    const actionConfig = persistentState.getAction(id)
+    const actionConfig = io.get(id)
     if (!actionConfig) {
-      return {ok: false, payload: null, message: `Action not found: ${id}`}
+      metricsReport.sensor.error(id, 'unknown id', 'call-validation')
+      return {
+        ok: false,
+        payload: null,
+        message: `Channel not found: ${id}`
+      }
     }
 
-    // Apply protections
+    // UNIFIED PROTECTION PIPELINE - Applied once before any execution path
     const protectionResult = await applyBuiltInProtections(
       actionConfig,
       payload
     )
+
     if (!protectionResult.ok) {
       return {
         ok: false,
@@ -192,30 +159,50 @@ const call = async (
       }
     }
 
+    // Handle delayed execution (debounce) - execution scheduled, return success
+    if (protectionResult.delayed) {
+      return {
+        ok: true,
+        payload: protectionResult.payload,
+        message: protectionResult.message,
+        metadata: {
+          executionPath: 'delayed-by-protection',
+          delayed: true,
+          duration: protectionResult.duration,
+          ...protectionResult.metadata
+        }
+      }
+    }
+
+    // Use processed payload from protection pipeline
     const processedPayload = protectionResult.payload
 
-    // Execute
+    // Determine execution path after protections pass
     const requiresTimekeeper = !!(
-      actionConfig.interval ||
-      actionConfig.delay !== undefined ||
-      (actionConfig.repeat !== undefined &&
-        actionConfig.repeat !== 1 &&
-        actionConfig.repeat !== 0)
+      (
+        actionConfig.interval ||
+        actionConfig.delay !== undefined ||
+        (actionConfig.repeat !== undefined &&
+          actionConfig.repeat !== 1 &&
+          actionConfig.repeat !== 0)
+      ) // Note: repeat 0 already blocked by protections
     )
 
     let result: CyreResponse
+
     if (requiresTimekeeper) {
       result = await scheduleCall(actionConfig, processedPayload)
     } else {
       result = await processCall(actionConfig, processedPayload)
     }
 
+    // Auto-save after successful execution
+    if (result.ok) {
+      persistence.autoSave()
+    }
+
     // Handle IntraLink chain reactions
     if (result.ok && result.metadata?.intraLink) {
-      persistentState.setPayload(id, processedPayload)
-      autoSave()
-      // Handle IntraLink chain reactions
-
       const chainLink = result.metadata.intraLink
 
       try {
@@ -248,14 +235,27 @@ const call = async (
     }
   }
 }
+
+/**
+ * Subscription with auto-save
+ */
+const on = (actionId: string, handler: Function): any => {
+  const result = subscribe(actionId, handler)
+  if (result.ok) {
+    persistence.autoSave() // Auto-save after subscription
+  }
+  return result
+}
+
 /**
  * Forget action - simplified cleanup
  */
 const forget = (id: string): boolean => {
-  if (!id || typeof id !== 'string') return false
+  if (!id || typeof id !== 'string') {
+    return false
+  }
 
   try {
-    const removed = persistentState.removeAction(id)
     const actionRemoved = io.forget(id)
     const subscriberRemoved = subscribers.forget(id)
     timeline.forget(id)
@@ -263,36 +263,49 @@ const forget = (id: string): boolean => {
     if (actionRemoved || subscriberRemoved) {
       log.debug(`Removed action and subscriber for ${id}`)
       metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
+      persistence.autoSave() // Auto-save after removal
       return true
     }
-    if (removed) {
-      autoSave()
-      log.debug(`Removed action: ${id}`)
-    }
-    return removed
+
+    metricsReport.sensor.log(id, 'info', 'action-removal', {
+      success: false,
+      reason: 'not found'
+    })
+    return false
   } catch (error) {
     log.error(`Failed to forget ${id}: ${error}`)
+    metricsReport.sensor.error(id, String(error), 'action-removal')
     return false
   }
 }
 
 /**
- * Clear all state
+ * Clear system - simplified
  */
 const clear = (): void => {
   try {
-    autoSave()
+    metricsReport.sensor.log('system', 'info', 'system-clear', {
+      timestamp: Date.now()
+    })
+
     io.clear()
     subscribers.clear()
     timeline.clear()
-    persistentState.clear()
     metricsReport.reset()
     metricsState.reset()
+
+    // Clear state machines
     stateMachineService.clear()
 
+    persistence.autoSave() // Auto-save after clear
+
     log.success('System cleared')
+    metricsReport.sensor.log('system', 'success', 'system-clear', {
+      completed: true
+    })
   } catch (error) {
     log.error(`Clear operation failed: ${error}`)
+    metricsReport.sensor.error('system', String(error), 'system-clear')
   }
 }
 
@@ -301,106 +314,130 @@ const clear = (): void => {
  */
 const initialize = async (
   config: CyreConfig = {}
-): Promise<{ok: boolean; message: string}> => {
-  if (metricsState.initialize) {
-    return {ok: true, message: MSG.ONLINE}
+): Promise<{ok: boolean; payload: number; message: string}> => {
+  if (isInitialized) {
+    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   }
 
   try {
-    metricsState.init()
-    // Set configuration
-    if (config.autoSave !== undefined) autoSaveEnabled = config.autoSave
-    if (config.saveKey) saveKey = config.saveKey
+    // Configure persistence
+    persistence.configure({
+      autoSave: config.autoSave,
+      saveKey: config.saveKey,
+      adapter: createLocalStorageAdapter()
+    })
 
     // Load persistent state if provided or from storage
     if (config.persistentState) {
-      persistentState.hydrate(config.persistentState)
+      persistence.hydrate(config.persistentState)
       log.debug('Loaded state from config')
-    } else if (autoSaveEnabled) {
-      const savedState = await storageAdapter.load(saveKey)
+    } else if (config.autoSave) {
+      const savedState = await persistence.loadState(config.saveKey)
       if (savedState) {
-        persistentState.hydrate(savedState)
+        persistence.hydrate(savedState)
         log.debug('Loaded state from storage')
       }
     }
 
-    // Initialize core systems
-
+    isInitialized = true
     initializeBreathing()
     TimeKeeper.resume()
 
-    const stats = persistentState.getStats()
+    log.sys(MSG.QUANTUM_HEADER)
+    log.success('Cyre initialized with state machine support')
 
-    log.success(
-      `Cyre initialized with ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
+    const stats = persistence.getStats()
+    log.debug(
+      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
     )
 
-    return {ok: true, message: MSG.ONLINE}
+    metricsReport.sensor.log('system', 'success', 'system-initialization', {
+      timestamp: Date.now(),
+      features: [
+        'simplified-core',
+        'built-in-protections',
+        'breathing-system',
+        'state-machines',
+        'persistent-state'
+      ],
+      restoredActions: stats.actionCount,
+      restoredSubscribers: stats.subscriberCount
+    })
+
+    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.critical(`Cyre initialization failed: ${errorMessage}`)
-    return {ok: false, message: errorMessage}
+    log.critical(`Cyre failed to initialize : ${errorMessage}`)
+    metricsReport.sensor.error('system', errorMessage, 'system-initialization')
+    return {ok: false, payload: 0, message: errorMessage}
   }
 }
 
 /**
- * Main CYRE instance with persistent state support
+ * Main CYRE instance - with persistent state integration
  */
 export const cyre = {
-  // Enhanced initialization
+  // Core methods
   initialize,
-
-  // Core methods with persistent state
   action,
   on,
   call,
-  get: (id: string): IO | undefined => persistentState.getAction(id),
+  get: (id: string): IO | undefined => io.get(id),
   forget,
   clear,
 
-  // State persistence methods
+  // State methods (existing)
+  hasChanged: (id: string, payload: ActionPayload): boolean =>
+    io.hasChanged(id, payload),
+  getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
+  updatePayload: (id: string, payload: ActionPayload): void =>
+    io.updatePayload(id, payload),
+
+  // NEW: Persistent state methods
   saveState: async (key?: string): Promise<void> => {
-    const state = persistentState.serialize()
-    await storageAdapter.save(key || saveKey, state)
+    await persistence.saveState(key)
   },
 
   loadState: async (key?: string): Promise<void> => {
-    const state = await storageAdapter.load(key || saveKey)
+    const state = await persistence.loadState(key)
     if (state) {
-      persistentState.hydrate(state)
+      persistence.hydrate(state)
     }
   },
 
-  exportState: (): PersistentState => persistentState.serialize(),
+  exportState: (): PersistentState => persistence.serialize(),
 
-  // State utilities
-  hasChanged: (id: string, payload: ActionPayload): boolean => {
-    const previous = persistentState.getPayload(id)
-    return previous !== payload
-  },
-
-  getPrevious: (id: string): ActionPayload | undefined =>
-    persistentState.getPayload(id),
+  getStats: () => persistence.getStats(),
 
   // Control methods
-  pause: (id?: string): void => TimeKeeper.pause(id),
-  resume: (id?: string): void => TimeKeeper.resume(id),
-  lock: () => {
+  pause: (id?: string): void => {
+    TimeKeeper.pause(id)
+    metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
+  },
+  resume: (id?: string): void => {
+    TimeKeeper.resume(id)
+    metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
+  },
+  lock: (): {ok: boolean; message: string; payload: null} => {
     metricsState.lock()
+    metricsReport.sensor.log('system', 'critical', 'system-lock')
     return {ok: true, message: 'System locked', payload: null}
   },
 
-  // Monitoring
-  getStats: () => persistentState.getStats(),
-
   shutdown: (): void => {
     try {
-      if (autoSaveEnabled) {
-        const state = persistentState.serialize()
-        storageAdapter.save(saveKey, state)
-      }
+      metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
+        timestamp: Date.now()
+      })
+
+      // Save state before shutdown
+      persistence.saveState().catch(error => {
+        log.error(`Failed to save state during shutdown: ${error}`)
+      })
+
       metricsReport.shutdown()
       clear()
+
       if (typeof process !== 'undefined' && process.exit) {
         process.exit(0)
       }
@@ -412,7 +449,7 @@ export const cyre = {
 
   status: (): boolean => metricsState.get().hibernating,
 
-  // Monitoring methods
+  // Monitoring methods (existing)
   getBreathingState: () => metricsState.get().breathing,
   getPerformanceState: () => {
     const systemStats = metricsReport.getSystemStats()
