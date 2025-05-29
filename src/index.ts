@@ -13,29 +13,38 @@
 
     CYRE TARGET: is to make Cyre the least call-to-execution overhead per channel still having cutting edge features 
 
-CYRE TODO: * multi .on subscribers to single .action channel 
-* single .on subscriber to multi .action channels 
-* add queue option to .action. if true .call to that channel will be queued until .on subscriber registered
-* improved react and nextjs support with hooks
-* * useCyre can take optional ID. if set, it uses that id instead of generated id. in that way cyre.call can access that useCyre remotely
-* * complete experimental cyre/ssr
-* * complete experimental cyre/stream ✅ experimental
-* * state-machine: experimental stage
-* * improve action pipeline. each channel in cyre are independent. so action pipeline should proactively compile actions that apply to specific channel when that channel run. the rest should run with zero overhead. 
-* * Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
-* * more test coverage
-* * improve efficiency
-* * publish to NPM these are my current todo list. what do you think? any todo suggestions?
+CYRE TODO: 
+[]  multi .on subscribers to single .action channel 
+[]  single .on subscriber to multi .action channels 
+[]  add queue option to .action. if true .call to that channel will be queued until .on subscriber registered
+[]  improved react and nextjs support with hooks
+[]  useCyre could take optional ID. if set, it uses that id instead of generated id. so cyre.call can access that useCyre remotely
+[]  cyre/ssr: experimental/testing stage
+[]  cyre/stream experimental/testing stage
+[]  state-machine: experimental/testing stage
+[]  TimeKeeper.cron():
+[]  improve action pipeline. each channel in cyre are independent. so action pipeline should proactively compile actions that apply to specific channel when that channel run. the rest should run with zero overhead. 
+[]  Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
+[]  more test coverage
+[]  more proactive decision on cyre init and registrations to minimize run time calculations and overheads
+[]  publish to NPM these are my current todo list. what do you think? any todo suggestions?
 
-* instead of endless cyre.api create system channels for users to subscribe for example on initialize, on error, on stress high etc
-* persistent state. possibly to load cyre from saved state and sync with server
-* send and receive call with server
+[]  system channels: instead of endless cyre.api create system .on listening channels for users to subscribe eg: on initialize, on error, on stress high etc
+[]  persistent state. load Cyre from saved state, storage and sync with server
+[]  cyre/server: server for client cyre applicants or others
+[]  location routing: use id as address bar eg 'home/branch/app'
+[]  cyre/branch: branch Cyre instances run their own network and respond to parent calls eg: shutdown or state change
 
+[]  .action future features {
 
+      block:boolean // this channel is no longer available
+      required: boolean // payload is required on call
+      payload 
+    }
 */
 
 // Import the cyre instance and related utilities from app.ts
-import {cyre, Cyre} from './app'
+import {cyre} from './app'
 import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
 import {log} from './components/cyre-log'
@@ -44,7 +53,7 @@ import {log} from './components/cyre-log'
 import {createStream} from './stream'
 
 // Main exports - ensure these are properly exported
-export {Cyre, cyre, log, useCyre, cyreCompose, createStream}
+export {cyre, log, useCyre, cyreCompose, createStream}
 
 // Export stream system
 

@@ -60,7 +60,7 @@ export const io = {
       ioStore.set(ioState.id, enhanced)
 
       // Initialize action metrics properly with current timestamp
-      const currentTime = Date.now()
+
       const currentMetrics = actionMetrics.get(ioState.id)
 
       // Initialize metrics if they don't exist or are invalid
@@ -322,15 +322,7 @@ export const timeline = {
     timelineStore.clear()
     metricsState.update({activeFormations: 0})
   },
-  getAll: (): Timer[] => timelineStore.getAll(),
-  getActive: (): Timer[] => {
-    const active = timelineStore
-      .getAll()
-      .filter(timer => timer.status === 'active')
-    // Update the count in metrics state
-    metricsState.update({activeFormations: active.length})
-    return active
-  }
+  getAll: (): Timer[] => timelineStore.getAll()
 }
 
 // Export readonly stores

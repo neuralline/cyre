@@ -1,6 +1,6 @@
 // src/context/metrics-state.ts
 
-import {BREATHING, defaultMetrics} from '../config/cyre-config'
+import {BREATHING, defaultMetrics, MSG} from '../config/cyre-config'
 import type {
   BreathingState,
   QuantumState as MetricsState,
@@ -177,6 +177,7 @@ export const metricsState = {
   init: (): void => {
     try {
       metricsState.update({initialize: true})
+      log.sys(MSG.QUANTUM_HEADER)
     } catch (error) {
       // CRITICAL: Lock failure compromises system security
       log.critical(`System init failed: ${error}`)
