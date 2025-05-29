@@ -116,6 +116,8 @@ export interface QuantumState {
   recuperationInterval?: NodeJS.Timeout
   activeFormations: number
   isLocked: boolean
+  initialize: boolean
+  isShutdown: boolean
 }
 
 export interface TimekeeperMetrics {

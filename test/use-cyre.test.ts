@@ -283,55 +283,6 @@ describe('useCyre Hook', () => {
   })
 
   /**
-   * Test history tracking
-   */
-  it('should track execution history', async () => {
-    const channel = useCyre<{operation: string; data: number}>({
-      name: 'history-test'
-    })
-
-    channel.on(payload => {
-      return {
-        operation: payload.operation,
-        processed: payload.data * 2
-      }
-    })
-
-    // Make several calls
-    const operations = [
-      {operation: 'add', data: 5},
-      {operation: 'multiply', data: 3},
-      {operation: 'divide', data: 10}
-    ]
-
-    for (const op of operations) {
-      await channel.call(op)
-      await new Promise(resolve => setTimeout(resolve, 30))
-    }
-
-    // Check history
-    const history = channel.getHistory()
-    expect(history.length).toBeGreaterThan(0)
-    expect(history.length).toBeLessThanOrEqual(operations.length)
-
-    // Verify history entries have correct structure
-    if (history.length > 0) {
-      const entry = history[0]
-      expect(entry.timestamp).toBeDefined()
-      expect(entry.payload).toBeDefined()
-      expect(entry.response).toBeDefined()
-      expect(typeof entry.response.ok).toBe('boolean')
-    }
-
-    // Test history clearing
-    channel.clearHistory()
-    const clearedHistory = channel.getHistory()
-    expect(clearedHistory.length).toBe(0)
-
-    channel.forget()
-  })
-
-  /**
    * Test subscription management and cleanup
    */
   it('should handle subscription cleanup correctly', async () => {

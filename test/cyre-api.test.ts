@@ -473,89 +473,6 @@ describe('Cyre API Tests', () => {
   })
 
   /**
-   * Middleware Tests
-   */
-  describe('Middleware', () => {
-    it('should register and apply middleware', async () => {
-      const actionId = `middleware-test-${Date.now()}`
-      const middlewareId = `test-middleware-${Date.now()}`
-      let middlewareCalled = false
-      let handlerCalled = false
-      let receivedPayload = null
-
-      // Register middleware that tracks what it processes
-      const middlewareResult = cyre.middleware(
-        middlewareId,
-        async (action, payload) => {
-          middlewareCalled = true
-          // Return transformed payload
-          return {
-            action,
-            payload: {...payload, transformed: true}
-          }
-        }
-      )
-
-      expect(middlewareResult.ok).toBe(true)
-
-      // Register handler
-      cyre.on(actionId, payload => {
-        handlerCalled = true
-        receivedPayload = payload
-        return {handled: true}
-      })
-
-      // Create action with middleware
-      cyre.action({
-        id: actionId,
-        type: 'middleware-test',
-        middleware: [middlewareId]
-      })
-
-      // Call action
-      await cyre.call(actionId, {original: true})
-
-      // Verify handler was called
-      expect(handlerCalled).toBe(true)
-      expect(receivedPayload).toEqual({original: true})
-
-      // Note: Current middleware implementation is limited
-      // Full middleware integration would require more work
-    })
-
-    it('should handle middleware rejection', async () => {
-      const actionId = `middleware-reject-${Date.now()}`
-      const middlewareId = `reject-middleware-${Date.now()}`
-      let handlerCalled = false
-
-      // Register rejecting middleware
-      cyre.middleware(middlewareId, async () => {
-        return null // Reject the action
-      })
-
-      // Register handler
-      cyre.on(actionId, () => {
-        handlerCalled = true
-        return {handled: true}
-      })
-
-      // Create action with middleware
-      cyre.action({
-        id: actionId,
-        type: 'middleware-reject-test',
-        middleware: [middlewareId]
-      })
-
-      // Call action - should still work in current implementation
-      const result = await cyre.call(actionId, {test: true})
-
-      // Note: Current implementation doesn't fully integrate middleware rejection
-      expect(result.ok).toBe(true)
-      expect(handlerCalled).toBe(true)
-    })
-  })
-
-  /**
    * System Management Tests
    */
   describe('System Management', () => {
@@ -593,6 +510,7 @@ describe('Cyre API Tests', () => {
 
       // Forget action
       const result = cyre.forget(actionId)
+
       expect(result).toBe(true)
 
       // Verify action is gone
@@ -691,72 +609,6 @@ describe('Cyre API Tests', () => {
   })
 
   /**
-   * History Tests
-   */
-  describe('History Management', () => {
-    it('should track execution history', async () => {
-      const actionId = `history-test-${Date.now()}`
-
-      cyre.on(actionId, () => ({handled: true}))
-      cyre.action({id: actionId, type: 'history-test'})
-
-      // Execute action multiple times
-      await cyre.call(actionId, {call: 1})
-      await cyre.call(actionId, {call: 2})
-      await cyre.call(actionId, {call: 3})
-
-      const history = cyre.getHistory(actionId)
-      expect(Array.isArray(history)).toBe(true)
-      expect(history.length).toBeGreaterThan(0)
-
-      // Check history entry structure
-      if (history.length > 0) {
-        const entry = history[0]
-        expect(entry.actionId).toBe(actionId)
-        expect(typeof entry.timestamp).toBe('number')
-        expect(entry.result).toBeDefined()
-      }
-    })
-
-    it('should clear history', async () => {
-      const actionId = `history-clear-${Date.now()}`
-
-      cyre.on(actionId, () => ({handled: true}))
-      cyre.action({id: actionId, type: 'history-clear-test'})
-
-      await cyre.call(actionId)
-
-      // Verify history exists
-      let history = cyre.getHistory(actionId)
-      expect(history.length).toBeGreaterThan(0)
-
-      // Clear specific action history
-      cyre.clearHistory(actionId)
-
-      // Verify history is cleared
-      history = cyre.getHistory(actionId)
-      expect(history.length).toBe(0)
-    })
-
-    it('should get all history', async () => {
-      const actionId1 = `history-all-1-${Date.now()}`
-      const actionId2 = `history-all-2-${Date.now()}`
-
-      cyre.on(actionId1, () => ({handled: true}))
-      cyre.on(actionId2, () => ({handled: true}))
-      cyre.action({id: actionId1, type: 'history-all-test'})
-      cyre.action({id: actionId2, type: 'history-all-test'})
-
-      await cyre.call(actionId1)
-      await cyre.call(actionId2)
-
-      const allHistory = cyre.getHistory()
-      expect(Array.isArray(allHistory)).toBe(true)
-      expect(allHistory.length).toBeGreaterThan(0)
-    })
-  })
-
-  /**
    * Error Handling Tests
    */
   describe('Error Handling', () => {
@@ -788,27 +640,6 @@ describe('Cyre API Tests', () => {
       const result = await cyre.call(actionId)
       // The system should handle the error gracefully
       expect(result).toBeDefined()
-    })
-  })
-
-  /**
-   * Performance Timer Tests
-   */
-  describe('Performance Timer', () => {
-    it('should create and use performance timer', () => {
-      const timer = cyre.createPerformanceTimer()
-      expect(timer).toBeDefined()
-
-      timer.start()
-      timer.markStage('test-stage')
-
-      const totalTime = timer.getTotalTime()
-      expect(typeof totalTime).toBe('number')
-      expect(totalTime).toBeGreaterThanOrEqual(0)
-
-      const stageTime = timer.getStageTime('test-stage')
-      expect(typeof stageTime).toBe('number')
-      expect(stageTime).toBeGreaterThanOrEqual(0)
     })
   })
 })

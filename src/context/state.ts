@@ -4,7 +4,7 @@
 import {log} from '../components/cyre-log'
 import type {ActionPayload, IO, ISubscriber, Timer} from '../types/interface'
 import {isEqual} from '../libs/utils'
-import {metricsState, type QuantumState} from './metrics-state'
+import {metricsState, type MetricsState} from './metrics-state'
 
 import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
@@ -78,7 +78,6 @@ export const io = {
       }
 
       // Record call in quantum state
-      metricsState.recordCall(ioState.priority?.level)
     } catch (error) {
       log.critical(
         `IO state corruption detected: ${
@@ -344,4 +343,4 @@ export const stores = Object.freeze({
 })
 
 // Export types
-export type {QuantumState, StateKey}
+export type {MetricsState as QuantumState, StateKey}

@@ -20,6 +20,7 @@ CYRE TODO: * multi .on subscribers to single .action channel
 * * useCyre can take optional ID. if set, it uses that id instead of generated id. in that way cyre.call can access that useCyre remotely
 * * complete experimental cyre/ssr
 * * complete experimental cyre/stream ✅ experimental
+* * state-machine: experimental stage
 * * improve action pipeline. each channel in cyre are independent. so action pipeline should proactively compile actions that apply to specific channel when that channel run. the rest should run with zero overhead. 
 * * Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
 * * more test coverage
@@ -27,6 +28,8 @@ CYRE TODO: * multi .on subscribers to single .action channel
 * * publish to NPM these are my current todo list. what do you think? any todo suggestions?
 
 * instead of endless cyre.api create system channels for users to subscribe for example on initialize, on error, on stress high etc
+* persistent state. possibly to load cyre from saved state and sync with server
+* send and receive call with server
 
 
 */
@@ -38,13 +41,12 @@ import {useCyre} from './hooks/use-cyre'
 import {log} from './components/cyre-log'
 
 // Import stream system
-import * as StreamSystem from './stream'
+import {createStream} from './stream'
 
 // Main exports - ensure these are properly exported
-export {Cyre, cyre, log, useCyre, cyreCompose}
+export {Cyre, cyre, log, useCyre, cyreCompose, createStream}
 
 // Export stream system
-export const Stream = StreamSystem
 
 // Export types with unique names to avoid conflicts
 export type {
@@ -65,9 +67,6 @@ export type {
   CyreHook as CyreHookType,
   CyreChannel as CyreChannelType
 } from './types/hooks-interface'
-
-// Export history types
-export type {HistoryEntry, HistoryStats, HistoryQuery} from './types/history'
 
 // Export composition types
 export type {
@@ -95,7 +94,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.cyre = cyre
   globalThis.useCyre = useCyre
   globalThis.cyreCompose = cyreCompose
-  globalThis.CyreStream = StreamSystem
+  globalThis.CyreStream = createStream
 }
 
 // For browser environments that don't have globalThis
@@ -103,5 +102,5 @@ if (typeof window !== 'undefined') {
   ;(window as any).cyre = cyre
   ;(window as any).useCyre = useCyre
   ;(window as any).cyreCompose = cyreCompose
-  ;(window as any).CyreStream = StreamSystem
+  ;(window as any).CyreStream = createStream
 }

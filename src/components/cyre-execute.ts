@@ -20,7 +20,8 @@ import {metricsReport} from '../context/metrics-report'
 interface ExecutionResult {
   ok: boolean
   payload?: any
-  error?: string
+  error?: boolean
+  message?: string
   intraLink?: {
     id: string
     payload?: ActionPayload
@@ -37,7 +38,7 @@ export const cyreExecute = async (
   if (!action?.id || !handler) {
     return {
       ok: false,
-      error: 'Invalid action or handler'
+      message: 'Invalid action or handler'
     }
   }
 
@@ -59,12 +60,8 @@ export const cyreExecute = async (
 
     io.trackExecution(action.id, executionTime)
 
-    log.debug(`Action ${action.id} executed in ${executionTime.toFixed(2)}ms`)
-
     // Check for IntraLink (chain reaction)
     if (result && typeof result === 'object' && 'id' in result && result.id) {
-      log.debug(`Chain reaction detected: ${action.id} -> ${result.id}`)
-
       return {
         ok: true,
         payload: result,
@@ -80,7 +77,6 @@ export const cyreExecute = async (
       payload: result
     }
   } catch (error) {
-    const executionTime = performance.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)
 
     log.error(`Execution failed for ${action.id}: ${errorMessage}`)
@@ -102,7 +98,8 @@ export const cyreExecute = async (
 
     return {
       ok: false,
-      error: errorMessage
+      message: errorMessage,
+      error: true
     }
   }
 }

@@ -128,10 +128,10 @@ export const MSG = {
   // Subscription Related
   SUBSCRIPTION_INVALID_PARAMS: 'Invalid subscription parameters provided',
   SUBSCRIPTION_EXISTS: 'Subscriber exists - updating configuration',
-  SUBSCRIPTION_SUCCESS_SINGLE: 'Subscribed to event',
-  SUBSCRIPTION_SUCCESS_MULTIPLE: 'Subscribed to multiple events',
+  SUBSCRIPTION_SUCCESS_SINGLE: 'Subscribed to channel',
+  SUBSCRIPTION_SUCCESS_MULTIPLE: 'Subscribed to multiple channels',
   SUBSCRIPTION_INVALID_TYPE: 'Invalid subscriber type specified',
-  SUBSCRIPTION_INVALID_HANDLER: 'Invalid event handler provided',
+  SUBSCRIPTION_INVALID_HANDLER: 'Invalid channel handler provided',
   SUBSCRIPTION_FAILED: 'Subscription failed: check configuration',
 
   // Call Related

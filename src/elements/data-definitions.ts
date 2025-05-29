@@ -186,6 +186,35 @@ const dataDefinitions = {
       message: `'${attribute}'  action.at is an experimental feature, not applied yet`,
       required: false
     }
+  },
+  // payload required validation feature
+  required: (attribute: any = false) => {
+    // Handle boolean (simple required)
+    if (typeof attribute === 'boolean') {
+      return {ok: true, payload: attribute}
+    }
+
+    // Handle string values for specific requirements
+    if (typeof attribute === 'string') {
+      const validValues = ['non-empty']
+      if (validValues.includes(attribute)) {
+        return {ok: true, payload: attribute}
+      }
+
+      return {
+        ok: false,
+        payload: false,
+        message: `'${attribute}' invalid action.required value. Use boolean or 'non-empty'`,
+        required: false
+      }
+    }
+
+    return {
+      ok: false,
+      payload: false,
+      message: `'${attribute}' action.required must be boolean or 'non-empty'`,
+      required: false
+    }
   }
 }
 export default dataDefinitions

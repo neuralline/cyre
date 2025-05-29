@@ -601,7 +601,7 @@ export const TimeKeeper = {
     interval: number | TimerDuration,
     callback: () => void,
     repeat?: TimerRepeat,
-    id: string = crypto.randomUUID(),
+    id: string = `keep-${crypto.randomUUID()}`,
     delay?: number
   ): Result<Timer, Error> => {
     try {
@@ -635,12 +635,6 @@ export const TimeKeeper = {
       // Schedule first execution
       scheduleNext(formation)
 
-      log.debug(
-        `Timer created: ${id} (interval: ${intervalMs}ms${
-          delay !== undefined ? `, delay: ${delay}ms` : ''
-        })`
-      )
-
       return {kind: 'ok', value: formation}
     } catch (error) {
       log.error(`Timer creation failed: ${error}`)
@@ -651,7 +645,29 @@ export const TimeKeeper = {
       }
     }
   },
+  wait: async (
+    duration: number,
+    id: string = `wait-${crypto.randomUUID()}`
+  ): Promise<void> => {
+    return new Promise(resolve => {
+      // Clear any existing timer first
+      _quartz.clearTimer(id)
 
+      // Use simple setTimeout
+      const timeoutId = setTimeout(() => {
+        _quartz.activeTimers.delete(id)
+        resolve()
+      }, duration)
+
+      // Store for cancellation
+      _quartz.activeTimers.set(id, {
+        timeoutId,
+        startTime: Date.now(),
+        executionId: `${id}-${Date.now()}`,
+        isExecuting: false
+      })
+    })
+  },
   forget: (id: string): void => {
     _quartz.clearTimer(id)
 
@@ -661,7 +677,6 @@ export const TimeKeeper = {
     }
 
     timeline.forget(id)
-    log.debug(`Timer forgotten: ${id}`)
   },
 
   pause: (id?: string): void => {

@@ -1,22 +1,19 @@
 // src/app.ts
 
-import type {
-  IO,
-  ActionPayload,
-  CyreResponse,
-  IMiddleware,
-  MiddlewareFunction
-} from './types/interface'
+import type {IO, ActionPayload, CyreResponse} from './types/interface'
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
-import {io, subscribers, timeline, middlewares} from './context/state'
+import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
-import {historyState} from './context/history-state'
 import {metricsReport} from './context/metrics-report'
-import {registerSingleAction} from './components/cyre-actions'
+import {
+  applyBuiltInProtections,
+  registerSingleAction
+} from './components/cyre-actions'
 import {processCall, scheduleCall} from './components/cyre-call'
+import {stateMachineService} from './state-machine/state-machine-service'
 
 /* 
     Neural Line
@@ -25,17 +22,17 @@ import {processCall, scheduleCall} from './components/cyre-call'
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
     Version 4.1.0 2025
 
-     example use:
-      cyre.action({id: 'uber', payload: 44085648634})
-      cyre.on('uber', number => {
-          console.log('Calling Uber: ', number)
-      })
-      cyre.call('uber') 
+        example use:
+        cyre.action({id: 'uber', payload: 44085648634})
+        cyre.on('uber', number => {
+            console.log('Calling Uber @', number)
+        })
+        cyre.call('uber') 
 
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
     Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
 
-    - Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+    Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
 */
 
 /**
@@ -59,7 +56,6 @@ const initializeBreathing = (): void => {
 
 // Track initialization state
 let isInitialized = false
-let isLocked = false
 
 /**
  * Action registration - simplified without external middleware
@@ -67,7 +63,7 @@ let isLocked = false
 const action = (
   attribute: IO | IO[]
 ): {ok: boolean; message: string; payload?: any} => {
-  if (isLocked) {
+  if (metricsState.isLocked) {
     log.error(MSG.SYSTEM_LOCKED_CHANNELS)
     return {ok: false, message: MSG.SYSTEM_LOCKED_CHANNELS}
   }
@@ -139,21 +135,60 @@ export const call = async (
       }
     }
 
-    // Check if action requires timekeeper
+    // UNIFIED PROTECTION PIPELINE - Applied once before any execution path
+    const protectionResult = await applyBuiltInProtections(
+      actionConfig,
+      payload
+    )
+
+    if (!protectionResult.ok) {
+      return {
+        ok: false,
+        payload: protectionResult.payload,
+        message: protectionResult.message,
+        metadata: {
+          executionPath: 'blocked-by-protection',
+          protection: 'protectionResult?.protection',
+          ...protectionResult.metadata
+        }
+      }
+    }
+
+    // Handle delayed execution (debounce) - execution scheduled, return success
+    if (protectionResult.delayed) {
+      return {
+        ok: true,
+        payload: protectionResult.payload,
+        message: protectionResult.message,
+        metadata: {
+          executionPath: 'delayed-by-protection',
+          delayed: true,
+          duration: protectionResult.duration,
+          ...protectionResult.metadata
+        }
+      }
+    }
+
+    // Use processed payload from protection pipeline
+    const processedPayload = protectionResult.payload
+
+    // Determine execution path after protections pass
     const requiresTimekeeper = !!(
-      actionConfig.interval ||
-      actionConfig.delay !== undefined ||
-      (actionConfig.repeat !== undefined &&
-        actionConfig.repeat !== 1 &&
-        actionConfig.repeat !== 0)
+      (
+        actionConfig.interval ||
+        actionConfig.delay !== undefined ||
+        (actionConfig.repeat !== undefined &&
+          actionConfig.repeat !== 1 &&
+          actionConfig.repeat !== 0)
+      ) // Note: repeat 0 already blocked by protections
     )
 
     let result: CyreResponse
 
     if (requiresTimekeeper) {
-      result = await scheduleCall(actionConfig, payload)
+      result = await scheduleCall(actionConfig, processedPayload)
     } else {
-      result = await processCall(actionConfig, payload)
+      result = await processCall(actionConfig, processedPayload)
     }
 
     // Handle IntraLink chain reactions
@@ -190,38 +225,6 @@ export const call = async (
     }
   }
 }
-
-/**
- * Middleware registration
- */
-const middleware = (
-  id: string,
-  fn: MiddlewareFunction
-): {ok: boolean; message: string} => {
-  try {
-    if (!id || typeof id !== 'string') {
-      return {ok: false, message: 'Middleware ID must be a string'}
-    }
-
-    if (typeof fn !== 'function') {
-      return {ok: false, message: 'Middleware must be a function'}
-    }
-
-    const middlewareEntry: IMiddleware = {id, fn}
-    middlewares.add(middlewareEntry)
-
-    log.debug(`Middleware registered: ${id}`)
-    return {ok: true, message: `Middleware registered: ${id}`}
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Middleware registration failed: ${errorMessage}`)
-    return {
-      ok: false,
-      message: `Middleware registration failed: ${errorMessage}`
-    }
-  }
-}
-
 /**
  * Forget action - simplified cleanup
  */
@@ -265,9 +268,11 @@ const clear = (): void => {
     io.clear()
     subscribers.clear()
     timeline.clear()
-    historyState.clearAll()
     metricsReport.reset()
     metricsState.reset()
+
+    // Clear state machines
+    stateMachineService.clear()
 
     log.success('System cleared')
     metricsReport.sensor.log('system', 'success', 'system-clear', {
@@ -295,14 +300,15 @@ export const cyre = {
       TimeKeeper.resume()
 
       log.sys(MSG.QUANTUM_HEADER)
-      log.success('Cyre initialized')
+      log.success('Cyre initialized with state machine support')
 
       metricsReport.sensor.log('system', 'success', 'system-initialization', {
         timestamp: Date.now(),
         features: [
           'simplified-core',
           'built-in-protections',
-          'breathing-system'
+          'breathing-system',
+          'state-machines'
         ]
       })
 
@@ -310,7 +316,7 @@ export const cyre = {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      log.error(`Initialization failed: ${errorMessage}`)
+      log.critical(`Cyre failed to initialize : ${errorMessage}`)
       metricsReport.sensor.error(
         'system',
         errorMessage,
@@ -344,7 +350,6 @@ export const cyre = {
     metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
   },
   lock: (): {ok: boolean; message: string; payload: null} => {
-    isLocked = true
     metricsState.lock()
     metricsReport.sensor.log('system', 'critical', 'system-lock')
     return {ok: true, message: 'System locked', payload: null}
@@ -428,25 +433,6 @@ export const cyre = {
     }
   },
 
-  // History methods
-  getHistory: (actionId?: string) => {
-    return actionId ? historyState.getChannel(actionId) : historyState.getAll()
-  },
-  clearHistory: (actionId?: string): void => {
-    if (actionId) {
-      historyState.clearChannel(actionId)
-      metricsReport.sensor.log(actionId, 'info', 'history-clear', {
-        scope: 'single'
-      })
-    } else {
-      historyState.clearAll()
-      metricsReport.sensor.log('system', 'info', 'history-clear', {
-        scope: 'all'
-      })
-    }
-  },
-
-  // Report methods
   exportMetrics: (filter?: {
     actionId?: string
     eventType?: string
@@ -455,6 +441,7 @@ export const cyre = {
   }) => {
     return metricsReport.exportEvents(filter)
   },
+
   getMetricsReport: () => {
     const systemStats = metricsReport.getSystemStats()
     const breathingState = metricsState.get().breathing
@@ -523,24 +510,8 @@ export const cyre = {
       log.error(`Failed to clear timer ${timerId}: ${error}`)
       return false
     }
-  }
-}
-/**
- * Factory function for creating new Cyre instances
- */
-export const Cyre = (instanceId: string) => {
-  // For now, return the main instance but with isolated state
-  // This is a simplified implementation for testing
-  return {
-    ...cyre,
-    initialize: () => {
-      log.debug(`Initializing Cyre instance: ${instanceId}`)
-      return cyre.initialize()
-    }
-  }
-}
+  },
 
-// Initialize on import
-cyre.initialize()
-
-export default cyre
+  // State machine service
+  stateMachine: stateMachineService
+}

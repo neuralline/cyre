@@ -1,430 +1,459 @@
-// Usage Examples for Cyre Stream System
+// example/stream.ts
+// Comprehensive examples for Cyre Stream system in Node.js environment
 
-import { cyre, Stream, operators } from 'cyre'
+import {
+  createStream,
+  of,
+  interval,
+  timer,
+  merge,
+  operators
+} from '../src/stream'
+import {cyre} from '../src'
 
-// Basic Stream Creation and Usage
-const basicExample = () => {
-  // Create a stream
-  const numberStream = Stream.create<number>()
+/*
 
-  // Subscribe to stream
-  const subscription = numberStream.subscribe({
-    next: value => console.log('Received:', value),
-    error: error => console.error('Error:', error),
+      C.Y.R.E - S.T.R.E.A.M - E.X.A.M.P.L.E.S
+      
+      Comprehensive Node.js examples demonstrating:
+      - Basic stream creation and subscription
+      - Operator composition and chaining
+      - Error handling and resource management
+      - Integration with Cyre's protection mechanisms
+      - Real-world use cases and patterns
+
+*/
+
+// Initialize Cyre system
+cyre.initialize()
+
+/**
+ * Example 1: Basic Stream Creation and Subscription
+ */
+async function basicStreamExample(): Promise<void> {
+  console.log('\n=== Basic Stream Example ===')
+
+  // Create a simple stream
+  const stream = createStream<number>({
+    id: 'basic-stream',
+    debug: true
+  })
+
+  // Subscribe to emissions
+  const subscription = stream.subscribe({
+    next: value => console.log(`Received: ${value}`),
+    error: error => console.error(`Error: ${error.message}`),
     complete: () => console.log('Stream completed')
   })
 
-  // Emit values
-  numberStream.next(1)
-  numberStream.next(2)
-  numberStream.next(3)
-  numberStream.complete()
+  // Emit some values
+  await stream.next(1)
+  await stream.next(2)
+  await stream.next(3)
 
-  // Clean up
+  // Complete the stream
+  stream.complete()
+
+  // Cleanup
   subscription.unsubscribe()
 }
 
-// Using Factory Functions
-const factoryExample = () => {
-  // Create from values
-  const staticStream = Stream.of(1, 2, 3, 4, 5)
-  
-  // Create from array
-  const arrayStream = Stream.from([10, 20, 30])
-  
-  // Create interval stream
-  const intervalStream = Stream.interval(1000) // Emits 0, 1, 2... every second
-  
-  // Create timer stream
-  const timerStream = Stream.timer(5000) // Emits once after 5 seconds
+/**
+ * Example 2: Factory Functions
+ */
+async function factoryFunctionsExample(): Promise<void> {
+  console.log('\n=== Factory Functions Example ===')
+
+  // Create stream from static values
+  const staticStream = of(1, 2, 3, 4, 5)
+
+  staticStream.subscribe({
+    next: value => console.log(`Static stream value: ${value}`),
+    complete: () => console.log('Static stream completed')
+  })
+
+  // Wait a bit for async emissions
+  await new Promise(resolve => setTimeout(resolve, 100))
+
+  // Create interval stream (emits incrementing numbers)
+  console.log('Starting interval stream...')
+  const intervalStream = interval(500) // Every 500ms
+
+  const intervalSub = intervalStream
+    .take(5) // Only take 5 values
+    .subscribe({
+      next: value => console.log(`Interval value: ${value}`),
+      complete: () => console.log('Interval stream completed')
+    })
+
+  // Let it run for a bit
+  await new Promise(resolve => setTimeout(resolve, 3000))
+  intervalSub.unsubscribe()
+
+  // Timer stream (emits once after delay)
+  console.log('Starting timer stream...')
+  const timerStream = timer(1000) // After 1 second
+
+  timerStream.subscribe({
+    next: () => console.log('Timer fired!'),
+    complete: () => console.log('Timer completed')
+  })
+
+  await new Promise(resolve => setTimeout(resolve, 1500))
 }
 
-// Stream Transformation with Operators
-const transformationExample = () => {
-  const dataStream = Stream.create<number>()
+/**
+ * Example 3: Transformation Operators
+ */
+async function transformationOperatorsExample(): Promise<void> {
+  console.log('\n=== Transformation Operators Example ===')
 
-  const processedStream = dataStream.pipe(
-    operators.map(x => x * 2),           // Double the values
-    operators.filter(x => x > 10),       // Keep only values > 10
-    operators.take(5),                   // Take first 5 values
-    operators.distinctUntilChanged(),    // Remove consecutive duplicates
-    operators.debounce(300)              // Debounce rapid emissions
-  )
+  const source = createStream<number>()
 
-  processedStream.subscribe(value => 
-    console.log('Processed value:', value)
-  )
+  // Chain multiple operators
+  const transformed = source
+    .map(x => x * 2) // Double each value
+    .filter(x => x > 5) // Only values greater than 5
+    .map(x => `Value: ${x}`) // Convert to string
+    .take(3) // Take only first 3 that pass
 
-  // Emit test data
-  dataStream.next(3)  // 6, filtered out
-  dataStream.next(8)  // 16, passes
-  dataStream.next(12) // 24, passes
-  dataStream.next(12) // 24, filtered by distinctUntilChanged
-  dataStream.next(15) // 30, passes
+  transformed.subscribe({
+    next: value => console.log(`Transformed: ${value}`),
+    complete: () => console.log('Transformation completed')
+  })
+
+  // Emit test values
+  for (const value of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    await source.next(value)
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
 }
 
-// Using Cyre's Built-in Protections
-const protectionExample = () => {
-  const clickStream = Stream.create<MouseEvent>()
+/**
+ * Example 4: Timing Operators with Cyre Integration
+ */
+async function timingOperatorsExample(): Promise<void> {
+  console.log('\n=== Timing Operators Example ===')
 
-  // Use Cyre's built-in throttle and debounce
-  const controlledStream = clickStream.pipe(
-    operators.throttle(1000),  // Max 1 per second
-    operators.debounce(300),   // Wait 300ms after last click
-    operators.map(event => ({ x: event.clientX, y: event.clientY }))
-  )
+  const source = createStream<string>()
 
-  controlledStream.subscribe(coords =>
-    console.log('Click at:', coords)
-  )
+  // Debounce using Cyre's built-in protection
+  const debounced = source.debounce(300)
+
+  debounced.subscribe({
+    next: value => console.log(`Debounced: ${value}`),
+    complete: () => console.log('Debounced stream completed')
+  })
+
+  // Simulate rapid user input
+  console.log('Simulating rapid input...')
+  const inputs = ['a', 'ab', 'abc', 'abcd', 'abcde']
+
+  for (const input of inputs) {
+    await source.next(input)
+    await new Promise(resolve => setTimeout(resolve, 100)) // Rapid input
+  }
+
+  // Wait for debounce to complete
+  await new Promise(resolve => setTimeout(resolve, 500))
+  source.complete()
 }
 
-// Stream Combination
-const combinationExample = () => {
-  const stream1 = Stream.interval(1000).pipe(operators.map(x => `A${x}`))
-  const stream2 = Stream.interval(1500).pipe(operators.map(x => `B${x}`))
+/**
+ * Example 5: Error Handling
+ */
+async function errorHandlingExample(): Promise<void> {
+  console.log('\n=== Error Handling Example ===')
+
+  const source = createStream<number>()
+
+  // Stream that might error
+  const processed = source
+    .map(x => {
+      if (x === 3) throw new Error('Number 3 is not allowed!')
+      return x * 2
+    })
+    .catchError(error => {
+      console.log(`Caught error: ${error.message}, using fallback value`)
+      return -1
+    })
+
+  processed.subscribe({
+    next: value => console.log(`Processed: ${value}`),
+    error: error => console.error(`Unexpected error: ${error.message}`),
+    complete: () => console.log('Error handling completed')
+  })
+
+  // Emit values including the problematic one
+  for (const value of [1, 2, 3, 4, 5]) {
+    await source.next(value)
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+
+  source.complete()
+}
+
+/**
+ * Example 6: Stream Combination
+ */
+async function streamCombinationExample(): Promise<void> {
+  console.log('\n=== Stream Combination Example ===')
+
+  // Create two source streams
+  const stream1 = createStream<string>()
+  const stream2 = createStream<number>()
 
   // Merge streams
   const merged = stream1.merge(stream2)
-  merged.subscribe(value => console.log('Merged:', value))
 
-  // Zip streams
-  const zipped = stream1.zip(stream2, (a, b) => `${a}-${b}`)
-  zipped.subscribe(value => console.log('Zipped:', value))
+  merged.subscribe({
+    next: value => console.log(`Merged: ${value}`),
+    complete: () => console.log('Merged stream completed')
+  })
 
-  // Combine latest
-  const combined = Stream.combineLatest(stream1, stream2)
-  combined.subscribe(([a, b]) => console.log('Combined:', a, b))
+  // Zip streams together
+  const zipped = stream1.zip(stream2)
+
+  zipped.subscribe({
+    next: ([str, num]) => console.log(`Zipped: [${str}, ${num}]`),
+    complete: () => console.log('Zipped stream completed')
+  })
+
+  // Emit to both streams
+  await stream1.next('hello')
+  await stream2.next(1)
+
+  await stream1.next('world')
+  await stream2.next(2)
+
+  await stream1.next('!')
+  await stream2.next(3)
+
+  // Complete both streams
+  stream1.complete()
+  stream2.complete()
+
+  await new Promise(resolve => setTimeout(resolve, 100))
 }
 
-// Error Handling
-const errorHandlingExample = () => {
-  const riskyStream = Stream.create<number>()
+/**
+ * Example 7: Advanced Operators
+ */
+async function advancedOperatorsExample(): Promise<void> {
+  console.log('\n=== Advanced Operators Example ===')
 
-  const safeStream = riskyStream.pipe(
-    operators.map(x => {
-      if (x < 0) throw new Error('Negative number!')
-      return x * 2
-    }),
-    operators.catchError((error, value) => {
-      console.warn('Caught error:', error.message, 'for value:', value)
-      return 0 // Fallback value
-    }),
-    operators.retry(3) // Retry up to 3 times
+  const source = createStream<number>()
+
+  // Using pipe for functional composition
+  const processed = source.pipe(
+    stream => stream.map(x => x * 2),
+    stream => stream.filter(x => x % 4 === 0),
+    stream => stream.distinctUntilChanged(),
+    stream => stream.take(5)
   )
 
-  safeStream.subscribe(value => console.log('Safe value:', value))
+  processed.subscribe({
+    next: value => console.log(`Piped result: ${value}`),
+    complete: () => console.log('Advanced operators completed')
+  })
 
-  riskyStream.next(5)   // OK: 10
-  riskyStream.next(-1)  // Error caught, returns 0
-  riskyStream.next(3)   // OK: 6
+  // Emit sequence
+  const sequence = [1, 2, 2, 3, 4, 4, 5, 6, 7, 8, 8, 9, 10]
+  for (const value of sequence) {
+    await source.next(value)
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+
+  source.complete()
 }
 
-// Advanced Operators
-const advancedExample = () => {
-  const sourceStream = Stream.create<string>()
+/**
+ * Example 8: Real-world Use Case - Data Processing Pipeline
+ */
+async function dataProcessingPipelineExample(): Promise<void> {
+  console.log('\n=== Data Processing Pipeline Example ===')
 
-  const advancedStream = sourceStream.pipe(
-    operators.bufferCount(3),           // Collect 3 items into arrays
-    operators.map(batch => batch.join(',')), // Join arrays
-    operators.scan((acc, current) => `${acc}|${current}`, ''), // Accumulate
-    operators.sample(2000),             // Sample every 2 seconds
-    operators.distinctUntilChanged(),   // Remove consecutive duplicates
-    operators.share()                   // Share among multiple subscribers
-  )
+  // Simulate incoming data stream
+  const dataStream = createStream<{
+    id: number
+    value: string
+    timestamp: number
+  }>()
+
+  // Processing pipeline
+  const processedData = dataStream
+    .filter(data => data.value.length > 0) // Filter empty values
+    .map(data => ({
+      ...data,
+      processed: true,
+      normalizedValue: data.value.toLowerCase().trim()
+    }))
+    .debounce(200) // Debounce rapid updates
+    .distinctUntilChanged() // Skip duplicates
+
+  // Subscribe to processed data
+  processedData.subscribe({
+    next: data => {
+      console.log(`Processed data:`, {
+        id: data.id,
+        original: data.value,
+        normalized: data.normalizedValue,
+        timestamp: new Date(data.timestamp).toISOString()
+      })
+    },
+    error: error => console.error(`Processing error: ${error.message}`),
+    complete: () => console.log('Data processing completed')
+  })
+
+  // Simulate incoming data
+  const testData = [
+    {id: 1, value: 'Hello World', timestamp: Date.now()},
+    {id: 2, value: '  TEST  ', timestamp: Date.now() + 50},
+    {id: 3, value: '', timestamp: Date.now() + 100}, // Will be filtered
+    {id: 4, value: 'Final Item', timestamp: Date.now() + 150}
+  ]
+
+  for (const data of testData) {
+    await dataStream.next(data)
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+
+  // Wait for debounce
+  await new Promise(resolve => setTimeout(resolve, 300))
+  dataStream.complete()
+}
+
+/**
+ * Example 9: Memory Management and Cleanup
+ */
+async function memoryManagementExample(): Promise<void> {
+  console.log('\n=== Memory Management Example ===')
+
+  // Create stream with explicit cleanup
+  const stream = createStream<number>({
+    id: 'cleanup-demo',
+    debug: true
+  })
+
+  // Track subscriptions for proper cleanup
+  const subscriptions = []
 
   // Multiple subscribers
-  advancedStream.subscribe(value => console.log('Sub 1:', value))
-  advancedStream.subscribe(value => console.log('Sub 2:', value))
+  subscriptions.push(
+    stream.subscribe(value => console.log(`Subscriber 1: ${value}`))
+  )
 
-  // Emit data
-  sourceStream.next('A')
-  sourceStream.next('B')
-  sourceStream.next('C') // Will buffer and emit as "A,B,C"
+  subscriptions.push(
+    stream.subscribe(value => console.log(`Subscriber 2: ${value * 2}`))
+  )
+
+  // Emit some values
+  await stream.next(1)
+  await stream.next(2)
+
+  // Demonstrate proper cleanup
+  console.log('Cleaning up subscriptions...')
+  subscriptions.forEach(sub => sub.unsubscribe())
+
+  // Stream should handle emissions to unsubscribed observers gracefully
+  await stream.next(3) // This might not be logged
+
+  stream.complete()
+  console.log('Memory management example completed')
 }
 
-// Integration with Cyre Actions
-const cyreIntegrationExample = () => {
-  // Set up Cyre action
-  cyre.action({
-    id: 'user-action',
-    throttle: 500,
-    debounce: 200
+/**
+ * Example 10: Integration with Cyre System
+ */
+async function cyreIntegrationExample(): Promise<void> {
+  console.log('\n=== Cyre Integration Example ===')
+
+  // Stream that integrates with Cyre's action system
+  const stream = createStream<{action: string; payload: any}>({
+    id: 'cyre-integration',
+    debug: false
   })
 
-  cyre.on('user-action', (data) => {
-    console.log('Cyre action executed:', data)
-    return { processed: true, timestamp: Date.now() }
-  })
-
-  // Create stream that triggers Cyre actions
-  const userStream = Stream.create<any>()
-
-  userStream.subscribe(async (data) => {
-    // Call Cyre action from stream
-    const result = await cyre.call('user-action', data)
-    console.log('Cyre result:', result)
-  })
-
-  // Emit data
-  userStream.next({ userId: 123, action: 'click' })
-}
-
-// Real-world Example: Search with Autocomplete
-const searchExample = () => {
-  const searchInput = document.querySelector('#search') as HTMLInputElement
-  const searchStream = Stream.create<string>()
-
-  // Set up search stream processing
-  const searchResults = searchStream.pipe(
-    operators.map(query => query.trim()),
-    operators.filter(query => query.length > 2),
-    operators.distinctUntilChanged(),
-    operators.debounce(300), // Wait for user to stop typing
-    operators.switchMap(query => 
-      // Switch to new search, canceling previous
-      Stream.create<string[]>().tap(async (stream) => {
+  // Process stream data through Cyre actions
+  stream
+    .map(data => data.payload)
+    .filter(payload => payload != null)
+    .subscribe({
+      next: async payload => {
+        // Use Cyre's call system for further processing
         try {
-          const response = await fetch(`/api/search?q=${query}`)
-          const results = await response.json()
-          stream.next(results)
-          stream.complete()
+          await cyre.call('process-stream-data', payload)
         } catch (error) {
-          stream.error(error instanceof Error ? error : new Error(String(error)))
+          console.error('Failed to process through Cyre:', error)
         }
-      })
-    ),
-    operators.catchError((error) => {
-      console.error('Search failed:', error)
-      return [] // Return empty results on error
-    })
-  )
-
-  // Display results
-  searchResults.subscribe(results => {
-    const resultsDiv = document.querySelector('#search-results')
-    if (resultsDiv) {
-      resultsDiv.innerHTML = results.map(item => `<div>${item}</div>`).join('')
-    }
-  })
-
-  // Connect input to stream
-  if (searchInput) {
-    searchInput.addEventListener('input', (event) => {
-      const target = event.target as HTMLInputElement
-      searchStream.next(target.value)
-    })
-  }
-}
-
-// Real-world Example: WebSocket Data Stream
-const websocketExample = () => {
-  const wsStream = Stream.create<any>()
-  const ws = new WebSocket('wss://api.example.com/live-data')
-
-  // Set up WebSocket integration
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      wsStream.next(data)
-    } catch (error) {
-      wsStream.error(new Error('Invalid JSON received'))
-    }
-  }
-
-  ws.onerror = (error) => {
-    wsStream.error(new Error('WebSocket error'))
-  }
-
-  ws.onclose = () => {
-    wsStream.complete()
-  }
-
-  // Process WebSocket data
-  const processedData = wsStream.pipe(
-    operators.filter(data => data.type === 'price_update'),
-    operators.map(data => ({
-      symbol: data.symbol,
-      price: parseFloat(data.price),
-      timestamp: Date.now()
-    })),
-    operators.bufferTime(1000), // Batch updates every second
-    operators.filter(batch => batch.length > 0),
-    operators.map(batch => ({
-      updates: batch,
-      count: batch.length,
-      avgPrice: batch.reduce((sum, item) => sum + item.price, 0) / batch.length
-    }))
-  )
-
-  processedData.subscribe(batch => {
-    console.log(`Processed ${batch.count} price updates, avg: ${batch.avgPrice}`)
-    // Update UI, save to database, etc.
-  })
-}
-
-// React Integration Example
-const reactIntegrationExample = () => {
-  // This would be inside a React component
-  const useStreamState = <T>(stream: Stream<T>, initialValue: T) => {
-    const [value, setValue] = React.useState<T>(initialValue)
-    
-    React.useEffect(() => {
-      const subscription = stream.subscribe({
-        next: setValue,
-        error: (error) => console.error('Stream error:', error)
-      })
-      
-      return () => subscription.unsubscribe()
-    }, [stream])
-    
-    return value
-  }
-
-  // Usage in component
-  const MyComponent = () => {
-    const dataStream = React.useMemo(() => Stream.interval(1000), [])
-    const currentValue = useStreamState(dataStream, 0)
-    
-    return <div>Current value: {currentValue}</div>
-  }
-}
-
-// Performance Monitoring with Streams
-const performanceExample = () => {
-  const performanceStream = Stream.create<PerformanceEntry>()
-
-  // Monitor performance entries
-  const observer = new PerformanceObserver((list) => {
-    list.getEntries().forEach(entry => {
-      performanceStream.next(entry)
-    })
-  })
-
-  observer.observe({ entryTypes: ['measure', 'navigation', 'resource'] })
-
-  // Process performance data
-  const performanceAnalysis = performanceStream.pipe(
-    operators.filter(entry => entry.entryType === 'measure'),
-    operators.bufferTime(5000), // Collect 5 seconds worth of data
-    operators.map(entries => ({
-      count: entries.length,
-      avgDuration: entries.reduce((sum, entry) => sum + entry.duration, 0) / entries.length,
-      maxDuration: Math.max(...entries.map(entry => entry.duration)),
-      minDuration: Math.min(...entries.map(entry => entry.duration))
-    })),
-    operators.filter(stats => stats.count > 0)
-  )
-
-  performanceAnalysis.subscribe(stats => {
-    console.log('Performance Stats:', stats)
-    
-    // Alert if performance degrades
-    if (stats.avgDuration > 100) {
-      console.warn('Performance degradation detected!')
-    }
-  })
-}
-
-// Custom Operator Example
-const customOperatorExample = () => {
-  // Create a custom operator
-  const takeEveryNth = <T>(n: number): operators.StreamOperator<T, T> => (source) => {
-    const result = Stream.create<T>()
-    let count = 0
-
-    const subscription = source.subscribe({
-      next: (value) => {
-        count++
-        if (count % n === 0) {
-          result.next(value)
-        }
-      },
-      error: (error) => result.error(error),
-      complete: () => result.complete()
-    })
-
-    // Clean up subscription when result stream completes
-    const originalComplete = result.complete
-    result.complete = () => {
-      subscription.unsubscribe()
-      originalComplete.call(result)
-    }
-
-    return result
-  }
-
-  // Use custom operator
-  const numberStream = Stream.interval(100)
-  const everyFifthNumber = numberStream.pipe(
-    takeEveryNth(5), // Take every 5th number
-    operators.take(10) // Take first 10 results
-  )
-
-  everyFifthNumber.subscribe(value => 
-    console.log('Every 5th number:', value)
-  )
-}
-
-// Memory Management Example
-const memoryManagementExample = () => {
-  const createManagedStream = <T>() => {
-    const stream = Stream.create<T>()
-    const subscriptions = new Set<{ unsubscribe(): void }>()
-
-    // Override subscribe to track subscriptions
-    const originalSubscribe = stream.subscribe.bind(stream)
-    stream.subscribe = (observer) => {
-      const subscription = originalSubscribe(observer)
-      subscriptions.add(subscription)
-      
-      // Override unsubscribe to remove from tracking
-      const originalUnsubscribe = subscription.unsubscribe
-      subscription.unsubscribe = () => {
-        subscriptions.delete(subscription)
-        originalUnsubscribe.call(subscription)
       }
-      
-      return subscription
-    }
+    })
 
-    // Add cleanup method
-    const cleanup = () => {
-      subscriptions.forEach(sub => sub.unsubscribe())
-      subscriptions.clear()
-      stream.complete()
-    }
+  // Set up Cyre action to handle stream data
+  cyre.action({
+    id: 'process-stream-data',
+    throttle: 100, // Use Cyre's built-in throttling
+    detectChanges: true
+  })
 
-    return { stream, cleanup, subscriptionCount: () => subscriptions.size }
+  cyre.on('process-stream-data', payload => {
+    console.log('Processed through Cyre:', payload)
+    return {processed: true, timestamp: Date.now()}
+  })
+
+  // Send data through the stream
+  await stream.next({action: 'update', payload: {value: 1}})
+  await stream.next({action: 'update', payload: {value: 2}})
+  await stream.next({action: 'update', payload: null}) // Will be filtered
+  await stream.next({action: 'update', payload: {value: 3}})
+
+  await new Promise(resolve => setTimeout(resolve, 200))
+  stream.complete()
+}
+
+/**
+ * Run all examples
+ */
+async function runAllExamples(): Promise<void> {
+  console.log('Starting Cyre Stream Examples...\n')
+
+  try {
+    await basicStreamExample()
+    await factoryFunctionsExample()
+    await transformationOperatorsExample()
+    await timingOperatorsExample()
+    await errorHandlingExample()
+    await streamCombinationExample()
+    await advancedOperatorsExample()
+    await dataProcessingPipelineExample()
+    await memoryManagementExample()
+    await cyreIntegrationExample()
+
+    console.log('\n=== All Examples Completed Successfully ===')
+  } catch (error) {
+    console.error('Example failed:', error)
+  } finally {
+    // Cleanup Cyre system
+    console.log('\nCleaning up Cyre system...')
+    cyre.clear()
   }
-
-  // Usage
-  const { stream, cleanup, subscriptionCount } = createManagedStream<number>()
-  
-  const sub1 = stream.subscribe(value => console.log('Sub 1:', value))
-  const sub2 = stream.subscribe(value => console.log('Sub 2:', value))
-  
-  console.log('Active subscriptions:', subscriptionCount()) // 2
-  
-  // Clean up all subscriptions
-  cleanup()
-  console.log('Active subscriptions:', subscriptionCount()) // 0
 }
 
-// Export examples for documentation
+// Export for use in other files
 export {
-  basicExample,
-  factoryExample,
-  transformationExample,
-  protectionExample,
-  combinationExample,
+  basicStreamExample,
+  factoryFunctionsExample,
+  transformationOperatorsExample,
+  timingOperatorsExample,
   errorHandlingExample,
-  advancedExample,
+  streamCombinationExample,
+  advancedOperatorsExample,
+  dataProcessingPipelineExample,
+  memoryManagementExample,
   cyreIntegrationExample,
-  searchExample,
-  websocketExample,
-  reactIntegrationExample,
-  performanceExample,
-  customOperatorExample,
-  memoryManagementExample
+  runAllExamples
 }
+
+// Run examples if this file is executed directly
+
+runAllExamples().catch(console.error)

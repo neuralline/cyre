@@ -95,6 +95,8 @@ export const metricsState = {
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
   isLocked: false,
+  initialize: false,
+  isShutdown: false,
 
   isSystemLocked: (): boolean => {
     return metricsState.isLocked
@@ -165,7 +167,6 @@ export const metricsState = {
 
   lock: (): void => {
     try {
-      metricsState.isLocked = true
       metricsState.update({isLocked: true})
     } catch (error) {
       // CRITICAL: Lock failure compromises system security
@@ -173,29 +174,47 @@ export const metricsState = {
       throw error // Re-throw to prevent unsafe operation
     }
   },
-  // Performance tracking
-  recordCall: (priority: Priority = 'medium'): MetricsState => {
-    const current = metricsStore.get('quantum')!
-    const now = Date.now()
-    const timeDiff = now - current.performance.lastCallTimestamp
-
-    const callsPerSecond =
-      timeDiff >= 1000 ? 1 : current.performance.callsPerSecond + 1
-
-    const performance: PerformanceMetrics = {
-      ...current.performance,
-      callsTotal: current.performance.callsTotal + 1,
-      callsPerSecond,
-      lastCallTimestamp: now,
-      activeQueues: {
-        ...current.performance.activeQueues,
-        [priority]: current.performance.activeQueues[priority] + 1
-      },
-      queueDepth: current.performance.queueDepth + 1
+  init: (): void => {
+    try {
+      metricsState.update({initialize: true})
+    } catch (error) {
+      // CRITICAL: Lock failure compromises system security
+      log.critical(`System init failed: ${error}`)
+      throw error // Re-throw to prevent unsafe operation
     }
-
-    return metricsState.update({performance})
   },
+  shutdown: (): void => {
+    try {
+      metricsState.update({isShutdown: true})
+    } catch (error) {
+      // CRITICAL: Lock failure compromises system security
+      log.critical(`System init failed: ${error}`)
+      throw error // Re-throw to prevent unsafe operation
+    }
+  },
+  // Performance tracking
+  // recordCall: (priority: Priority = 'medium'): MetricsState => {
+  //   const current = metricsStore.get('quantum')!
+  //   const now = Date.now()
+  //   const timeDiff = now - current.performance.lastCallTimestamp
+
+  //   const callsPerSecond =
+  //     timeDiff >= 1000 ? 1 : current.performance.callsPerSecond + 1
+
+  //   const performance: PerformanceMetrics = {
+  //     ...current.performance,
+  //     callsTotal: current.performance.callsTotal + 1,
+  //     callsPerSecond,
+  //     lastCallTimestamp: now,
+  //     activeQueues: {
+  //       ...current.performance.activeQueues,
+  //       [priority]: current.performance.activeQueues[priority] + 1
+  //     },
+  //     queueDepth: current.performance.queueDepth + 1
+  //   }
+
+  //   return metricsState.update({performance})
+  // },
 
   // System health checks
   isHealthy: (): boolean => {
@@ -225,6 +244,7 @@ export const metricsState = {
     metricsState.hibernating = false
     metricsState.activeFormations = 0
     metricsState.isLocked = false
+    metricsState.isShutdown = false
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
       metricsState.recuperationInterval = undefined
@@ -237,4 +257,4 @@ export const metricsState = {
 }
 
 // Export type for external use
-export type {MetricsState as QuantumState, StateKey}
+export type {MetricsState as MetricsState, StateKey}

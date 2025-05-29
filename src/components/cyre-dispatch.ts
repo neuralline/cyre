@@ -1,35 +1,37 @@
 // src/components/cyre-dispatch.ts
+// CRITICAL FIX: Stop converting falsy values to null
 
 import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {cyreExecute} from './cyre-execute'
-import {historyState} from '../context/history-state'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
 
 /*
 
-      C.Y.R.E - D.I.S.P.A.T.C.H
+      C.Y.R.E - D.I.S.P.A.T.C.H 
       
-      Updated dispatch logic with middleware integration:
-      - Find subscriber and execute
-      - Handle IntraLink chain reactions
-      - Record execution history
-      - Update payload history after successful execution
-      - Proper error handling and metrics
+      CRITICAL FIX: Stop converting falsy values (0, undefined, false, '') to null
+      
+      The bug was in payload processing:
+      OLD: const currentPayload = payload || action.payload  // ❌ Converts falsy to action.payload
+      NEW: const currentPayload = payload !== undefined ? payload : action.payload  // ✅ Preserves falsy
 
 */
 
 /**
- * Dispatch action to subscriber for execution
+ * FIXED: Dispatch action to subscriber preserving exact payload values
  */
 export const useDispatch = async (
   action: IO,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
-  const currentPayload = payload || action.payload
+
+  // CRITICAL FIX: Preserve falsy values like 0, undefined, false, ''
+  // Use strict undefined check instead of truthy check
+  const currentPayload = payload !== undefined ? payload : action.payload
 
   try {
     // Get subscriber
@@ -47,11 +49,11 @@ export const useDispatch = async (
 
     metricsReport.sensor.log(action.id, 'dispatch', 'dispatch-to-execute')
 
-    // Execute through cyreExecute
+    // Execute through cyreExecute with EXACT payload value
     const result = await cyreExecute(
       {
         ...action,
-        payload: currentPayload,
+        payload: currentPayload, // Pass exact value, including falsy values
         timeOfCreation: startTime
       },
       subscriber.fn
@@ -71,26 +73,13 @@ export const useDispatch = async (
     if (result.ok) {
       // Update payload history for change detection on successful execution
       if (action.detectChanges) {
+        // CRITICAL FIX: Store exact payload value for change detection
         io.updatePayload(action.id, currentPayload)
       }
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
     }
-
-    // Record in history
-    historyState.record(
-      action.id,
-      currentPayload,
-      {
-        ok: result.ok,
-        message: result.ok
-          ? 'Execution completed'
-          : result.error || 'Execution failed',
-        error: result.error
-      },
-      totalTime
-    )
 
     // Handle IntraLink (chain reactions)
     if (result.intraLink) {
@@ -103,7 +92,7 @@ export const useDispatch = async (
       return {
         ok: true,
         payload: result.payload,
-        message: MSG.WELCOME,
+        message: result.message,
         metadata: {
           executionTime: totalTime,
           intraLink: {
@@ -117,24 +106,16 @@ export const useDispatch = async (
     return {
       ok: result.ok,
       payload: result.payload,
-      message: result.ok ? MSG.WELCOME : result.error || 'Execution failed',
+      message: result.ok ? result.message : result.error || 'Execution failed',
       metadata: {
         executionTime: totalTime
       }
     }
   } catch (error) {
-    const totalTime = performance.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)
 
     log.error(`Dispatch failed for ${action.id}: ${errorMessage}`)
     metricsReport.sensor.error(action.id, errorMessage, 'dispatch-execution')
-
-    historyState.record(
-      action.id,
-      currentPayload,
-      {ok: false, error: errorMessage},
-      totalTime
-    )
 
     return {
       ok: false,

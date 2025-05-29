@@ -458,31 +458,6 @@ export function useCyre<TPayload = ActionPayload>(
     },
 
     /**
-     * Get execution history
-     */
-    getHistory: (): ReadonlyArray<ChannelHistoryEntry<TPayload>> => {
-      const rawHistory = cyre.getHistory(channelId)
-      return rawHistory.map(entry => ({
-        timestamp: entry.timestamp,
-        payload: entry.payload as TPayload,
-        response: {
-          ok: entry.result.ok,
-          payload: null,
-          message: entry.result.message || '',
-          error: entry.result.error ? new Error(entry.result.error) : undefined
-        }
-      }))
-    },
-
-    /**
-     * Clear execution history
-     */
-    clearHistory: (): void => {
-      debugLog('Clearing history')
-      cyre.clearHistory(channelId)
-    },
-
-    /**
      * Get subscription count
      */
     getSubscriptionCount: (): number => {

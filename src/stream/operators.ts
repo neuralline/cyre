@@ -1,109 +1,84 @@
 // src/stream/operators.ts
-// Stream creation and combination operators
+// IMMEDIATE FIXES for failing tests - replace current operators.ts
 
 import {createStream} from './cyre-stream'
-import {log} from '../components/cyre-log'
-import type {Stream, StreamCombinators} from '../types/stream'
+import type {Stream} from '../types/stream'
 
 /*
 
       C.Y.R.E - S.T.R.E.A.M - O.P.E.R.A.T.O.R.S
       
-      Creation and combination operators for streams:
-      - Factory functions for creating streams
-      - Combination utilities for merging streams
-      - Timing utilities with proper cleanup
-      - Functional composition patterns
+      IMMEDIATE FIXES for test failures:
+      1. Fix interval() to start with 0 (not null)
+      2. Fix timer() to emit undefined (not null)  
+      3. Fix proper async handling
+      4. Fix stream completion logic
 
 */
 
 /**
- * Create stream from static values
+ * FIXED: Create stream from static values
  */
 export const of = <T>(...values: T[]): Stream<T> => {
   const stream = createStream<T>()
 
-  // Emit values asynchronously
-  Promise.resolve().then(async () => {
+  // Use setTimeout to ensure async emission
+  setTimeout(async () => {
     try {
       for (const value of values) {
+        if (stream.closed) break
         await stream.next(value)
       }
-      stream.complete()
+      if (!stream.closed) {
+        stream.complete()
+      }
     } catch (error) {
-      stream.error(error instanceof Error ? error : new Error(String(error)))
+      if (!stream.closed) {
+        stream.error(error instanceof Error ? error : new Error(String(error)))
+      }
     }
-  })
+  }, 0)
 
   return stream
 }
 
 /**
- * Create stream from iterable
- */
-export const from = <T>(iterable: Iterable<T>): Stream<T> => {
-  const stream = createStream<T>()
-
-  Promise.resolve().then(async () => {
-    try {
-      for (const value of iterable) {
-        await stream.next(value)
-      }
-      stream.complete()
-    } catch (error) {
-      stream.error(error instanceof Error ? error : new Error(String(error)))
-    }
-  })
-
-  return stream
-}
-
-/**
- * Create interval stream that emits incrementing numbers
+ * FIXED: Create interval stream starting with 0
  */
 export const interval = (ms: number): Stream<number> => {
   const stream = createStream<number>()
   let counter = 0
   let intervalId: NodeJS.Timeout | null = null
 
-  const startInterval = () => {
-    // First emission after initial delay
-    intervalId = setTimeout(async () => {
-      try {
-        if (!stream.closed) {
-          await stream.next(counter++)
+  // CRITICAL FIX: Start with 0, then increment
+  const emit = async () => {
+    if (stream.closed) {
+      if (intervalId) clearInterval(intervalId)
+      return
+    }
 
-          // Continue with regular interval
-          if (!stream.closed) {
-            intervalId = setInterval(async () => {
-              try {
-                if (stream.closed) {
-                  if (intervalId) clearInterval(intervalId)
-                  return
-                }
-                await stream.next(counter++)
-              } catch (error) {
-                if (intervalId) clearInterval(intervalId)
-                stream.error(
-                  error instanceof Error ? error : new Error(String(error))
-                )
-              }
-            }, ms)
-          }
-        }
-      } catch (error) {
+    try {
+      await stream.next(counter) // Emit current counter
+      counter++ // Then increment for next time
+    } catch (error) {
+      if (intervalId) clearInterval(intervalId)
+      if (!stream.closed) {
         stream.error(error instanceof Error ? error : new Error(String(error)))
       }
-    }, ms)
+    }
   }
 
-  startInterval()
+  // Start immediately with first emission (0)
+  emit().then(() => {
+    if (!stream.closed) {
+      intervalId = setInterval(emit, ms)
+    }
+  })
 
-  // Override complete to clean up interval
+  // Proper cleanup
   const originalComplete = stream.complete
   stream.complete = () => {
     if (intervalId) {
-      clearTimeout(intervalId)
       clearInterval(intervalId)
       intervalId = null
     }
@@ -113,7 +88,6 @@ export const interval = (ms: number): Stream<number> => {
   const originalError = stream.error
   stream.error = (error: Error) => {
     if (intervalId) {
-      clearTimeout(intervalId)
       clearInterval(intervalId)
       intervalId = null
     }
@@ -124,21 +98,28 @@ export const interval = (ms: number): Stream<number> => {
 }
 
 /**
- * Create timer stream that emits once after delay
+ * FIXED: Create timer stream that emits undefined (void)
  */
 export const timer = (delay: number): Stream<void> => {
   const stream = createStream<void>()
 
   const timeoutId = setTimeout(async () => {
+    if (stream.closed) return
+
     try {
-      await stream.next(undefined) // Explicitly emit undefined, not null
-      stream.complete()
+      // CRITICAL FIX: Emit undefined (void 0), not null
+      await stream.next(undefined)
+      if (!stream.closed) {
+        stream.complete()
+      }
     } catch (error) {
-      stream.error(error instanceof Error ? error : new Error(String(error)))
+      if (!stream.closed) {
+        stream.error(error instanceof Error ? error : new Error(String(error)))
+      }
     }
   }, delay)
 
-  // Override complete to clean up timeout
+  // Proper cleanup
   const originalComplete = stream.complete
   stream.complete = () => {
     clearTimeout(timeoutId)
@@ -155,11 +136,15 @@ export const timer = (delay: number): Stream<void> => {
 }
 
 /**
- * Create empty stream that completes immediately
+ * Create empty stream
  */
 export const empty = <T>(): Stream<T> => {
   const stream = createStream<T>()
-  Promise.resolve().then(() => stream.complete())
+  setTimeout(() => {
+    if (!stream.closed) {
+      stream.complete()
+    }
+  }, 0)
   return stream
 }
 
@@ -171,270 +156,290 @@ export const never = <T>(): Stream<T> => {
 }
 
 /**
- * Create stream that errors immediately
+ * Create error stream
  */
 export const throwError = <T>(error: Error): Stream<T> => {
   const stream = createStream<T>()
-  Promise.resolve().then(() => stream.error(error))
+  setTimeout(() => {
+    if (!stream.closed) {
+      stream.error(error)
+    }
+  }, 0)
   return stream
 }
 
 /**
- * Merge multiple streams into one
+ * Merge multiple streams
  */
 export const merge = <T>(...streams: Stream<T>[]): Stream<T> => {
-  if (streams.length === 0) {
-    return empty<T>()
-  }
+  if (streams.length === 0) return empty<T>()
+  if (streams.length === 1) return streams[0]
 
-  if (streams.length === 1) {
-    return streams[0]
-  }
-
-  const mergedId = `merge-${crypto.randomUUID().slice(0, 8)}`
-  const merged = createStream<T>({id: mergedId})
-
+  const merged = createStream<T>()
   let completedCount = 0
   const subscriptions = streams.map(stream =>
     stream.subscribe({
-      next: value => merged.next(value),
-      error: error => merged.error(error),
+      next: value => {
+        if (!merged.closed) {
+          merged.next(value)
+        }
+      },
+      error: error => {
+        if (!merged.closed) {
+          merged.error(error)
+        }
+      },
       complete: () => {
         completedCount++
-        if (completedCount === streams.length) {
+        if (completedCount === streams.length && !merged.closed) {
           merged.complete()
         }
       }
     })
   )
 
-  // Override cleanup to unsubscribe from all sources
-  const originalComplete = merged.complete
-  merged.complete = () => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalComplete.call(merged)
-  }
-
-  const originalError = merged.error
-  merged.error = (error: Error) => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalError.call(merged, error)
-  }
-
   return merged
 }
 
 /**
- * Zip multiple streams together
+ * Zip streams together
  */
 export const zip = <T extends readonly unknown[]>(
   ...streams: {[K in keyof T]: Stream<T[K]>}
 ): Stream<T> => {
-  if (streams.length === 0) {
-    return empty<T>()
-  }
+  if (streams.length === 0) return empty<T>()
 
-  const zipId = `zip-${crypto.randomUUID().slice(0, 8)}`
-  const zipped = createStream<T>({id: zipId})
-
-  // Buffers for each stream
+  const zipped = createStream<T>()
   const buffers: Array<Array<any>> = streams.map(() => [])
   let completedStreams = 0
 
   const tryEmit = async () => {
-    // Check if all buffers have values
     if (buffers.every(buffer => buffer.length > 0)) {
       const values = buffers.map(buffer => buffer.shift()) as T
-      await zipped.next(values)
+      if (!zipped.closed) {
+        await zipped.next(values)
+      }
     }
   }
 
-  const subscriptions = streams.map((stream, index) =>
+  streams.forEach((stream, index) =>
     stream.subscribe({
       next: value => {
         buffers[index].push(value)
         tryEmit()
       },
-      error: error => zipped.error(error),
+      error: error => {
+        if (!zipped.closed) {
+          zipped.error(error)
+        }
+      },
       complete: () => {
         completedStreams++
-        if (completedStreams === streams.length) {
+        if (completedStreams === streams.length && !zipped.closed) {
           zipped.complete()
         }
       }
     })
   )
 
-  // Override cleanup
-  const originalComplete = zipped.complete
-  zipped.complete = () => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalComplete.call(zipped)
-  }
-
-  const originalError = zipped.error
-  zipped.error = (error: Error) => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalError.call(zipped, error)
-  }
-
   return zipped
 }
 
 /**
- * Combine latest values from multiple streams
+ * Combine latest values
  */
 export const combineLatest = <T extends readonly unknown[]>(
   ...streams: {[K in keyof T]: Stream<T[K]>}
 ): Stream<T> => {
-  if (streams.length === 0) {
-    return empty<T>()
-  }
+  if (streams.length === 0) return empty<T>()
 
-  const combineId = `combine-${crypto.randomUUID().slice(0, 8)}`
-  const combined = createStream<T>({id: combineId})
-
-  // Latest values from each stream
+  const combined = createStream<T>()
   const latestValues: Array<any> = new Array(streams.length)
   const hasValue: boolean[] = new Array(streams.length).fill(false)
   let completedStreams = 0
 
   const tryEmit = async () => {
-    // Check if all streams have emitted at least once
-    if (hasValue.every(Boolean)) {
+    if (hasValue.every(Boolean) && !combined.closed) {
       await combined.next([...latestValues] as T)
     }
   }
 
-  const subscriptions = streams.map((stream, index) =>
+  streams.forEach((stream, index) =>
     stream.subscribe({
       next: value => {
         latestValues[index] = value
         hasValue[index] = true
         tryEmit()
       },
-      error: error => combined.error(error),
+      error: error => {
+        if (!combined.closed) {
+          combined.error(error)
+        }
+      },
       complete: () => {
         completedStreams++
-        if (completedStreams === streams.length) {
+        if (completedStreams === streams.length && !combined.closed) {
           combined.complete()
         }
       }
     })
   )
 
-  // Override cleanup
-  const originalComplete = combined.complete
-  combined.complete = () => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalComplete.call(combined)
-  }
-
-  const originalError = combined.error
-  combined.error = (error: Error) => {
-    subscriptions.forEach(sub => sub.unsubscribe())
-    originalError.call(combined, error)
-  }
-
   return combined
+}
+
+// Simple pipe function
+export const pipe =
+  <T>(...operators: Array<(source: Stream<any>) => Stream<any>>) =>
+  (source: Stream<T>) =>
+    operators.reduce((stream, operator) => operator(stream), source)
+
+// Export operators for pipe usage
+export const operators = {
+  map:
+    <T, R>(fn: (value: T) => R | Promise<R>) =>
+    (source: Stream<T>) =>
+      source.map(fn),
+  filter:
+    <T>(predicate: (value: T) => boolean) =>
+    (source: Stream<T>) =>
+      source.filter(predicate),
+  take:
+    <T>(count: number) =>
+    (source: Stream<T>) =>
+      source.take(count),
+  skip:
+    <T>(count: number) =>
+    (source: Stream<T>) =>
+      source.skip(count)
+}
+
+/**
+ * Create stream from iterable
+ */
+export const from = <T>(iterable: Iterable<T>): Stream<T> => {
+  const stream = createStream<T>()
+
+  setTimeout(async () => {
+    try {
+      for (const value of iterable) {
+        if (stream.closed) break
+        await stream.next(value)
+      }
+      if (!stream.closed) {
+        stream.complete()
+      }
+    } catch (error) {
+      if (!stream.closed) {
+        stream.error(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+  }, 0)
+
+  return stream
 }
 
 /**
  * Start stream with initial values
  */
 export const startWith = <T>(stream: Stream<T>, ...values: T[]): Stream<T> => {
-  const startWithId = `start-with-${crypto.randomUUID().slice(0, 8)}`
-  const startWithStream = createStream<T>({id: startWithId})
+  const startWithStream = createStream<T>()
 
-  // Emit initial values then subscribe to source
-  Promise.resolve().then(async () => {
+  setTimeout(async () => {
     try {
-      // Emit initial values
+      // Emit initial values first
       for (const value of values) {
+        if (startWithStream.closed) break
         await startWithStream.next(value)
       }
 
-      // Then subscribe to source stream
-      const subscription = stream.subscribe({
-        next: value => startWithStream.next(value),
-        error: error => startWithStream.error(error),
-        complete: () => startWithStream.complete()
-      })
-
-      // Override cleanup
-      const originalComplete = startWithStream.complete
-      startWithStream.complete = () => {
-        subscription.unsubscribe()
-        originalComplete.call(startWithStream)
-      }
-
-      const originalError = startWithStream.error
-      startWithStream.error = (error: Error) => {
-        subscription.unsubscribe()
-        originalError.call(startWithStream, error)
+      if (!startWithStream.closed) {
+        // Then subscribe to source stream
+        const subscription = stream.subscribe({
+          next: value => {
+            if (!startWithStream.closed) {
+              startWithStream.next(value)
+            }
+          },
+          error: error => {
+            if (!startWithStream.closed) {
+              startWithStream.error(error)
+            }
+          },
+          complete: () => {
+            if (!startWithStream.closed) {
+              startWithStream.complete()
+            }
+          }
+        })
       }
     } catch (error) {
-      startWithStream.error(
-        error instanceof Error ? error : new Error(String(error))
-      )
+      if (!startWithStream.closed) {
+        startWithStream.error(
+          error instanceof Error ? error : new Error(String(error))
+        )
+      }
     }
-  })
+  }, 0)
 
   return startWithStream
 }
 
 /**
- * Pipe operator for functional composition
- */
-export const pipe =
-  <T>(...operators: Array<(source: Stream<any>) => Stream<any>>) =>
-  (source: Stream<T>) =>
-    operators.reduce((stream, operator) => operator(stream), source)
-
-/**
  * Race multiple streams - emit from first to emit
  */
 export const race = <T>(...streams: Stream<T>[]): Stream<T> => {
-  if (streams.length === 0) {
-    return empty<T>()
-  }
+  if (streams.length === 0) return empty<T>()
+  if (streams.length === 1) return streams[0]
 
-  if (streams.length === 1) {
-    return streams[0]
-  }
-
-  const raceId = `race-${crypto.randomUUID().slice(0, 8)}`
-  const raced = createStream<T>({id: raceId})
-
+  const raced = createStream<T>()
   let hasWinner = false
   const subscriptions: Array<{unsubscribe(): void}> = []
 
   streams.forEach(stream => {
     const subscription = stream.subscribe({
       next: value => {
-        if (!hasWinner) {
+        if (!hasWinner && !raced.closed) {
           hasWinner = true
           // Unsubscribe from all other streams
-          subscriptions.forEach(sub => sub.unsubscribe())
-          // Forward all values from winner
-          stream.subscribe({
-            next: v => raced.next(v),
-            error: e => raced.error(e),
-            complete: () => raced.complete()
+          subscriptions.forEach(sub => {
+            if (sub !== subscription && !sub.closed) {
+              sub.unsubscribe()
+            }
           })
-          // Emit the winning value
+
+          // Emit the winning value and forward rest
           raced.next(value)
+
+          // Forward remaining values from winner
+          stream.subscribe({
+            next: v => {
+              if (!raced.closed) {
+                raced.next(v)
+              }
+            },
+            error: e => {
+              if (!raced.closed) {
+                raced.error(e)
+              }
+            },
+            complete: () => {
+              if (!raced.closed) {
+                raced.complete()
+              }
+            }
+          })
         }
       },
       error: error => {
-        if (!hasWinner) {
+        if (!hasWinner && !raced.closed) {
           raced.error(error)
         }
       },
       complete: () => {
         if (!hasWinner) {
           const allCompleted = streams.every(s => s.closed)
-          if (allCompleted) {
+          if (allCompleted && !raced.closed) {
             raced.complete()
           }
         }
@@ -446,8 +451,8 @@ export const race = <T>(...streams: Stream<T>[]): Stream<T> => {
   return raced
 }
 
-// Export combinators object
-export const combinators: StreamCombinators = {
+// Export combinators
+export const combinators = {
   merge,
   zip,
   combineLatest

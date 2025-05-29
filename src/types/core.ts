@@ -73,6 +73,9 @@ export interface IO {
   type?: string
   /** Initial or default payload data */
   payload?: any
+  // PAYLOAD VALIDATION FEATURES
+  /** Require payload to be provided - boolean for basic requirement, 'non-empty' for non-empty requirement */
+  required?: boolean | 'non-empty'
   /** Milliseconds between executions for repeated actions */
   interval?: number
   /** Number of times to repeat execution, true for infinite repeats */
@@ -83,6 +86,8 @@ export interface IO {
   throttle?: number
   /** Collapse rapid calls within this window (milliseconds) */
   debounce?: number
+  //maximum wait for debounce
+  maxWait?: number
   /** Only execute if payload has changed from previous execution */
   detectChanges?: boolean
   /** Enable logging for this action */
@@ -118,3 +123,115 @@ export type Result<T, E = Error> =
  * On function type - flexible
  */
 export type On = (...args: any[]) => any
+
+// src/types/protection.ts
+// Protection system type definitions
+
+export type ProtectionType =
+  | 'system-recuperation'
+  | 'required-payload'
+  | 'zero-repeat-block'
+  | 'throttle'
+  | 'debounce'
+  | 'change-detection'
+
+export interface BaseProtectionConfig {
+  readonly type: ProtectionType
+  readonly enabled: boolean
+}
+
+export interface ThrottleConfig extends BaseProtectionConfig {
+  readonly type: 'throttle'
+  readonly intervalMs: number
+  readonly lastExecutionTime: number
+}
+
+export interface DebounceConfig extends BaseProtectionConfig {
+  readonly type: 'debounce'
+  readonly delayMs: number
+  readonly maxWaitMs?: number
+  readonly hasActiveTimer: boolean
+  readonly timerId?: string
+}
+
+export interface ChangeDetectionConfig extends BaseProtectionConfig {
+  readonly type: 'change-detection'
+  readonly previousPayload?: unknown
+}
+
+export interface RequiredPayloadConfig extends BaseProtectionConfig {
+  readonly type: 'required-payload'
+  readonly requirement: boolean | 'non-empty'
+}
+
+export interface SystemRecuperationConfig extends BaseProtectionConfig {
+  readonly type: 'system-recuperation'
+  readonly isRecuperating: boolean
+  readonly allowedPriorities: readonly string[]
+}
+
+export interface ZeroRepeatConfig extends BaseProtectionConfig {
+  readonly type: 'zero-repeat-block'
+  readonly repeatValue: number | boolean
+}
+
+export type ProtectionConfig =
+  | ThrottleConfig
+  | DebounceConfig
+  | ChangeDetectionConfig
+  | RequiredPayloadConfig
+  | SystemRecuperationConfig
+  | ZeroRepeatConfig
+
+export interface ProtectionResult<T = unknown> {
+  readonly success: boolean
+  readonly proceed: boolean
+  readonly data: T
+  readonly scheduled: boolean
+  readonly blocked: boolean
+  readonly reason?: string
+  readonly metadata: Readonly<Record<string, unknown>>
+}
+
+export interface ProtectionPipelineResult<T = unknown> {
+  readonly ok: boolean
+  readonly message: string
+  readonly payload: T
+  readonly blocked?: boolean
+  readonly scheduled?: boolean
+  readonly duration?: number
+  readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+export type ProtectionFunction<
+  TConfig extends ProtectionConfig = ProtectionConfig
+> = (config: TConfig, payload?: unknown) => Promise<ProtectionResult>
+
+export interface ProtectionRegistry {
+  readonly [key: string]: ProtectionFunction
+}
+
+export interface TimerManager {
+  readonly create: (
+    id: string,
+    duration: number,
+    callback: () => void
+  ) => Promise<{success: boolean; error?: string}>
+  readonly clear: (id: string) => boolean
+  readonly exists: (id: string) => boolean
+}
+
+export interface ProtectionContext {
+  readonly actionId: string
+  readonly currentTime: number
+  readonly systemState: {
+    readonly isRecuperating: boolean
+    readonly stress: number
+  }
+  readonly actionState: {
+    readonly lastExecutionTime: number
+    readonly previousPayload?: unknown
+    readonly debounceTimerId?: string
+  }
+  readonly timerManager: TimerManager
+}

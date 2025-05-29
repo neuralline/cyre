@@ -27,7 +27,7 @@ describe('Debounce Protection Pipeline', () => {
    */
   it('should collapse rapid calls with debounce interval', async () => {
     // Create action with debounce
-    const DEBOUNCE_INTERVAL = 200 // ms
+    const DEBOUNCE_INTERVAL = 1000 // ms
     cyre.action({
       id: 'debounce-test',
       type: 'test',

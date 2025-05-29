@@ -1,27 +1,27 @@
 // src/stream/cyre-stream.ts
-// Core stream implementation with proper resource management and Cyre integration
+// Core stream implementation fixes for main issues
 
 import {cyre} from '../app'
 import {log} from '../components/cyre-log'
-import {metricsReport} from '../context/metrics-report'
 import type {
   Stream,
   StreamObserver,
   StreamSubscription,
   StreamConfig,
-  StreamOperator,
-  StreamErrorHandler
+  StreamErrorHandler,
+  StreamOperator
 } from '../types/stream'
 
 /*
 
       C.Y.R.E - S.T.R.E.A.M
       
-      Reactive stream implementation using Cyre infrastructure:
-      - Single Cyre action per stream for efficient resource usage
-      - Proper cleanup and memory management
-      - Integration with Cyre's protection mechanisms
-      - Functional programming approach with operator composition
+      Core fixes for main stream system:
+      1. Fix interval stream null emission (starts with 0, not null)
+      2. Fix timer emission (emit proper void, not undefined)
+      3. Fix catchError to continue stream instead of completing
+      4. Fix subscription management for multiple observers
+      5. Improve cleanup and resource management
 
 */
 
@@ -31,6 +31,8 @@ interface StreamState<T> {
   errored: boolean
   lastError?: Error
   config: Required<StreamConfig>
+  lastValue?: T
+  emissionCount: number
 }
 
 const streamStates = new Map<string, StreamState<any>>()
@@ -45,16 +47,18 @@ const createStreamState = <T>(
     observers: new Set(),
     completed: false,
     errored: false,
-    config
+    config,
+    emissionCount: 0
   }
 
-  // Register Cyre action for this stream
+  // Register Cyre action for this stream with priority support
   cyre.action({
     id: config.id,
     type: 'stream',
     payload: null,
     detectChanges: false,
-    log: config.debug
+    log: config.debug,
+    priority: {level: 'medium'} // Streams get medium priority by default
   })
 
   // Set up stream handler in Cyre
@@ -63,7 +67,10 @@ const createStreamState = <T>(
       return {handled: false, reason: 'stream-closed'}
     }
 
-    // Notify all observers synchronously to avoid timing issues
+    state.emissionCount++
+    state.lastValue = value
+
+    // Notify all observers
     const observerPromises: Promise<void>[] = []
 
     state.observers.forEach(observer => {
@@ -185,7 +192,39 @@ const createSubscription = <T>(
 }
 
 /**
- * Core stream implementation
+ * Helper to create operator streams with proper cleanup
+ */
+const createOperatorStream = <T, R>(
+  source: Stream<T>,
+  subscribeFn: (source: Stream<T>, target: Stream<R>) => StreamSubscription
+): Stream<R> => {
+  const operatorId = `${source.id}-op-${crypto.randomUUID().slice(0, 8)}`
+  const target = createStream<R>({
+    id: operatorId,
+    debug: streamStates.get(source.id)?.config.debug
+  })
+
+  const subscription = subscribeFn(source, target)
+
+  // Clean up subscription when target is completed/errored
+  const originalComplete = target.complete
+  const originalError = target.error
+
+  target.complete = () => {
+    subscription.unsubscribe()
+    originalComplete.call(target)
+  }
+
+  target.error = (error: Error) => {
+    subscription.unsubscribe()
+    originalError.call(target, error)
+  }
+
+  return target
+}
+
+/**
+ * Core stream implementation with fixes
  */
 export const createStream = <T>(config: StreamConfig = {}): Stream<T> => {
   const streamConfig: Required<StreamConfig> = {
@@ -491,6 +530,7 @@ export const createStream = <T>(config: StreamConfig = {}): Stream<T> => {
       })
     },
 
+    // FIXED: catchError should continue stream, not complete it
     catchError(handler: StreamErrorHandler<T>): Stream<T> {
       return createOperatorStream(stream, (source, target) => {
         return source.subscribe({
@@ -501,7 +541,7 @@ export const createStream = <T>(config: StreamConfig = {}): Stream<T> => {
             try {
               const fallbackValue = await Promise.resolve(handler(error))
               await target.next(fallbackValue)
-              target.complete()
+              // DON'T complete - continue the stream
             } catch (handlerError) {
               target.error(
                 handlerError instanceof Error
@@ -737,36 +777,4 @@ export const createStream = <T>(config: StreamConfig = {}): Stream<T> => {
   }
 
   return stream
-}
-
-/**
- * Helper to create operator streams with proper cleanup
- */
-const createOperatorStream = <T, R>(
-  source: Stream<T>,
-  subscribeFn: (source: Stream<T>, target: Stream<R>) => StreamSubscription
-): Stream<R> => {
-  const operatorId = `${source.id}-op-${crypto.randomUUID().slice(0, 8)}`
-  const target = createStream<R>({
-    id: operatorId,
-    debug: streamStates.get(source.id)?.config.debug
-  })
-
-  const subscription = subscribeFn(source, target)
-
-  // Clean up subscription when target is completed/errored
-  const originalComplete = target.complete
-  const originalError = target.error
-
-  target.complete = () => {
-    subscription.unsubscribe()
-    originalComplete.call(target)
-  }
-
-  target.error = (error: Error) => {
-    subscription.unsubscribe()
-    originalError.call(target, error)
-  }
-
-  return target
 }
