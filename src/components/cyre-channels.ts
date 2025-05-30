@@ -220,7 +220,7 @@ export const CyreChannel = (
     io.set(preparedChannel)
 
     // Log success
-    log.debug(`${MSG.CHANNEL_CREATED}: ${channel.id}`)
+    //log.debug(`${MSG.CHANNEL_CREATED}: ${channel.id}`)
 
     return {
       ok: true,

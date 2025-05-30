@@ -5,7 +5,6 @@ import {IO, ActionPayload} from '../types/interface'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
 import {MSG} from '../config/cyre-config'
-import {call} from '../app'
 
 /*
 
@@ -57,8 +56,13 @@ export const cyreExecute = async (
     metricsReport.sensor.execution(action.id, executionTime)
 
     // Check for IntraLink (chain reaction)
+    let intraLink: {id: string; payload?: ActionPayload} | undefined
     if (result && typeof result === 'object' && 'id' in result && result.id) {
-      call(result.id, result.payload)
+      intraLink = {
+        id: result.id,
+        payload: result.payload
+      }
+
       metricsReport.sensor.intralink(action.id, result.id, 'dispatch')
     }
 
@@ -66,7 +70,11 @@ export const cyreExecute = async (
       ok: true,
       payload: result,
       message: MSG.WELCOME,
-      metadata: {executionTime}
+      metadata: {
+        executionTime,
+        intraLink
+      },
+      intraLink
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -80,4 +88,5 @@ export const cyreExecute = async (
     }
   }
 }
+
 export default cyreExecute

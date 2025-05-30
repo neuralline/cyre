@@ -1,4 +1,5 @@
 // example/cyre-extended-tests.ts
+// pnpm tsx example/cyre-extended-tests.ts
 
 import {cyre} from '../src'
 import {metricsReport} from '../src/context/metrics-report'

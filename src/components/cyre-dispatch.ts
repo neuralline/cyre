@@ -5,7 +5,7 @@ import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {cyreExecute} from './cyre-execute'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
-import {metricsReport} from '../context/metrics-report'
+import {metricsReport, sensor} from '../context/metrics-report'
 
 /*
 
@@ -13,8 +13,6 @@ import {metricsReport} from '../context/metrics-report'
       
       CRITICAL FIX: Stop converting falsy values (0, undefined, false, '') to null
       
-    
-
 */
 
 /**
@@ -31,20 +29,24 @@ export const useDispatch = async (
   const currentPayload = payload !== undefined ? payload : action.payload
 
   try {
+    sensor.callToDispatch(action.id, {
+      timestamp: Date.now(),
+      payloadType: typeof currentPayload,
+      hasSubscriber: undefined // will be determined below
+    })
     // Get subscriber
     const subscriber = subscribers.get(action.id)
     if (!subscriber) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
-      metricsReport.sensor.log(
-        action.id,
-        'no subscriber',
-        'dispatch-to-execute'
-      )
+      sensor.log(action.id, 'no subscriber', 'dispatch-validation', {
+        subscriberFound: false,
+        actionExists: !!io.get(action.id)
+      })
 
       return {ok: false, payload: null, message: error}
     }
 
-    metricsReport.sensor.log(action.id, 'dispatch', 'dispatch-to-execute')
+    sensor.log(action.id, 'dispatch', 'dispatch-to-execute')
 
     // Execute through cyreExecute with EXACT payload value
     const result = await cyreExecute(
@@ -59,12 +61,11 @@ export const useDispatch = async (
     const totalTime = performance.now() - startTime
 
     // Record execution metrics
-    metricsReport.sensor.execution(
-      action.id,
-      totalTime,
-      'execution',
-      'useDispatch'
-    )
+    sensor.dispatchToExecute(action.id, totalTime, {
+      success: result.ok,
+      executionPath: 'direct-dispatch',
+      payloadPreserved: true
+    })
 
     // IMPORTANT: Update payload history after successful execution for change detection
     if (result.ok) {
@@ -77,20 +78,25 @@ export const useDispatch = async (
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
     }
+    sensor.log(action.id, 'error', 'execution-failure', {
+      errorMessage: result.message,
+      executionTime: totalTime
+    })
 
     return {
       ok: result.ok,
       payload: result.payload,
       message: result.ok ? result.message : result.error || 'Execution failed',
       metadata: {
-        executionTime: totalTime
+        executionTime: totalTime,
+        intraLink: result.intraLink // Pass through IntraLink metadata
       }
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
 
     log.error(`Dispatch failed for ${action.id}: ${errorMessage}`)
-    metricsReport.sensor.error(action.id, errorMessage, 'dispatch-execution')
+    sensor.error(action.id, errorMessage, 'dispatch-execution')
 
     return {
       ok: false,

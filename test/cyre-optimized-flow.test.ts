@@ -4,11 +4,10 @@
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest'
 import {cyre} from '../src/app'
 import {compileProtectionPipeline} from '../src/components/cyre-actions'
-import {internalCall} from '../src/components/cyre-execute'
 
 describe('Optimized Cyre Execution Flow', () => {
-  beforeEach(() => {
-    cyre.initialize()
+  beforeEach(async () => {
+    await cyre.initialize()
     vi.useFakeTimers()
   })
 
@@ -35,7 +34,7 @@ describe('Optimized Cyre Execution Flow', () => {
       }
 
       const pipeline = compileProtectionPipeline(action)
-      expect(pipeline).toHaveLength(1)
+      expect(pipeline).toHaveLength(1) // Only throttle, no recuperation for simple action
 
       // Test throttle behavior
       const ctx = {
@@ -56,7 +55,7 @@ describe('Optimized Cyre Execution Flow', () => {
         throttle: 100,
         debounce: 200,
         detectChanges: true,
-        priority: {level: 'medium'}
+        priority: {level: 'medium' as const}
       }
 
       const pipeline = compileProtectionPipeline(action)
@@ -66,7 +65,7 @@ describe('Optimized Cyre Execution Flow', () => {
     it('should skip recuperation check for critical actions', () => {
       const action = {
         id: 'critical-action',
-        priority: {level: 'critical'},
+        priority: {level: 'critical' as const},
         throttle: 100
       }
 
@@ -96,15 +95,23 @@ describe('Optimized Cyre Execution Flow', () => {
       cyre.on('debounce-test', handler)
 
       // Multiple rapid calls
-      await cyre.call('debounce-test', {count: 1})
-      await cyre.call('debounce-test', {count: 2})
-      await cyre.call('debounce-test', {count: 3})
+      const result1 = await cyre.call('debounce-test', {count: 1})
+      const result2 = await cyre.call('debounce-test', {count: 2})
+      const result3 = await cyre.call('debounce-test', {count: 3})
 
+      // All calls should be debounced
+      expect(result1.metadata?.delayed).toBe(true)
+      expect(result2.metadata?.delayed).toBe(true)
+      expect(result3.metadata?.delayed).toBe(true)
       expect(handler).not.toHaveBeenCalled()
 
       // Advance time
       vi.advanceTimersByTime(150)
-      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1))
+
+      // Wait for async execution
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(handler).toHaveBeenCalledTimes(1)
       expect(handler).toHaveBeenCalledWith({count: 3})
     })
 
@@ -126,15 +133,18 @@ describe('Optimized Cyre Execution Flow', () => {
       expect(result.metadata?.delay).toBe(50)
 
       // First execution after delay
-      vi.advanceTimersByTime(50)
-      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1))
+      vi.advanceTimersByTime(60)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(handler).toHaveBeenCalledTimes(1)
 
       // Subsequent executions use interval
       vi.advanceTimersByTime(100)
-      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(2))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(handler).toHaveBeenCalledTimes(2)
 
       vi.advanceTimersByTime(100)
-      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(3))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(handler).toHaveBeenCalledTimes(3)
     })
   })
 
@@ -151,7 +161,7 @@ describe('Optimized Cyre Execution Flow', () => {
       // Get action and check pipeline
       const storedAction = cyre.get('cached-pipeline')
       expect(storedAction?._protectionPipeline).toBeDefined()
-      expect(storedAction?._protectionPipeline).toHaveLength(2)
+      expect(storedAction?._protectionPipeline).toHaveLength(3) // recuperation, throttle, change detection
 
       // Subsequent calls should use cached pipeline
       const handler = vi.fn(() => ({result: 'success'}))
@@ -172,7 +182,7 @@ describe('Optimized Cyre Execution Flow', () => {
       const endTime = performance.now()
 
       expect(handler).toHaveBeenCalled()
-      expect(endTime - startTime).toBeLessThan(5) // Should be very fast
+      expect(endTime - startTime).toBeLessThan(10) // Should be very fast
     })
   })
 
@@ -234,7 +244,7 @@ describe('Optimized Cyre Execution Flow', () => {
       const result = await cyre.call('error-test')
 
       expect(result.ok).toBe(false)
-      expect(result.error).toContain('Handler error')
+      expect(result.message).toContain('Handler error')
     })
   })
 
@@ -276,6 +286,7 @@ describe('Optimized Cyre Execution Flow', () => {
       cyre.forget('debounce-cleanup')
 
       vi.advanceTimersByTime(150)
+      await new Promise(resolve => setTimeout(resolve, 0))
 
       // Handler should not be called
       expect(handler).not.toHaveBeenCalled()

@@ -247,9 +247,9 @@ export const subscribers = {
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
   forget: (id: StateKey): boolean => {
     const result = subscriberStore.forget(id)
-    if (result) {
-      log.debug(`Removed subscriber: ${id}`)
-    }
+    // if (result) {
+    //   log.debug(`Removed subscriber: ${id}`)
+    // }
     return result
   },
   clear: (): void => {

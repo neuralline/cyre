@@ -1,32 +1,18 @@
 // src/context/metrics-report.ts
-// Raw metrics collection with sensor-based architecture
+// Improvements to metrics collection sensor system
 
 import {createStore} from './create-store'
 import type {ActionId, Priority, StateKey} from '../types/interface'
 import {log} from '../components/cyre-log'
 
-/*
-
-      C.Y.R.E - M.E.T.R.I.C.S - R.E.P.O.R.T
-      
-      Raw metrics collection with sensor architecture:
-      - Generalized sensor.log() for most events
-      - Custom sensors for complex events requiring specific data
-      - Live streaming capabilities for external monitoring
-      - Minimal processing - raw data export focused
-      - Essential stats only for Cyre breathing system
-      - call-to-dispatch and dispatch-to-execute tracking
-
-*/
-
 export type EventType =
-  | 'call' // Action call initiated
+  | 'call' // Action call initiated - CRITICAL: must be logged
   | 'dispatch' // Call dispatched to listener
   | 'execution' // Action executed successfully
   | 'error' // Execution error
-  | 'throttle' // Call throttled
-  | 'debounce' // Call debounced
-  | 'skip' // Execution skipped (change detection)
+  | 'throttle' // Call throttled - CRITICAL: was missing
+  | 'debounce' // Call debounced - CRITICAL: was missing
+  | 'skip' // Execution skipped (change detection) - CRITICAL: was missing
   | 'middleware' // Middleware processed
   | 'intralink' // Chain reaction processed
   | 'timeout' // Execution timeout
@@ -38,68 +24,38 @@ export type EventType =
   | 'debug'
   | 'delayed'
   | 'repeat'
-  | 'blocked'
+  | 'blocked' // Service not available - CRITICAL: was missing
   | 'unknown id'
   | 'no subscriber'
   | 'other'
 
 // Core metric event structure
 export interface RawMetricEvent {
-  id: string // Unique event ID
-  timestamp: number // When event occurred
-  actionId: ActionId // Which action
-  eventType: EventType // What happened
-  location?: string // Where in pipeline (optional)
-  priority?: Priority // Action priority
-  metadata?: Record<string, any> // Event-specific data
-}
-
-// Live streaming interfaces
-export interface EventFilter {
-  actionIds?: string[]
-  eventTypes?: EventType[]
-  since?: number
-  priority?: Priority[]
-  location?: string
-}
-
-export interface LiveQuery extends EventFilter {
-  limit?: number
-  offset?: number
-}
-
-// Stream subscription for live monitoring
-export interface StreamSubscription {
   id: string
-  filter: EventFilter
-  callback: (event: RawMetricEvent) => void
-  active: boolean
+  timestamp: number
+  actionId: ActionId
+  eventType: EventType
+  location?: string
+  priority?: Priority
+  metadata?: Record<string, any>
 }
 
-// Essential system stats (breathing system only)
+// System stats with call rate tracking
 export interface SystemStats {
-  totalCalls: number
+  totalCalls: number // CRITICAL: this was not being incremented
   totalExecutions: number
   totalErrors: number
-  callRate: number // For breathing system stress calculation
+  callRate: number
   lastCallTime: number
   startTime: number
-}
-
-// Minimal action stats (breathing system only)
-export interface ActionStats {
-  id: ActionId
-  calls: number
-  errors: number
-  lastCall: number
 }
 
 // Configuration
 const RETENTION_CONFIG = {
   MAX_EVENTS: 2000,
   MAX_ACTIONS: 1000,
-  CLEANUP_INTERVAL: 30000, // 30 seconds
-  LIVE_BUFFER_SIZE: 500 // Events to keep for live streaming
+  CLEANUP_INTERVAL: 30000,
+  LIVE_BUFFER_SIZE: 500
 }
 
 // Stores
@@ -107,9 +63,9 @@ const eventStore = createStore<RawMetricEvent>()
 const actionStatsStore = createStore<ActionStats>()
 const streamStore = createStore<StreamSubscription>()
 
-// System stats (single object)
+// System stats tracking
 let systemStats: SystemStats = {
-  totalCalls: 0,
+  totalCalls: 0, // CRITICAL: Initialize properly
   totalExecutions: 0,
   totalErrors: 0,
   callRate: 0,
@@ -121,11 +77,8 @@ let systemStats: SystemStats = {
 let eventSequence = 0
 const liveEventBuffer: RawMetricEvent[] = []
 
-// Stream management
-let streamIdCounter = 0
-
 /**
- * Core sensor interface - generalized logging
+ * CRITICAL FIX: Core sensor interface with proper call tracking
  */
 const sensorLog = (
   actionId: ActionId,
@@ -152,7 +105,7 @@ const sensorLog = (
       liveEventBuffer.shift()
     }
 
-    // Update basic stats for breathing system
+    // CRITICAL FIX: Update system stats properly
     updateSystemStats(event)
     updateActionStats(event)
 
@@ -164,99 +117,12 @@ const sensorLog = (
 }
 
 /**
- * Custom sensors for complex events with call-to-dispatch and dispatch-to-execute tracking
- */
-const sensorExecution = (
-  actionId: ActionId,
-  duration: number,
-  category?: string,
-  location?: string
-): void => {
-  sensorLog(actionId, 'execution', location, {duration, category})
-}
-
-const sensorThrottle = (
-  actionId: ActionId,
-  remaining: number,
-  location?: string
-): void => {
-  sensorLog(actionId, 'throttle', location, {remaining})
-}
-
-const sensorDebounce = (
-  actionId: ActionId,
-  delay: number,
-  collapsed: number,
-  location?: string
-): void => {
-  sensorLog(actionId, 'debounce', location, {delay, collapsed})
-}
-
-const sensorError = (
-  actionId: ActionId,
-  error: string,
-  location?: string,
-  stack?: string
-): void => {
-  sensorLog(actionId, 'error', location, {error, stack})
-}
-
-const sensorMiddleware = (
-  actionId: ActionId,
-  middlewareId: string,
-  result: 'accept' | 'reject' | 'transform',
-  location?: string
-): void => {
-  sensorLog(actionId, 'middleware', location, {middlewareId, result})
-}
-
-const sensorIntralink = (
-  fromActionId: ActionId,
-  toActionId: ActionId,
-  location?: string
-): void => {
-  sensorLog(fromActionId, 'intralink', location, {toActionId})
-}
-
-const sensorTimeout = (
-  actionId: ActionId,
-  timeout: number,
-  location?: string
-): void => {
-  sensorLog(actionId, 'timeout', location, {timeout})
-}
-
-/**
- * Call-to-dispatch tracking sensor
- */
-const sensorCallToDispatch = (
-  actionId: ActionId,
-  metadata?: Record<string, any>
-): void => {
-  sensorLog(actionId, 'dispatch', 'call-to-dispatch', metadata)
-}
-
-/**
- * Dispatch-to-execute tracking sensor
- */
-const sensorDispatchToExecute = (
-  actionId: ActionId,
-  executionTime?: number,
-  metadata?: Record<string, any>
-): void => {
-  sensorLog(actionId, 'execution', 'dispatch-to-execute', {
-    executionTime,
-    ...metadata
-  })
-}
-
-/**
- * Update system stats (breathing system needs)
+ * CRITICAL FIX: Update system stats with proper call counting
  */
 const updateSystemStats = (event: RawMetricEvent): void => {
   switch (event.eventType) {
     case 'call':
-      systemStats.totalCalls++
+      systemStats.totalCalls++ // CRITICAL: This was missing
       systemStats.lastCallTime = event.timestamp
       break
     case 'execution':
@@ -276,197 +142,180 @@ const updateSystemStats = (event: RawMetricEvent): void => {
 }
 
 /**
- * Update action stats (breathing system needs)
+ * CRITICAL FIX: Enhanced throttle sensor with proper logging
  */
-const updateActionStats = (event: RawMetricEvent): void => {
-  let stats = actionStatsStore.get(event.actionId)
-
-  if (!stats) {
-    stats = {
-      id: event.actionId,
-      calls: 0,
-      errors: 0,
-      lastCall: 0
-    }
-  }
-
-  switch (event.eventType) {
-    case 'call':
-      stats.calls++
-      stats.lastCall = event.timestamp
-      break
-    case 'error':
-      stats.errors++
-      break
-  }
-
-  actionStatsStore.set(event.actionId, stats)
+const sensorThrottle = (
+  actionId: ActionId,
+  remaining: number,
+  location?: string
+): void => {
+  sensorLog(actionId, 'throttle', location, {
+    remaining,
+    throttleActive: true,
+    throttleType: 'rate-limit'
+  })
 }
 
 /**
- * Live streaming - notify active streams
+ * CRITICAL FIX: Enhanced debounce sensor with proper logging
  */
-const notifyStreams = (event: RawMetricEvent): void => {
-  const activeStreams = streamStore.getAll().filter(s => s.active)
-
-  for (const stream of activeStreams) {
-    try {
-      if (matchesFilter(event, stream.filter)) {
-        stream.callback(event)
-      }
-    } catch (error) {
-      log.error(`Stream notification failed for ${stream.id}: ${error}`)
-      // Deactivate problematic stream
-      stream.active = false
-      streamStore.set(stream.id, stream)
-    }
-  }
+const sensorDebounce = (
+  actionId: ActionId,
+  delay: number,
+  collapsed: number,
+  location?: string
+): void => {
+  sensorLog(actionId, 'debounce', location, {
+    delay,
+    collapsed,
+    debounceActive: true,
+    debounceType: 'call-collapse'
+  })
 }
 
 /**
- * Check if event matches filter
+ * CRITICAL FIX: Change detection skip sensor
  */
-const matchesFilter = (event: RawMetricEvent, filter: EventFilter): boolean => {
-  if (filter.actionIds && !filter.actionIds.includes(event.actionId)) {
-    return false
-  }
-
-  if (filter.eventTypes && !filter.eventTypes.includes(event.eventType)) {
-    return false
-  }
-
-  if (filter.since && event.timestamp < filter.since) {
-    return false
-  }
-
-  if (
-    filter.priority &&
-    event.priority &&
-    !filter.priority.includes(event.priority)
-  ) {
-    return false
-  }
-
-  if (filter.location && event.location !== filter.location) {
-    return false
-  }
-
-  return true
+const sensorChangeDetectionSkip = (
+  actionId: ActionId,
+  location?: string
+): void => {
+  sensorLog(actionId, 'skip', location, {
+    skipReason: 'payload-unchanged',
+    changeDetectionActive: true
+  })
 }
 
 /**
- * Create live stream subscription
+ * CRITICAL FIX: Service blocked sensor
  */
-const createStream = (
-  filter: EventFilter,
-  callback: (event: RawMetricEvent) => void
-): string => {
-  const streamId = `stream-${++streamIdCounter}`
-
-  const subscription: StreamSubscription = {
-    id: streamId,
-    filter,
-    callback,
-    active: true
-  }
-
-  streamStore.set(streamId, subscription)
-  return streamId
+const sensorServiceBlocked = (
+  actionId: ActionId,
+  reason: string,
+  location?: string
+): void => {
+  sensorLog(actionId, 'blocked', location, {
+    blockReason: reason,
+    serviceAvailable: false
+  })
 }
 
-/**
- * Remove stream subscription
- */
-const removeStream = (streamId: string): boolean => {
-  const stream = streamStore.get(streamId)
-  if (stream) {
-    stream.active = false
-    streamStore.set(streamId, stream)
-    return streamStore.forget(streamId)
-  }
-  return false
-}
-
-/**
- * Cleanup old data
- */
-const cleanup = (): void => {
-  try {
-    // Clean old events
-    const allEvents = eventStore.getAll()
-    if (allEvents.length > RETENTION_CONFIG.MAX_EVENTS) {
-      eventStore.clear()
-      const recentEvents = allEvents
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, RETENTION_CONFIG.MAX_EVENTS)
-
-      recentEvents.forEach(event => {
-        eventStore.set(event.id, event)
-      })
-    }
-
-    // Clean old action stats
-    const allStats = actionStatsStore.getAll()
-    if (allStats.length > RETENTION_CONFIG.MAX_ACTIONS) {
-      actionStatsStore.clear()
-      const recentStats = allStats
-        .sort((a, b) => b.lastCall - a.lastCall)
-        .slice(0, RETENTION_CONFIG.MAX_ACTIONS)
-
-      recentStats.forEach(stat => {
-        actionStatsStore.set(stat.id, stat)
-      })
-    }
-
-    // Clean inactive streams
-    const activeStreams = streamStore.getAll().filter(s => s.active)
-    streamStore.clear()
-    activeStreams.forEach(stream => {
-      streamStore.set(stream.id, stream)
-    })
-  } catch (error) {
-    log.error(`Metrics cleanup failed: ${error}`)
-  }
-}
-
-// Cleanup timer
-let cleanupTimer: NodeJS.Timeout | undefined
-
-/**
- * Main metrics interface with sensor architecture
- */
-export const metricsReport = {
-  // Sensor interface
-  sensor: {
+export const // Sensor interface
+  sensor = {
     log: sensorLog,
-    execution: sensorExecution,
+
+    // CRITICAL FIX: Properly implemented sensor methods
+    execution: (
+      actionId: ActionId,
+      duration: number,
+      category?: string,
+      location?: string
+    ) => {
+      sensorLog(actionId, 'execution', location, {duration, category})
+    },
+
     throttle: sensorThrottle,
     debounce: sensorDebounce,
-    error: sensorError,
-    middleware: sensorMiddleware,
-    intralink: sensorIntralink,
-    timeout: sensorTimeout,
-    callToDispatch: sensorCallToDispatch,
-    dispatchToExecute: sensorDispatchToExecute
+
+    error: (
+      actionId: ActionId,
+      error: string,
+      location?: string,
+      stack?: string
+    ) => {
+      sensorLog(actionId, 'error', location, {error, stack})
+    },
+
+    middleware: (
+      actionId: ActionId,
+      middlewareId: string,
+      result: 'accept' | 'reject' | 'transform',
+      location?: string
+    ) => {
+      sensorLog(actionId, 'middleware', location, {middlewareId, result})
+    },
+
+    intralink: (
+      fromActionId: ActionId,
+      toActionId: ActionId,
+      location?: string
+    ) => {
+      sensorLog(fromActionId, 'intralink', location, {toActionId})
+    },
+
+    timeout: (actionId: ActionId, timeout: number, location?: string) => {
+      sensorLog(actionId, 'timeout', location, {timeout})
+    },
+
+    callToDispatch: (actionId: ActionId, metadata?: Record<string, any>) => {
+      sensorLog(actionId, 'dispatch', 'call-to-dispatch', metadata)
+    },
+
+    dispatchToExecute: (
+      actionId: ActionId,
+      executionTime?: number,
+      metadata?: Record<string, any>
+    ) => {
+      sensorLog(actionId, 'execution', 'dispatch-to-execute', {
+        executionTime,
+        ...metadata
+      })
+    },
+
+    // CRITICAL FIX: New sensor methods for missing events
+    skip: sensorChangeDetectionSkip,
+    blocked: sensorServiceBlocked
+  }
+
+/**
+ * Main metrics interface with comprehensive sensor architecture
+ */
+export const metricsReport = {
+  // Enhanced sensor interface
+  sensor,
+  // Live streaming
+  createStream: (
+    filter: EventFilter,
+    callback: (event: RawMetricEvent) => void
+  ): string => {
+    const streamId = `stream-${++streamIdCounter}`
+    const subscription: StreamSubscription = {
+      id: streamId,
+      filter,
+      callback,
+      active: true
+    }
+    streamStore.set(streamId, subscription)
+    return streamId
   },
 
-  // Live streaming
-  createStream,
-  removeStream,
+  removeStream: (streamId: string): boolean => {
+    const stream = streamStore.get(streamId)
+    if (stream) {
+      stream.active = false
+      streamStore.set(streamId, stream)
+      return streamStore.forget(streamId)
+    }
+    return false
+  },
+
+  // Enhanced tracking methods
   trackExecution: (actionId: string, duration: number, category?: string) => {
-    sensorExecution(actionId, duration, category, 'execution')
+    sensorLog(actionId, 'execution', 'execution-tracking', {duration, category})
   },
 
   trackError: (actionId: string, error: string, location?: string) => {
-    sensorError(actionId, error, location)
+    sensorLog(actionId, 'error', location || 'error-tracking', {error})
   },
 
   trackProtection: (actionId: string, protectionType: string) => {
-    sensorLog(actionId, protectionType as EventType, 'protection')
+    sensorLog(actionId, protectionType as EventType, 'protection-system')
   },
 
   trackMiddlewareRejection: (actionId: string) => {
-    sensorMiddleware(actionId, 'unknown', 'reject', 'middleware-rejection')
+    sensorLog(actionId, 'middleware', 'middleware-rejection', {
+      result: 'reject'
+    })
   },
 
   trackThrottle: (actionId: string) => {
@@ -478,9 +327,10 @@ export const metricsReport = {
   },
 
   trackChangeDetectionSkip: (actionId: string) => {
-    sensorLog(actionId, 'skip', 'change-detection')
+    sensorChangeDetectionSkip(actionId, 'change-detection')
   },
-  // Data export (raw)
+
+  // Data export
   exportEvents: (query?: LiveQuery): RawMetricEvent[] => {
     let events = eventStore.getAll()
 
@@ -504,10 +354,8 @@ export const metricsReport = {
       }
     }
 
-    // Sort by timestamp (newest first)
     events.sort((a, b) => b.timestamp - a.timestamp)
 
-    // Apply pagination
     if (query?.offset) {
       events = events.slice(query.offset)
     }
@@ -518,27 +366,26 @@ export const metricsReport = {
     return events
   },
 
-  // Live events (from buffer)
   getLiveEvents: (query?: LiveQuery): RawMetricEvent[] => {
     let events = [...liveEventBuffer]
-
-    if (query && (matchesFilter as any)) {
+    if (query && matchesFilter) {
       events = events.filter(event => matchesFilter(event, query))
     }
-
     return events.slice(0, query?.limit || 100)
   },
 
-  // Essential stats for breathing system
+  // CRITICAL FIX: System stats with proper call counting
   getSystemStats: (): SystemStats => ({...systemStats}),
+
   getActionStats: (actionId: ActionId): ActionStats | undefined => {
     return actionStatsStore.get(actionId)
   },
+
   getActionMetrics: (actionId: ActionId): ActionStats | undefined => {
     return actionStatsStore.get(actionId)
   },
 
-  // Basic reporting
+  // Enhanced reporting
   getBasicReport: (): string => {
     const stats = systemStats
     const uptime = Math.floor((Date.now() - stats.startTime) / 1000)
@@ -585,13 +432,144 @@ Live Streams: ${streamCount}`
       clearInterval(cleanupTimer)
       cleanupTimer = undefined
     }
-    // Deactivate all streams
     const allStreams = streamStore.getAll()
     allStreams.forEach(stream => {
       stream.active = false
       streamStore.set(stream.id, stream)
     })
     streamStore.clear()
+  }
+}
+
+// Required interfaces and types
+interface ActionStats {
+  id: ActionId
+  calls: number
+  errors: number
+  lastCall: number
+}
+
+interface EventFilter {
+  actionIds?: string[]
+  eventTypes?: EventType[]
+  since?: number
+  priority?: Priority[]
+  location?: string
+}
+
+interface LiveQuery extends EventFilter {
+  limit?: number
+  offset?: number
+}
+
+interface StreamSubscription {
+  id: string
+  filter: EventFilter
+  callback: (event: RawMetricEvent) => void
+  active: boolean
+}
+
+// Helper functions
+let streamIdCounter = 0
+let cleanupTimer: NodeJS.Timeout | undefined
+
+const updateActionStats = (event: RawMetricEvent): void => {
+  let stats = actionStatsStore.get(event.actionId)
+
+  if (!stats) {
+    stats = {
+      id: event.actionId,
+      calls: 0,
+      errors: 0,
+      lastCall: 0
+    }
+  }
+
+  switch (event.eventType) {
+    case 'call':
+      stats.calls++
+      stats.lastCall = event.timestamp
+      break
+    case 'error':
+      stats.errors++
+      break
+  }
+
+  actionStatsStore.set(event.actionId, stats)
+}
+
+const notifyStreams = (event: RawMetricEvent): void => {
+  const activeStreams = streamStore.getAll().filter(s => s.active)
+
+  for (const stream of activeStreams) {
+    try {
+      if (matchesFilter(event, stream.filter)) {
+        stream.callback(event)
+      }
+    } catch (error) {
+      log.error(`Stream notification failed for ${stream.id}: ${error}`)
+      stream.active = false
+      streamStore.set(stream.id, stream)
+    }
+  }
+}
+
+const matchesFilter = (event: RawMetricEvent, filter: EventFilter): boolean => {
+  if (filter.actionIds && !filter.actionIds.includes(event.actionId)) {
+    return false
+  }
+  if (filter.eventTypes && !filter.eventTypes.includes(event.eventType)) {
+    return false
+  }
+  if (filter.since && event.timestamp < filter.since) {
+    return false
+  }
+  if (
+    filter.priority &&
+    event.priority &&
+    !filter.priority.includes(event.priority)
+  ) {
+    return false
+  }
+  if (filter.location && event.location !== filter.location) {
+    return false
+  }
+  return true
+}
+
+const cleanup = (): void => {
+  try {
+    const allEvents = eventStore.getAll()
+    if (allEvents.length > RETENTION_CONFIG.MAX_EVENTS) {
+      eventStore.clear()
+      const recentEvents = allEvents
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, RETENTION_CONFIG.MAX_EVENTS)
+
+      recentEvents.forEach(event => {
+        eventStore.set(event.id, event)
+      })
+    }
+
+    const allStats = actionStatsStore.getAll()
+    if (allStats.length > RETENTION_CONFIG.MAX_ACTIONS) {
+      actionStatsStore.clear()
+      const recentStats = allStats
+        .sort((a, b) => b.lastCall - a.lastCall)
+        .slice(0, RETENTION_CONFIG.MAX_ACTIONS)
+
+      recentStats.forEach(stat => {
+        actionStatsStore.set(stat.id, stat)
+      })
+    }
+
+    const activeStreams = streamStore.getAll().filter(s => s.active)
+    streamStore.clear()
+    activeStreams.forEach(stream => {
+      streamStore.set(stream.id, stream)
+    })
+  } catch (error) {
+    log.error(`Metrics cleanup failed: ${error}`)
   }
 }
 

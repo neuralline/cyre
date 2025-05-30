@@ -3,7 +3,7 @@
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
-import {metricsReport} from '../context/metrics-report'
+import {metricsReport, sensor} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
 import {
   compileProtectionPipeline,
@@ -11,6 +11,7 @@ import {
   ProtectionFn
 } from './cyre-actions'
 import {io} from '../context/state'
+import {log} from './cyre-log'
 
 /*
 
@@ -24,105 +25,25 @@ import {io} from '../context/state'
       Solution: Preserve exact values throughout call chain
 
 */
-/** 
-export const scheduleCall = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<CyreResponse> => {
-  try {
-    // Create execution callback - protections already applied in main call()
-    const executionCallback = async () => {
-      // Direct dispatch without re-applying protections
-      await useDispatch(action, payload)
-    }
 
-    // Configure timing parameters
-    const interval = action.interval || action.delay || 0
-    const repeat = action.repeat ?? 1
-    const delay = action.delay
-
-    log.debug(
-      `Scheduling with TimeKeeper: interval=${interval}, delay=${delay}, repeat=${repeat}, id=${action.id}`
-    )
-
-    // Schedule with timekeeper
-    const timekeeperResult = TimeKeeper.keep(
-      interval,
-      executionCallback,
-      repeat,
-      action.id,
-      delay
-    )
-
-    if (timekeeperResult.kind === 'error') {
-      metricsReport.sensor.error(
-        action.id,
-        timekeeperResult.error.message,
-        'timekeeper-scheduling'
-      )
-      return {
-        ok: false,
-        payload: null,
-        message: `Timekeeper scheduling failed: ${timekeeperResult.error.message}`,
-        error: timekeeperResult.error.message
-      }
-    }
-
-    const timingDescription =
-      delay !== undefined && action.interval
-        ? `delay: ${delay}ms, then interval: ${interval}ms`
-        : delay !== undefined
-        ? `delay: ${delay}ms`
-        : action.interval
-        ? `interval: ${interval}ms`
-        : 'immediate'
-
-    metricsReport.sensor.log(action.id, 'delayed', 'timekeeper-scheduled', {
-      interval,
-      delay,
-      repeat,
-      timingDescription
-    })
-
-    return {
-      ok: true,
-      payload: null,
-      message: `Scheduled ${repeat} execution(s) with ${timingDescription}`,
-      metadata: {
-        executionPath: 'timekeeper',
-        interval,
-        delay,
-        repeat,
-        scheduled: true,
-        timingDescription
-      }
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Timekeeper execution failed for ${action.id}: ${errorMessage}`)
-    metricsReport.sensor.error(action.id, errorMessage, 'timekeeper-execution')
-
-    return {
-      ok: false,
-      payload: null,
-      message: `Timekeeper execution failed: ${errorMessage}`,
-      error: errorMessage
-    }
-  }
-}
-*/
 export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
   const startTime = performance.now()
+  sensor.log(action.id, 'call', 'call-initiation', {
+    timestamp: Date.now(),
+    hasPayload: payload !== undefined,
+    actionType: action.type || 'unknown'
+  })
   const context: ProtectionContext = {
     action,
     payload: payload ?? action.payload,
     metrics: io.getMetrics(action.id),
     timestamp: Date.now()
   }
-  const pipeline = action._protectionPipeline ?? []
+  const pipeline = action._protectionPipeline || []
+
   // Run protection pipeline
   for (const protection of pipeline) {
     const result = protection(context)
@@ -130,12 +51,18 @@ export async function processCall(
     if (!result.pass) {
       // Handle delayed execution (debounce)
       if (result.delayed && result.duration) {
+        sensor.debounce(
+          action.id,
+          result.duration,
+          1, // collapsed calls count
+          'protection-pipeline'
+        )
         return useDebounce(action, context.payload, result.duration)
       }
-
-      // Protection blocked execution
-      metricsReport.sensor.log(action.id, 'blocked', 'protection', {
-        reason: result.reason
+      const protectionType = extractProtectionType(result.reason)
+      sensor.log(action.id, protectionType, 'protection-pipeline', {
+        reason: result.reason,
+        protectionActive: true
       })
 
       return {
@@ -157,7 +84,22 @@ export async function processCall(
   }
 
   // Direct execution
-  return useDispatch(action, context.payload)
+  const result = await useDispatch(action, context.payload)
+
+  // Handle IntraLink chain reactions
+  if (result.ok && result.metadata?.intraLink) {
+    const {id: chainId, payload: chainPayload} = result.metadata.intraLink
+    try {
+      const chainResult = await processCall(io.get(chainId)!, chainPayload)
+      result.metadata.chainResult = chainResult
+    } catch (error) {
+      log.error(`IntraLink chain failed for ${chainId}: ${error}`)
+      result.metadata.chainError =
+        error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  return result
 }
 
 /**
@@ -172,6 +114,18 @@ function needsScheduling(action: IO): boolean {
 }
 
 /**
+ * Extract protection type from reason message for better metrics
+ */
+function extractProtectionType(
+  reason: string
+): 'throttle' | 'blocked' | 'skip' | 'error' {
+  if (reason.includes('Throttled')) return 'throttle'
+  if (reason.includes('unchanged')) return 'skip'
+  if (reason.includes('not available')) return 'blocked'
+  return 'error'
+}
+
+/**
  * Schedule timed execution (interval/delay/repeat)
  */
 function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
@@ -179,15 +133,30 @@ function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
   const repeat = action.repeat ?? 1
   const delay = action.delay
 
-  TimeKeeper.keep(
+  metricsReport.sensor.log(action.id, 'info', 'scheduling', {
+    interval,
+    delay,
+    repeat,
+    scheduledExecution: true
+  })
+  const result = TimeKeeper.keep(
     interval,
     async () => {
-      await processCall(action, payload)
+      await useDispatch(action, payload)
     },
     repeat,
     action.id,
     delay
   )
+
+  if (result.kind === 'error') {
+    return {
+      ok: false,
+      payload: null,
+      message: `Scheduling failed: ${result.error.message}`,
+      error: result.error.message
+    }
+  }
 
   const timingDesc =
     delay !== undefined
@@ -218,29 +187,36 @@ function useDebounce(
   delay: number
 ): CyreResponse {
   // Clear existing debounce timer
-
-  //debounce already exist
-  if (action._debounceTimer === undefined) {
-    //first time debounce
-    const timerId = `${action.id}-debounce-${Date.now()}`
-    action._debounceTimer = timerId
-    return {
-      ok: true,
-      payload: null,
-      message: `Debounced - will execute in ${delay}ms`,
-      metadata: {delayed: true, duration: delay}
-    }
+  if (action._debounceTimer) {
+    TimeKeeper.forget(action._debounceTimer)
   }
-  TimeKeeper.forget(action._debounceTimer)
-  TimeKeeper.keep(
+
+  const timerId = `${action.id}-debounce-${Date.now()}`
+  action._debounceTimer = timerId
+
+  const result = TimeKeeper.keep(
     delay,
     async () => {
       action._debounceTimer = undefined
+
+      metricsReport.sensor.log(action.id, 'info', 'debounce-execution', {
+        executedAfterDelay: delay,
+        timestamp: Date.now()
+      })
       await useDispatch(action, payload)
     },
     1,
-    action._debounceTimer
+    timerId
   )
+
+  if (result.kind === 'error') {
+    return {
+      ok: false,
+      payload: null,
+      message: `Debounce scheduling failed: ${result.error.message}`,
+      error: result.error.message
+    }
+  }
 
   return {
     ok: true,

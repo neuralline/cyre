@@ -106,16 +106,16 @@ const addSingleSubscriber = (
     subscribers.add(subscriber)
 
     const successMessage = `${MSG.SUBSCRIPTION_SUCCESS_SINGLE}: ${subscriber.id}`
-    log.debug(successMessage)
+    //log.debug(successMessage)
 
     return {
       ok: true,
       message: successMessage,
       unsubscribe: () => {
         const removed = subscribers.forget(subscriber.id)
-        if (removed) {
-          log.debug(`Unsubscribed from ${subscriber.id}`)
-        }
+        // if (removed) {
+        //   log.debug(`Unsubscribed from ${subscriber.id}`)
+        // }
         return removed
       }
     }
@@ -240,9 +240,9 @@ export const hasSubscriber = (actionId: string): boolean => {
  */
 export const removeSubscriber = (actionId: string): boolean => {
   const removed = subscribers.forget(actionId)
-  if (removed) {
-    log.debug(`Removed subscriber for ${actionId}`)
-  }
+  // if (removed) {
+  //   log.debug(`Removed subscriber for ${actionId}`)
+  // }
   return removed
 }
 
@@ -258,7 +258,7 @@ export const getAllSubscribers = (): Subscriber[] => {
  */
 export const clearAllSubscribers = (): void => {
   subscribers.clear()
-  log.debug('Cleared all subscribers')
+  //log.debug('Cleared all subscribers')
 }
 
 // Export the main subscribe function as default

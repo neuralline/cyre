@@ -7,7 +7,7 @@ import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
-import {metricsReport} from './context/metrics-report'
+import {metricsReport, sensor} from './context/metrics-report'
 import {registerSingleAction} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 import {stateMachineService} from './state-machine/state-machine-service'
@@ -91,7 +91,7 @@ const action = (
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Action registration failed: ${errorMessage}`)
 
-    metricsReport.sensor.log('system', 'error', 'action-registration', {
+    sensor.log('system', 'error', 'action-registration', {
       error: errorMessage
     })
 
@@ -111,6 +111,10 @@ export const call = async (
 ): Promise<CyreResponse> => {
   // Fast validation
   if (!id || typeof id !== 'string') {
+    sensor.log('unknown', 'error', 'call-validation', {
+      invalidId: true,
+      providedId: id
+    })
     return {
       ok: false,
       payload: null,
@@ -120,14 +124,25 @@ export const call = async (
 
   const action = io.get(id)
   if (!action) {
+    sensor.log(id, 'error', 'call-validation', {
+      actionNotFound: true,
+      actionId: id
+    })
     return {
       ok: false,
       payload: null,
       message: `Channel not found: ${id}`
     }
   }
-
+  const callStartTime = performance.now()
   try {
+    sensor.log(id, 'call', 'call-entry', {
+      timestamp: Date.now(),
+      hasPayload: payload !== undefined,
+      payloadType: typeof payload,
+      actionType: action.type || 'unknown',
+      callInitiationTime: callStartTime
+    })
     // Execute optimized pipeline
     const result = await processCall(action, payload)
 
@@ -137,15 +152,31 @@ export const call = async (
     //   const chainResult = await call(chainId, chainPayload)
     //   result.metadata.chainResult = chainResult
     // }
+    const totalCallTime = performance.now() - callStartTime
+
+    sensor.log(id, 'info', 'call-completion', {
+      success: result.ok,
+      totalCallTime,
+      callPath: result.metadata?.executionPath || 'unknown'
+    })
 
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+    const totalCallTime = performance.now() - callStartTime
+
+    // CRITICAL FIX: Log call errors
+    sensor.error(id, errorMessage, 'call-execution')
+
     return {
       ok: false,
       payload: null,
       message: `Call failed: ${errorMessage}`,
-      error: errorMessage
+      error: errorMessage,
+      metadata: {
+        totalCallTime,
+        executionPath: 'call-error'
+      }
     }
   }
 }
@@ -156,7 +187,17 @@ export const call = async (
 const on = (actionId: string, handler: Function): any => {
   const result = subscribe(actionId, handler)
   if (result.ok) {
-    persistence.autoSave() // Auto-save after subscription
+    // CRITICAL FIX: Log subscription events
+    sensor.log(actionId, 'info', 'subscription', {
+      subscriptionSuccess: true,
+      timestamp: Date.now()
+    })
+    persistence.autoSave()
+  } else {
+    sensor.log(actionId, 'error', 'subscription', {
+      subscriptionFailed: true,
+      reason: result.message
+    })
   }
   return result
 }
@@ -175,20 +216,24 @@ const forget = (id: string): boolean => {
     timeline.forget(id)
 
     if (actionRemoved || subscriberRemoved) {
-      log.debug(`Removed action and subscriber for ${id}`)
-      metricsReport.sensor.log(id, 'info', 'action-removal', {success: true})
-      persistence.autoSave() // Auto-save after removal
+      //log.debug(`Removed action and subscriber for ${id}`)
+      sensor.log(id, 'info', 'action-removal', {
+        success: true,
+        actionRemoved,
+        subscriberRemoved
+      })
+      persistence.autoSave()
       return true
     }
 
-    metricsReport.sensor.log(id, 'info', 'action-removal', {
+    sensor.log(id, 'info', 'action-removal', {
       success: false,
       reason: 'not found'
     })
     return false
   } catch (error) {
     log.error(`Failed to forget ${id}: ${error}`)
-    metricsReport.sensor.error(id, String(error), 'action-removal')
+    sensor.error(id, String(error), 'action-removal')
     return false
   }
 }
@@ -198,7 +243,7 @@ const forget = (id: string): boolean => {
  */
 const clear = (): void => {
   try {
-    metricsReport.sensor.log('system', 'info', 'system-clear', {
+    sensor.log('system', 'info', 'system-clear', {
       timestamp: Date.now()
     })
 
@@ -208,23 +253,21 @@ const clear = (): void => {
     metricsReport.reset()
     metricsState.reset()
 
-    // Clear state machines
     stateMachineService.clear()
-
-    persistence.autoSave() // Auto-save after clear
+    persistence.autoSave()
 
     log.success('System cleared')
-    metricsReport.sensor.log('system', 'success', 'system-clear', {
+    sensor.log('system', 'success', 'system-clear', {
       completed: true
     })
   } catch (error) {
     log.error(`Clear operation failed: ${error}`)
-    metricsReport.sensor.error('system', String(error), 'system-clear')
+    sensor.error('system', String(error), 'system-clear')
   }
 }
 
 /**
- * Enhanced initialization with configuration and persistent state
+ * Initialize with configuration and persistent state
  */
 const initialize = async (
   config: CyreConfig = {}
@@ -241,7 +284,7 @@ const initialize = async (
       adapter: createLocalStorageAdapter()
     })
 
-    // Load persistent state if provided or from storage
+    // Load persistent state
     if (config.persistentState) {
       persistence.hydrate(config.persistentState)
       log.debug('Loaded state from config')
@@ -265,14 +308,15 @@ const initialize = async (
       `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
     )
 
-    metricsReport.sensor.log('system', 'success', 'system-initialization', {
+    sensor.log('system', 'success', 'system-initialization', {
       timestamp: Date.now(),
       features: [
         'simplified-core',
         'built-in-protections',
         'breathing-system',
         'state-machines',
-        'persistent-state'
+        'persistent-state',
+        'metrics-tracking'
       ],
       restoredActions: stats.actionCount,
       restoredSubscribers: stats.subscriberCount
@@ -282,13 +326,13 @@ const initialize = async (
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.critical(`Cyre failed to initialize : ${errorMessage}`)
-    metricsReport.sensor.error('system', errorMessage, 'system-initialization')
+    sensor.error('system', errorMessage, 'system-initialization')
     return {ok: false, payload: 0, message: errorMessage}
   }
 }
 
 /**
- * Main CYRE instance - with persistent state integration
+ * Main CYRE instance with comprehensive metrics
  */
 export const cyre = {
   // Core methods
@@ -300,14 +344,14 @@ export const cyre = {
   forget,
   clear,
 
-  // State methods (existing)
+  // State methods
   hasChanged: (id: string, payload: ActionPayload): boolean =>
     io.hasChanged(id, payload),
   getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
   updatePayload: (id: string, payload: ActionPayload): void =>
     io.updatePayload(id, payload),
 
-  // NEW: Persistent state methods
+  // Persistent state methods
   saveState: async (key?: string): Promise<void> => {
     await persistence.saveState(key)
   },
@@ -320,31 +364,31 @@ export const cyre = {
   },
 
   exportState: (): PersistentState => persistence.serialize(),
-
   getStats: () => persistence.getStats(),
 
-  // Control methods
+  // Control methods with metrics
   pause: (id?: string): void => {
     TimeKeeper.pause(id)
-    metricsReport.sensor.log(id || 'system', 'info', 'system-pause')
+    sensor.log(id || 'system', 'info', 'system-pause')
   },
+
   resume: (id?: string): void => {
     TimeKeeper.resume(id)
-    metricsReport.sensor.log(id || 'system', 'info', 'system-resume')
+    sensor.log(id || 'system', 'info', 'system-resume')
   },
+
   lock: (): {ok: boolean; message: string; payload: null} => {
     metricsState.lock()
-    metricsReport.sensor.log('system', 'critical', 'system-lock')
+    sensor.log('system', 'critical', 'system-lock')
     return {ok: true, message: 'System locked', payload: null}
   },
 
   shutdown: (): void => {
     try {
-      metricsReport.sensor.log('system', 'critical', 'system-shutdown', {
+      sensor.log('system', 'critical', 'system-shutdown', {
         timestamp: Date.now()
       })
 
-      // Save state before shutdown
       persistence.saveState().catch(error => {
         log.error(`Failed to save state during shutdown: ${error}`)
       })
@@ -357,14 +401,15 @@ export const cyre = {
       }
     } catch (error) {
       log.error(`Shutdown failed: ${error}`)
-      metricsReport.sensor.error('system', String(error), 'system-shutdown')
+      sensor.error('system', String(error), 'system-shutdown')
     }
   },
 
   status: (): boolean => metricsState.get().hibernating,
 
-  // Monitoring methods (existing)
+  // Monitoring methods
   getBreathingState: () => metricsState.get().breathing,
+
   getPerformanceState: () => {
     const systemStats = metricsReport.getSystemStats()
     return {
@@ -378,8 +423,10 @@ export const cyre = {
     }
   },
 
+  // CRITICAL FIX: Enhanced metrics with proper call tracking
   getMetrics: (channelId?: string) => {
     const state = metricsState.get()
+    const systemStats = metricsReport.getSystemStats()
 
     if (channelId) {
       const actionStats = metricsReport.getActionStats(channelId)
@@ -388,6 +435,7 @@ export const cyre = {
         activeFormations: state.activeFormations,
         inRecuperation: state.inRecuperation,
         breathing: state.breathing,
+        totalCalls: systemStats.totalCalls,
         formations: actionStats
           ? [
               {
@@ -409,6 +457,7 @@ export const cyre = {
       activeFormations: state.activeFormations,
       inRecuperation: state.inRecuperation,
       breathing: state.breathing,
+      totalCalls: systemStats.totalCalls,
       formations: timeline.getAll().map(timer => ({
         id: timer.id,
         duration: timer.duration,
