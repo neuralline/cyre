@@ -14,12 +14,9 @@ describe('Action pipeline', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== ACTION PIPELINE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== ACTION PIPELINE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

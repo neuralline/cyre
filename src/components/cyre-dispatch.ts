@@ -1,5 +1,4 @@
 // src/components/cyre-dispatch.ts
-// CRITICAL FIX: Stop converting falsy values to null
 
 import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
@@ -14,9 +13,7 @@ import {metricsReport} from '../context/metrics-report'
       
       CRITICAL FIX: Stop converting falsy values (0, undefined, false, '') to null
       
-      The bug was in payload processing:
-      OLD: const currentPayload = payload || action.payload  // ❌ Converts falsy to action.payload
-      NEW: const currentPayload = payload !== undefined ? payload : action.payload  // ✅ Preserves falsy
+    
 
 */
 
@@ -79,28 +76,6 @@ export const useDispatch = async (
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
-    }
-
-    // Handle IntraLink (chain reactions)
-    if (result.intraLink) {
-      log.debug(`IntraLink detected: ${action.id} -> ${result.intraLink.id}`)
-
-      // Record the chain reaction
-      metricsReport.sensor.intralink(action.id, result.intraLink.id, 'dispatch')
-
-      // Return success with IntraLink info for processing by caller
-      return {
-        ok: true,
-        payload: result.payload,
-        message: result.message,
-        metadata: {
-          executionTime: totalTime,
-          intraLink: {
-            id: result.intraLink.id,
-            payload: result.intraLink.payload
-          }
-        }
-      }
     }
 
     return {

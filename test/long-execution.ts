@@ -64,12 +64,9 @@ describe('Advanced Long-Running Operations', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== ADVANCED LONG-RUNNING TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== ADVANCED LONG-RUNNING TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

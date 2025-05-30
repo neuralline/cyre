@@ -19,12 +19,9 @@ describe('CYRE Payload Update Behavior', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('\n===== PAYLOAD UPDATE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== PAYLOAD UPDATE TEST COMPLETED =====\n')
     vi.restoreAllMocks()
   })
 

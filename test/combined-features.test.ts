@@ -21,12 +21,9 @@ describe('Combined Protection Features', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== COMBINED FEATURES TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== COMBINED FEATURES TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

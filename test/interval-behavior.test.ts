@@ -35,8 +35,6 @@ describe('CYRE Interval Behavior', () => {
 
     // Clear our tracking array
     testActionIds.length = 0
-
-    console.log('\n===== INTERVAL BEHAVIOR TEST STARTED =====')
   })
 
   afterEach(() => {
@@ -45,7 +43,6 @@ describe('CYRE Interval Behavior', () => {
       cyre.forget(id) // Use forget instead of clear
     })
 
-    console.log('===== INTERVAL BEHAVIOR TEST COMPLETED =====\n')
     vi.restoreAllMocks()
   })
 

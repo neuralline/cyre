@@ -16,11 +16,9 @@ describe('Middleware Loss Diagnostic Test', () => {
   beforeEach(() => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     cyre.initialize()
-    console.log('===== MIDDLEWARE LOSS DIAGNOSTIC TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== MIDDLEWARE LOSS DIAGNOSTIC TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

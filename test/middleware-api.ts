@@ -67,14 +67,11 @@ describe('Middleware System Diagnostic', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== MIDDLEWARE DIAGNOSTIC TEST STARTED =====')
   })
 
   afterEach(() => {
     // Final system inspection
     inspectSystem()
-    console.log('===== MIDDLEWARE DIAGNOSTIC TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

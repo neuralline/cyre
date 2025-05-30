@@ -20,12 +20,10 @@ describe('Cyre Long Interval Stability', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     cyre.initialize()
     testActionIds.length = 0
-    console.log('===== LONG INTERVAL STABILITY TEST STARTED =====')
   })
 
   afterEach(() => {
     testActionIds.forEach(id => cyre.forget(id))
-    console.log('===== LONG INTERVAL STABILITY TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

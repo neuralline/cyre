@@ -16,12 +16,9 @@ describe('Advanced Throttle and Debounce Tests', () => {
 
     // Initialize cyre fresh for each test
     cyre.initialize()
-
-    console.log('===== ADVANCED THROTTLE/DEBOUNCE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== ADVANCED THROTTLE/DEBOUNCE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

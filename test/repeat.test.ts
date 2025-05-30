@@ -17,14 +17,10 @@ describe('CYRE Repeat and Timing Behavior with New TimeKeeper', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== REPEAT BEHAVIOR WITH NEW TIMEKEEPER TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log(
-      '===== REPEAT BEHAVIOR WITH NEW TIMEKEEPER TEST COMPLETED ====='
-    )
+    console.log()
     vi.restoreAllMocks()
   })
 

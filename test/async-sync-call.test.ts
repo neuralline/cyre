@@ -1,7 +1,7 @@
 // test/async-sync-call.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src/'
 
 /*
 This test suite examines how Cyre handles different call patterns:
@@ -66,12 +66,9 @@ describe('Cyre Async and Sync Call Patterns', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== ASYNC/SYNC CALL TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== ASYNC/SYNC CALL TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

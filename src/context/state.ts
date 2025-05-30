@@ -46,26 +46,25 @@ const cleanupAction = (id: StateKey): void => {
 
 // Export IO operations with proper metrics tracking and synchronization
 export const io = {
-  set: (ioState: IO): void => {
-    if (!ioState?.id) throw new Error('IO must have an id')
-
+  set: (action: IO): void => {
     try {
+      if (!action?.id) throw new Error('IO state: Action must have an id')
       const enhanced: IO = {
-        ...ioState,
+        ...action,
         timestamp: Date.now(),
-        type: ioState.type || ioState.id
+        type: action.type || action.id
       }
 
-      cleanupAction(ioState.id)
-      ioStore.set(ioState.id, enhanced)
+      cleanupAction(action.id)
+      ioStore.set(action.id, enhanced)
 
       // Initialize action metrics properly with current timestamp
 
-      const currentMetrics = actionMetrics.get(ioState.id)
+      const currentMetrics = actionMetrics.get(action.id)
 
       // Initialize metrics if they don't exist or are invalid
       if (!currentMetrics) {
-        actionMetrics.set(ioState.id, {
+        actionMetrics.set(action.id, {
           lastExecutionTime: 0, // Keep as 0 until first execution
           executionCount: 0,
           errors: []
@@ -73,8 +72,8 @@ export const io = {
       }
 
       // Initialize payload history for change detection if needed
-      if (ioState.detectChanges && ioState.payload !== undefined) {
-        payloadHistory.set(ioState.id, ioState.payload)
+      if (action.detectChanges && action.payload !== undefined) {
+        payloadHistory.set(action.id, action.payload)
       }
 
       // Record call in quantum state

@@ -19,15 +19,12 @@ describe('useCyre Hook', () => {
 
     // Initialize CYRE system
     cyre.initialize()
-
-    console.log('===== useCyre Hook Test Started =====')
   })
 
   afterEach(() => {
     // Clean up any remaining actions/subscriptions
     cyre.clear()
     vi.restoreAllMocks()
-    console.log('===== useCyre Hook Test Completed =====')
   })
 
   /**

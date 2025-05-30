@@ -13,12 +13,9 @@ describe('Throttle Protection Pipeline', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== THROTTLE PROTECTION TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== THROTTLE PROTECTION TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

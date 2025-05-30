@@ -24,15 +24,12 @@ describe('TimeKeeper with Redesigned API', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== TIMEKEEPER REDESIGN TEST STARTED =====')
   })
 
   afterEach(() => {
     // Clean up all timers
     timeKeeper.reset()
 
-    console.log('===== TIMEKEEPER REDESIGN TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

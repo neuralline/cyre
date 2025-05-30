@@ -17,12 +17,9 @@ describe('Duplicate Registration Handling', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== DUPLICATE HANDLING TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== DUPLICATE HANDLING TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

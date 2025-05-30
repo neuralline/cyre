@@ -10,12 +10,9 @@ describe('Debounce Functionality', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== DEBOUNCE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== DEBOUNCE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

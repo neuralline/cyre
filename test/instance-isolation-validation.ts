@@ -17,11 +17,9 @@ describe('Instance Isolation Validation', () => {
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    console.log('===== INSTANCE ISOLATION VALIDATION TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== INSTANCE ISOLATION VALIDATION TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

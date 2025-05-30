@@ -24,7 +24,7 @@ const dataDefinitions = {
         }
   },
 
-  payload: (attribute: any = null) => {
+  payload: (attribute: any = undefined) => {
     return {ok: true, payload: attribute}
   },
 
@@ -107,6 +107,16 @@ const dataDefinitions = {
           required: false
         }
   },
+  _debounceTimer: (attribute: string = '') => {
+    return typeof attribute === 'string'
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: null,
+          message: `'${attribute}' invalid action._debounceTimer value`,
+          required: false
+        }
+  },
 
   log: (attribute: boolean = false) => {
     return typeof attribute === 'boolean'
@@ -118,31 +128,25 @@ const dataDefinitions = {
           required: false
         }
   },
-
-  middleware: (attribute: any = []) => {
-    // Check if it's an array
-    if (Array.isArray(attribute)) {
-      return {
-        ok: true,
-        payload: attribute
-      }
-    }
-
-    // Handle string case for backward compatibility
-    if (typeof attribute === 'string') {
-      return {
-        ok: true,
-        payload: [attribute]
-      }
-    }
-
-    // Invalid value
-    return {
-      ok: false,
-      payload: [],
-      message: `'${attribute}' invalid action.middleware value`,
-      required: false
-    }
+  _protectionPipeline: (attribute: any = []) => {
+    return typeof attribute === 'boolean'
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: false,
+          message: `'${attribute}' invalid action._bypassDebounce value`,
+          required: false
+        }
+  },
+  _bypassDebounce: (attribute: boolean = false) => {
+    return typeof attribute === 'boolean'
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: false,
+          message: `'${attribute}' invalid action._bypassDebounce value`,
+          required: false
+        }
   },
 
   debounce: (attribute: number = 0) => {

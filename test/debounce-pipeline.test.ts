@@ -13,12 +13,9 @@ describe('Debounce Protection Pipeline', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== DEBOUNCE PROTECTION TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== DEBOUNCE PROTECTION TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

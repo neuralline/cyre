@@ -17,12 +17,9 @@ describe('Corrected CYRE Subscription Test', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

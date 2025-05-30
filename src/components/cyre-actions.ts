@@ -1,44 +1,38 @@
 // src/components/cyre-actions.ts
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
-import {metricsReport} from '../context/metrics-report'
-import {log} from './cyre-log'
-import CyreChannel from './cyre-channels'
-import dataDefinitions from '../elements/data-definitions'
 import {io} from '../context/state'
 import {metricsState} from '../context/metrics-state'
-import TimeKeeper from '../components/cyre-timekeeper'
-import {useDispatch} from './cyre-dispatch'
-
-interface ProtectionResult {
-  ok: boolean
-  message: string
-  payload?: ActionPayload
-  blocked?: boolean
-  delayed?: boolean
-  duration?: number
-  metadata?: Record<string, any>
-}
+import CyreChannel from './cyre-channels'
+import dataDefinitions from '../elements/data-definitions'
+import {metricsReport} from '../context/metrics-report'
+import {log} from './cyre-log'
 
 /*
 
       C.Y.R.E - A.C.T.I.O.N.S
       
-      Simplified action registration:
-      - No external middleware in core
-      - Clean channel creation and validation
-      - Built-in protections automatically applied during execution
+      Pipeline-based action system:
+      - Fast path for no protections (pipeline.length === 0)
+      - Fast block for blocked channels (repeat:0, block:true)
+      - Debounce continues pipeline after delay
+      - Extensible protection pipeline
+      - Compiled at registration for performance
 
 */
 
-// Debounce state management using Map for proper state tracking
-const debounceState = new Map<
-  string,
-  {
-    timerId: string
-    lastPayload: ActionPayload
-  }
->()
+export interface ProtectionContext {
+  action: IO
+  payload: ActionPayload
+  metrics: any
+  timestamp: number
+}
+
+export type ProtectionFn = (
+  ctx: ProtectionContext
+) =>
+  | {pass: true; payload?: ActionPayload}
+  | {pass: false; reason: string; delayed?: boolean; duration?: number}
 
 /**
  * Register single action - simplified without external middleware
@@ -61,18 +55,11 @@ export const registerSingleAction = (
     const validatedAction = channelResult.payload
 
     // Get built-in protection info for logging
-    const protections = []
-    if (validatedAction.throttle)
-      protections.push(`throttle:${validatedAction.throttle}ms`)
-    if (validatedAction.debounce)
-      protections.push(`debounce:${validatedAction.debounce}ms`)
-    if (validatedAction.detectChanges) protections.push('change-detection')
-    if (validatedAction.priority)
-      protections.push(`priority:${validatedAction.priority.level}`)
+    const protections = compileProtectionPipeline(attribute)
 
     const protectionInfo =
       protections.length > 0
-        ? `with built-in protections: ${protections.join(', ')}`
+        ? `with built-in protections: ${protections.length}`
         : 'with no protections'
 
     log.debug(`Action ${validatedAction.id} registered ${protectionInfo}`)
@@ -106,356 +93,88 @@ export const registerSingleAction = (
 }
 
 /**
- * System recuperation protection
+ * Compile protection pipeline at action registration
+ * Only includes necessary protections based on action config
  */
-const systemRecuperationProtection = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
-  const systemState = metricsState.get()
+export function compileProtectionPipeline(action: IO): ProtectionFn[] {
+  const pipeline: ProtectionFn[] = []
 
-  if (systemState.breathing.isRecuperating) {
-    const priority = action.priority?.level || 'medium'
-
-    if (priority !== 'critical') {
-      metricsReport.sensor.log(action.id, 'blocked', 'system-recuperation', {
-        priority,
-        stress: systemState.stress.combined
-      })
-
-      return {
-        ok: false,
-        message: `System in recuperation - only critical actions allowed (current priority: ${priority})`,
-        blocked: true,
-        metadata: {
-          protection: 'system-recuperation',
-          stress: systemState.stress.combined,
-          priority
+  // System recuperation - only if not critical
+  if (action.priority?.level !== 'critical') {
+    pipeline.push(ctx => {
+      const state = metricsState.get()
+      if (state.breathing.isRecuperating) {
+        return {
+          pass: false,
+          reason: 'System in recuperation - only critical actions allowed'
         }
       }
-    }
+      return {pass: true}
+    })
   }
 
-  return {
-    ok: true,
-    message: 'System recuperation check passed',
-    payload
-  }
-}
-
-/**
- * Block repeat: 0 protection
- */
-const blockZeroRepeatProtection = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
+  // Zero repeat block - compile time check
   if (action.repeat === 0) {
-    metricsReport.sensor.log(action.id, 'blocked', 'zero-repeat-protection')
+    io.set({...action, block: true})
+    // This could be caught at registration, but keeping for compatibility
+    pipeline.push(() => ({
+      pass: false,
+      reason: 'Action configured with repeat: 0'
+    }))
+  }
 
-    return {
-      ok: false, // Changed to false to actually block execution
-      message: `Action registered with repeat: 0 - execution blocked`,
-      blocked: true,
-      metadata: {
-        protection: 'zero-repeat',
-        repeat: action.repeat
+  if (action.block === true) {
+    // This could be caught at registration, but keeping for compatibility
+    pipeline.push(() => ({
+      pass: false,
+      reason: 'Service not available'
+    }))
+  }
+
+  // Throttle - only if configured
+  if (action.throttle && action.throttle > 0) {
+    pipeline.push(ctx => {
+      const lastExec = ctx.metrics?.lastExecutionTime || 0
+      if (lastExec === 0) return {pass: true} // First execution always passes
+
+      const elapsed = ctx.timestamp - lastExec
+      if (elapsed < action.throttle!) {
+        return {
+          pass: false,
+          reason: `Throttled - ${action.throttle! - elapsed}ms remaining`
+        }
       }
-    }
-  }
-
-  return {
-    ok: true,
-    message: 'Zero repeat check passed',
-    payload
-  }
-}
-
-/**
- * Throttle protection
- */
-const throttleProtection = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
-  if (!action.throttle || action.throttle <= 0) {
-    return {
-      ok: true,
-      message: 'No throttle configured',
-      payload
-    }
-  }
-
-  const now = Date.now()
-  const lastExecution = io.getMetrics(action.id)?.lastExecutionTime || 0
-  const timeSinceLastExecution = now - lastExecution
-
-  // Industry standard: First execution always passes (lastExecution === 0)
-  if (lastExecution !== 0 && timeSinceLastExecution < action.throttle) {
-    const remaining = action.throttle - timeSinceLastExecution
-
-    metricsReport.sensor.throttle(action.id, remaining, 'throttle-protection')
-
-    return {
-      ok: false,
-      message: `Throttled - ${remaining}ms remaining`,
-      blocked: true,
-      metadata: {
-        protection: 'throttle',
-        throttleMs: action.throttle,
-        remaining,
-        lastExecution
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    message: 'Throttle check passed',
-    payload
-  }
-}
-
-/**
- * Debounce protection - using IO state and TimeKeeper
- */
-const debounceProtection = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
-  if (!action.debounce || action.debounce <= 0) {
-    return {
-      ok: true,
-      message: 'Debounce not required',
-      payload
-    }
-  }
-
-  const currentPayload = payload || action.payload || undefined
-
-  // Clear existing debounce timer if it exists
-  if (action.debounceTimerId) {
-    TimeKeeper.forget(action.debounceTimerId)
-  }
-
-  // Create unique timer ID
-  const timerId = `${action.id}-debounce-${Date.now()}`
-  
-  // Store the timer ID with the action
-
-  io.set({
-    ...action,
-    debounceTimerId: timerId
-  })
-
-  // Set new debounce timer using TimeKeeper
-  const timerResult = TimeKeeper.keep(
-    action.debounce,
-    async () => {
-      try {
-        // Get the stored state to access the payload
-        const storedState = debounceState.get(action.id)
-        const executePayload = storedState?.lastPayload || currentPayload
-
-        // Clean up debounce state
-        io.set({
-          ...action,
-          debounceTimerId: undefined
-        })
-
-        // Execute the debounced call through dispatch
-        await useDispatch(action, executePayload)
-      } catch (error) {
-        io.set({
-          ...action,
-          debounceTimerId: undefined
-        })
-        log.critical(`Debounced execution failed for ${action.id}: ${error}`)
-      }
-    },
-    1, // Execute once
-    timerId
-  )
-
-  if (timerResult.kind === 'error') {
-    log.error(
-      `Failed to create debounce timer for ${action.id}: ${timerResult.error.message}`
-    )
-    io.set({
-      ...action,
-      debounceTimerId: undefined
+      return {pass: true}
     })
-    return {
-      ok: false,
-      message: `Debounce timer failed: ${timerResult.error.message}`,
-      blocked: true
-    }
   }
 
-  metricsReport.sensor.debounce(
-    action.id,
-    action.debounce,
-    1,
-    'debounce-protection'
-  )
-
-  return {
-    ok: true,
-    message: `Debounced - will execute in ${action.debounce}ms (maxWait: ${action.maxWait}ms)`,
-    delayed: true,
-    duration: action.debounce,
-    payload,
-    metadata: {
-      protection: 'debounce',
-      debounceMs: action.debounce,
-      maxWait: action.maxWait,
+  // Debounce - simplified without creating timers here
+  if (action.debounce && action.debounce > 0) {
+    pipeline.push(ctx => ({
+      pass: false,
+      reason: `Debounced - will execute in ${action.debounce}ms`,
       delayed: true,
-      timerId
-    }
-  }
-}
-
-/**
- * Change detection protection
- */
-const changeDetectionProtection = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
-  if (!action.detectChanges) {
-    return {
-      ok: true,
-      message: 'Change detection not enabled',
-      payload
-    }
+      duration: action.debounce
+    }))
   }
 
-  const currentPayload = payload || action.payload
-  const hasChanged = io.hasChanged(action.id, currentPayload)
-
-  if (!hasChanged) {
-    metricsReport.sensor.log(action.id, 'skip', 'change-detection', {
-      reason: 'no-change-detected'
+  // Change detection - only if enabled
+  if (action.detectChanges) {
+    pipeline.push(ctx => {
+      const hasChanged = io.hasChanged(ctx.action.id, ctx.payload)
+      if (!hasChanged) {
+        return {
+          pass: false,
+          reason: 'Payload unchanged - execution skipped'
+        }
+      }
+      return {pass: true, payload: ctx.payload}
     })
-
-    return {
-      ok: false,
-      message: 'Payload unchanged - execution skipped',
-      blocked: true,
-      metadata: {
-        protection: 'change-detection',
-        reason: 'no-change-detected'
-      }
-    }
   }
 
-  return {
-    ok: true,
-    message: 'Change detected - execution allowed',
-    payload: currentPayload
-  }
-}
+  // Store compiled pipeline on action
 
-/**
- * Built-in protection registry - extensible for new protections
- */
-const builtInProtections = [
-  {name: 'system-recuperation', fn: systemRecuperationProtection},
-  {name: 'zero-repeat-block', fn: blockZeroRepeatProtection},
-  {name: 'throttle', fn: throttleProtection},
-  {name: 'debounce', fn: debounceProtection},
-  {name: 'change-detection', fn: changeDetectionProtection}
-]
+  io.set({...action, _protectionPipeline: pipeline})
 
-/**
- * Apply all built-in protections to an action
- */
-export const applyBuiltInProtections = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<ProtectionResult> => {
-  let currentPayload = payload
-
-  try {
-    for (const protection of builtInProtections) {
-      const result = await protection.fn(action, currentPayload)
-
-      // If protection blocks or delays execution, return immediately
-      if (!result.ok || result.blocked || result.delayed) {
-        return result
-      }
-
-      // Update payload if protection modified it
-      if (result.payload !== undefined) {
-        currentPayload = result.payload
-      }
-    }
-
-    return {
-      ok: true,
-      message: 'All built-in protections passed',
-      payload: currentPayload,
-      metadata: {
-        protectionsApplied: builtInProtections.map(p => p.name)
-      }
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Built-in protection failed for ${action.id}: ${errorMessage}`)
-
-    metricsReport.sensor.error(action.id, errorMessage, 'built-in-protections')
-
-    return {
-      ok: false,
-      message: `Protection error: ${errorMessage}`,
-      blocked: true,
-      metadata: {
-        protection: 'error',
-        error: errorMessage
-      }
-    }
-  }
-}
-
-/**
- * Add new built-in protection (for extending core functionality)
- */
-export const addBuiltInProtection = (
-  name: string,
-  protectionFn: (
-    action: IO,
-    payload?: ActionPayload
-  ) => Promise<ProtectionResult>
-): void => {
-  builtInProtections.push({name, fn: protectionFn})
-  log.debug(`Added built-in protection: ${name}`)
-}
-
-/**
- * Get list of active built-in protections
- */
-export const getBuiltInProtections = (): string[] => {
-  return builtInProtections.map(p => p.name)
-}
-
-/**
- * Clear debounce state for action (cleanup) - using TimeKeeper
- */
-export const clearDebounceState = (actionId: string): void => {
-  const action = io.get(actionId)
-  if (action?.debounceTimerId) {
-    TimeKeeper.forget(action.debounceTimerId)
-
-    // Clear the timer ID from action
-    const updatedAction = {...action}
-    delete updatedAction.debounceTimerId
-    io.set(updatedAction)
-  }
-}
-
-/**
- * Clear all protection state for action (cleanup)
- */
-export const clearProtectionState = (actionId: string): void => {
-  clearDebounceState(actionId)
+  return pipeline
 }

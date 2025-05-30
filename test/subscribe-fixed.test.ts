@@ -21,15 +21,12 @@ describe('Fixed CYRE Subscription Test', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== FIXED SUBSCRIPTION TEST STARTED =====')
   })
 
   afterEach(() => {
     // Clear all actions and subscriptions
     cyre.clear()
 
-    console.log('===== FIXED SUBSCRIPTION TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

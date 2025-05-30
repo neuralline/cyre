@@ -8,11 +8,8 @@ import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {metricsReport} from './context/metrics-report'
-import {
-  applyBuiltInProtections,
-  registerSingleAction
-} from './components/cyre-actions'
-import {processCall, scheduleCall} from './components/cyre-call'
+import {registerSingleAction} from './components/cyre-actions'
+import {processCall} from './components/cyre-call'
 import {stateMachineService} from './state-machine/state-machine-service'
 import {
   persistence,
@@ -112,12 +109,8 @@ export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
+  // Fast validation
   if (!id || typeof id !== 'string') {
-    metricsReport.sensor.error(
-      'unknown',
-      'Invalid action ID',
-      'call-validation'
-    )
     return {
       ok: false,
       payload: null,
@@ -125,108 +118,29 @@ export const call = async (
     }
   }
 
-  metricsReport.sensor.log(id, 'call', 'call-initiation', {
-    hasPayload: payload !== undefined
-  })
+  const action = io.get(id)
+  if (!action) {
+    return {
+      ok: false,
+      payload: null,
+      message: `Channel not found: ${id}`
+    }
+  }
 
   try {
-    const actionConfig = io.get(id)
-    if (!actionConfig) {
-      metricsReport.sensor.error(id, 'unknown id', 'call-validation')
-      return {
-        ok: false,
-        payload: null,
-        message: `Channel not found: ${id}`
-      }
-    }
+    // Execute optimized pipeline
+    const result = await processCall(action, payload)
 
-    // UNIFIED PROTECTION PIPELINE - Applied once before any execution path
-    const protectionResult = await applyBuiltInProtections(
-      actionConfig,
-      payload
-    )
-
-    if (!protectionResult.ok) {
-      return {
-        ok: false,
-        payload: protectionResult.payload,
-        message: protectionResult.message,
-        metadata: {
-          executionPath: 'blocked-by-protection',
-          protection: 'protectionResult?.protection',
-          ...protectionResult.metadata
-        }
-      }
-    }
-
-    // Handle delayed execution (debounce) - execution scheduled, return success
-    if (protectionResult.delayed) {
-      return {
-        ok: true,
-        payload: protectionResult.payload,
-        message: protectionResult.message,
-        metadata: {
-          executionPath: 'delayed-by-protection',
-          delayed: true,
-          duration: protectionResult.duration,
-          ...protectionResult.metadata
-        }
-      }
-    }
-
-    // Use processed payload from protection pipeline
-    const processedPayload = protectionResult.payload
-
-    // Determine execution path after protections pass
-    const requiresTimekeeper = !!(
-      (
-        actionConfig.interval ||
-        actionConfig.delay !== undefined ||
-        (actionConfig.repeat !== undefined &&
-          actionConfig.repeat !== 1 &&
-          actionConfig.repeat !== 0)
-      ) // Note: repeat 0 already blocked by protections
-    )
-
-    let result: CyreResponse
-
-    if (requiresTimekeeper) {
-      result = await scheduleCall(actionConfig, processedPayload)
-    } else {
-      result = await processCall(actionConfig, processedPayload)
-    }
-
-    // Auto-save after successful execution
-    if (result.ok) {
-      persistence.autoSave()
-    }
-
-    // Handle IntraLink chain reactions
-    if (result.ok && result.metadata?.intraLink) {
-      const chainLink = result.metadata.intraLink
-
-      try {
-        const chainResult = await call(chainLink.id, chainLink.payload)
-        return {
-          ...result,
-          metadata: {
-            ...result.metadata,
-            chainResult
-          }
-        }
-      } catch (chainError) {
-        log.error(`IntraLink execution failed: ${chainError}`)
-        return result
-      }
-    }
+    // Handle IntraLink if present
+    // if (result.ok && result.metadata?.intraLink) {
+    //   const {id: chainId, payload: chainPayload} = result.metadata.intraLink
+    //   const chainResult = await call(chainId, chainPayload)
+    //   result.metadata.chainResult = chainResult
+    // }
 
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.critical(`Call execution failed for ${id}: ${errorMessage}`)
-
-    metricsReport.sensor.error(id, errorMessage, 'call-execution')
-
     return {
       ok: false,
       payload: null,

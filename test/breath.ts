@@ -19,8 +19,6 @@ describe('Cyre breathing System', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== BREATHING TEST STARTED =====')
   })
 
   afterEach(() => {
@@ -32,7 +30,6 @@ describe('Cyre breathing System', () => {
       // Ignore cleanup errors
     }
 
-    console.log('===== BREATHING TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

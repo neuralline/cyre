@@ -1,8 +1,8 @@
-// src/types/core.ts - Permissive version
-// Core type definitions for CYRE - relaxed for build compatibility
+// src/types/core.ts - Updated with optimization fields
+// Core type definitions for CYRE - with protection pipeline support
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
-export type ActionPayload = any // More permissive
+export type ActionPayload = any
 export type ActionId = string
 export type StateKey = string
 
@@ -15,56 +15,57 @@ export interface PriorityConfig {
   maxDelay?: number
 }
 
-/**
- * Enhanced CyreResponse with proper typing
- */
 export interface CyreResponse<T = any> {
   ok: boolean
   payload: T
   message: string
-  error?: any // More permissive
+  error?: any
   timestamp?: number
-  metadata?: any // More permissive
+  metadata?: {
+    executionTime?: number
+    scheduled?: boolean
+    delayed?: boolean
+    duration?: number
+    interval?: number
+    delay?: number
+    repeat?: number | boolean
+    intraLink?: {
+      id: string
+      payload?: ActionPayload
+    }
+    chainResult?: CyreResponse
+    [key: string]: any
+  }
 }
 
-/**
- * Event handler type for CYRE actions - more permissive
- */
 export type EventHandler = (...args: any[]) => any
-
-/**
- * Middleware function type - flexible signature
- */
 export type MiddlewareFunction = (...args: any[]) => any
 
-/**
- * Subscriber interface - flexible
- */
 export interface ISubscriber {
   id: string
-  fn: any // More permissive
+  fn: any
 }
 
-/**
- * Middleware interface - flexible
- */
 export interface IMiddleware {
   id: string
-  fn: any // More permissive
+  fn: any
 }
 
-/**
- * Subscription response
- */
 export interface SubscriptionResponse {
   ok: boolean
   message: string
   unsubscribe?: () => boolean
 }
 
-/**
- * Configuration object for CYRE actions - permissive
- */
+// Protection pipeline function type
+export type ProtectionFn = (ctx: {
+  action: IO
+  payload: ActionPayload
+  metrics: any
+  timestamp: number
+}) =>
+  | {pass: true; payload?: ActionPayload}
+  | {pass: false; reason: string; delayed?: boolean; duration?: number}
 
 export interface IO {
   /** Unique identifier for this action */
@@ -73,7 +74,6 @@ export interface IO {
   type?: string
   /** Initial or default payload data */
   payload?: any
-  // PAYLOAD VALIDATION FEATURES
   /** Require payload to be provided - boolean for basic requirement, 'non-empty' for non-empty requirement */
   required?: boolean | 'non-empty'
   /** Milliseconds between executions for repeated actions */
@@ -86,35 +86,31 @@ export interface IO {
   throttle?: number
   /** Collapse rapid calls within this window (milliseconds) */
   debounce?: number
-  //maximum wait for debounce
+  /** Maximum wait for debounce */
   maxWait?: number
   /** Only execute if payload has changed from previous execution */
   detectChanges?: boolean
   /** Enable logging for this action */
   log?: boolean
-  /** ID of the debounce timer if one is active */
-  debounceTimerId?: string
-  /** Timestamp of last throttle execution */
-  lastThrottleExecution?: number
   /** Priority level for execution during system stress */
   priority?: PriorityConfig
   /** Middleware functions to process action before execution */
   middleware?: string[]
-  /** Protection pipeline functions for this action */
-  _protectionPipeline?: any[]
+
+  // Optimization fields (not exposed to users)
+  /** Pre-compiled protection pipeline for performance */
+  _protectionPipeline?: ProtectionFn[]
+  /** Active debounce timer ID */
+  _debounceTimer?: string
   /** Flag to bypass debounce protection for internal use */
   _bypassDebounce?: boolean
+
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
 }
-/**
- * Action pipeline function type - flexible
- */
+
 export type ActionPipelineFunction = (...args: any[]) => any
 
-/**
- * Result type for operations that might fail
- */
 export type Result<T, E = Error> =
   | {kind: 'ok'; value: T}
   | {kind: 'error'; error: E}

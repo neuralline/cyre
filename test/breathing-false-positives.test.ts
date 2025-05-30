@@ -81,12 +81,9 @@ describe('Breathing System False Positives', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== BREATHING FALSE POSITIVE TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== BREATHING FALSE POSITIVE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

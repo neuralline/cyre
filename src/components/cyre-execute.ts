@@ -4,6 +4,8 @@ import {io} from '../context/state'
 import {IO, ActionPayload} from '../types/interface'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
+import {MSG} from '../config/cyre-config'
+import {call} from '../app'
 
 /*
 
@@ -22,6 +24,7 @@ interface ExecutionResult {
   payload?: any
   error?: boolean
   message?: string
+  metadata?: any
   intraLink?: {
     id: string
     payload?: ActionPayload
@@ -35,13 +38,6 @@ export const cyreExecute = async (
   action: IO,
   handler: Function
 ): Promise<ExecutionResult> => {
-  if (!action?.id || !handler) {
-    return {
-      ok: false,
-      message: 'Invalid action or handler'
-    }
-  }
-
   const startTime = performance.now()
 
   try {
@@ -58,50 +54,30 @@ export const cyreExecute = async (
       executionCount: (currentMetrics?.executionCount || 0) + 1
     })
 
-    io.trackExecution(action.id, executionTime)
+    metricsReport.sensor.execution(action.id, executionTime)
 
     // Check for IntraLink (chain reaction)
     if (result && typeof result === 'object' && 'id' in result && result.id) {
-      return {
-        ok: true,
-        payload: result,
-        intraLink: {
-          id: result.id,
-          payload: result.payload
-        }
-      }
+      call(result.id, result.payload)
+      metricsReport.sensor.intralink(action.id, result.id, 'dispatch')
     }
 
     return {
       ok: true,
-      payload: result
+      payload: result,
+      message: MSG.WELCOME,
+      metadata: {executionTime}
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-
-    log.error(`Execution failed for ${action.id}: ${errorMessage}`)
-
-    // Track error in metrics
-    const currentMetrics = io.getMetrics(action.id)
-    if (currentMetrics) {
-      const errorEntry = {
-        timestamp: Date.now(),
-        message: errorMessage
-      }
-      io.updateMetrics(action.id, {
-        ...currentMetrics,
-        errors: [...currentMetrics.errors, errorEntry]
-      })
-    }
-
-    metricsReport.sensor.error(action.id, errorMessage, 'cyre-execution')
-
+    metricsReport.sensor.error(action.id, errorMessage)
+    log.error(`Execution error: ${errorMessage}`)
     return {
       ok: false,
-      message: errorMessage,
+      payload: null,
+      message: `Execution error: ${errorMessage}`,
       error: true
     }
   }
 }
-
 export default cyreExecute

@@ -14,12 +14,9 @@ describe('Quantum Breathing - Long Operations', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== LONG OPERATIONS TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== LONG OPERATIONS TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

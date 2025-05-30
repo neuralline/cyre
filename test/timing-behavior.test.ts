@@ -51,12 +51,9 @@ describe('CYRE Timing Behavior', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('\n===== TIMING BEHAVIOR TEST STARTED =====')
   })
 
   afterEach(() => {
-    console.log('===== TIMING BEHAVIOR TEST COMPLETED =====\n')
     vi.restoreAllMocks()
   })
 

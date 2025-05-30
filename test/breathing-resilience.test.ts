@@ -41,8 +41,6 @@ describe('Quantum Breathing Resilience', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== SIMPLIFIED BREATHING TEST STARTED =====')
   })
 
   afterEach(() => {
@@ -53,7 +51,7 @@ describe('Quantum Breathing Resilience', () => {
     }
 
     console.log(`Collected ${breathingSnapshots.length} breathing samples`)
-    console.log('===== SIMPLIFIED BREATHING TEST COMPLETED =====')
+
     vi.restoreAllMocks()
   })
 

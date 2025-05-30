@@ -23,15 +23,12 @@ describe('Cyre API Tests', () => {
 
     // Initialize cyre
     cyre.initialize()
-
-    console.log('===== CYRE API TEST STARTED =====')
   })
 
   afterEach(() => {
     // Clean up any remaining actions
     cyre.clear()
     vi.restoreAllMocks()
-    console.log('===== CYRE API TEST COMPLETED =====')
   })
 
   /**
