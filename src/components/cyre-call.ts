@@ -5,11 +5,7 @@ import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
 import {metricsReport, sensor} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
-import {
-  compileProtectionPipeline,
-  ProtectionContext,
-  ProtectionFn
-} from './cyre-actions'
+import {ProtectionContext} from './cyre-actions'
 import {io} from '../context/state'
 import {log} from './cyre-log'
 

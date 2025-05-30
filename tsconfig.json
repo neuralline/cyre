@@ -51,12 +51,5 @@
     }
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/ssr",
-    "src/stream",
-    "coverage",
-    "**/*.d.ts"
-  ]
+  "exclude": ["node_modules", "dist", "coverage", "**/*.d.ts"]
 }
