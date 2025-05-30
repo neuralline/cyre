@@ -313,4 +313,13 @@ function UserComponent() {
   - cyre-compose (batch channel processing)
   - Update Cyre logics
 
+- 4.1.0: Schema
+  - build in data/payload validation
+- 4.2.0: Stream
+  - cyre/stream functional process chaining for live events
+  - *
+- 4.3.0: Machine
+  - *
+  
+
 For more detailed examples and API reference, see the [documentation](/docs).

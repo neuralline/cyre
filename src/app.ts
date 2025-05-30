@@ -18,7 +18,25 @@ import {
   type PersistentState
 } from './context/persistent-state'
 
-/*
+/* 
+    Neural Line
+    Reactive event manager
+    C.Y.R.E ~/`SAYER`/
+    Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
+    Version 4.3.0 2025
+
+        example use:
+        cyre.action({id: 'uber', payload: 44085648634})
+        cyre.on('uber', number => {
+            console.log('Calling Uber @', number)
+        })
+        cyre.call('uber') 
+
+    Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
+    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
+
+    Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+
 
       C.Y.R.E - A.P.P
       

@@ -1,22 +1,26 @@
 // src/components/cyre-dispatch.ts
+// Dispatch with schema validation support
 
 import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {cyreExecute} from './cyre-execute'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
-import {metricsReport, sensor} from '../context/metrics-report'
+import {sensor} from '../context/metrics-report'
 
 /*
 
       C.Y.R.E - D.I.S.P.A.T.C.H 
       
-      CRITICAL FIX: Stop converting falsy values (0, undefined, false, '') to null
-      
+      Dispatch with schema validation metadata support:
+      - Preserve exact payload values including falsy ones
+      - Include validation metadata in responses
+      - Track schema validation performance
+
 */
 
 /**
- * FIXED: Dispatch action to subscriber preserving exact payload values
+ * Dispatch action to subscriber with schema validation metadata
  */
 export const useDispatch = async (
   action: IO,
@@ -24,16 +28,17 @@ export const useDispatch = async (
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
 
-  // CRITICAL FIX: Preserve falsy values like 0, undefined, false, ''
-  // Use strict undefined check instead of truthy check
+  // Preserve falsy values like 0, undefined, false, ''
   const currentPayload = payload !== undefined ? payload : action.payload
 
   try {
     sensor.callToDispatch(action.id, {
       timestamp: Date.now(),
       payloadType: typeof currentPayload,
+      hasSchema: !!action.schema,
       hasSubscriber: undefined // will be determined below
     })
+
     // Get subscriber
     const subscriber = subscribers.get(action.id)
     if (!subscriber) {
@@ -64,24 +69,25 @@ export const useDispatch = async (
     sensor.dispatchToExecute(action.id, totalTime, {
       success: result.ok,
       executionPath: 'direct-dispatch',
-      payloadPreserved: true
+      payloadPreserved: true,
+      schemaValidated: !!action.schema
     })
 
-    // IMPORTANT: Update payload history after successful execution for change detection
+    // Update payload history after successful execution for change detection
     if (result.ok) {
-      // Update payload history for change detection on successful execution
       if (action.detectChanges) {
-        // CRITICAL FIX: Store exact payload value for change detection
+        // Store exact payload value for change detection
         io.updatePayload(action.id, currentPayload)
       }
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
+    } else {
+      sensor.log(action.id, 'error', 'execution-failure', {
+        errorMessage: result.message,
+        executionTime: totalTime
+      })
     }
-    sensor.log(action.id, 'error', 'execution-failure', {
-      errorMessage: result.message,
-      executionTime: totalTime
-    })
 
     return {
       ok: result.ok,
@@ -89,7 +95,9 @@ export const useDispatch = async (
       message: result.ok ? result.message : result.error || 'Execution failed',
       metadata: {
         executionTime: totalTime,
-        intraLink: result.intraLink // Pass through IntraLink metadata
+        intraLink: result.intraLink, // Pass through IntraLink metadata
+        validationPassed: !!action.schema, // Indicate if validation was performed
+        schemaUsed: !!action.schema
       }
     }
   } catch (error) {
@@ -102,7 +110,11 @@ export const useDispatch = async (
       ok: false,
       payload: null,
       message: `Dispatch failed: ${errorMessage}`,
-      error: errorMessage
+      error: errorMessage,
+      metadata: {
+        executionTime: performance.now() - startTime,
+        schemaUsed: !!action.schema
+      }
     }
   }
 }

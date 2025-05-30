@@ -1,4 +1,5 @@
 // src/components/cyre-actions.ts
+// Action system with schema validation integration
 
 import type {IO, ActionPayload, CyreResponse} from '../types/interface'
 import {io} from '../context/state'
@@ -7,13 +8,15 @@ import CyreChannel from './cyre-channels'
 import dataDefinitions from '../elements/data-definitions'
 import {metricsReport, sensor} from '../context/metrics-report'
 import {log} from './cyre-log'
+import {validate, type Schema} from '../schema/cyre-schema'
 
 /*
 
       C.Y.R.E - A.C.T.I.O.N.S
       
-      Pipeline-based action system:
+      Pipeline-based action system with schema validation:
       - Fast path for no protections (pipeline.length === 0)
+      - Schema validation in protection pipeline
       - Fast block for blocked channels (repeat:0, block:true)
       - Debounce continues pipeline after delay
       - Extensible protection pipeline
@@ -35,7 +38,7 @@ export type ProtectionFn = (
   | {pass: false; reason: string; delayed?: boolean; duration?: number}
 
 /**
- * Register single action - simplified without external middleware
+ * Register single action with schema validation support
  */
 export const registerSingleAction = (
   attribute: IO
@@ -59,16 +62,17 @@ export const registerSingleAction = (
 
     const protectionInfo =
       protections.length > 0
-        ? `with built-in protections: ${protections.length}`
+        ? `with ${protections.length} protections`
         : 'with no protections'
 
-    //log.debug(`Action ${validatedAction.id} registered ${protectionInfo}`)
+    log.debug(`Action ${validatedAction.id} registered ${protectionInfo}`)
 
     sensor.log(validatedAction.id, 'info', 'action-registration', {
       protectionCount: protections.length,
       hasThrottle: !!(validatedAction.throttle && validatedAction.throttle > 0),
       hasDebounce: !!(validatedAction.debounce && validatedAction.debounce > 0),
       hasChangeDetection: !!validatedAction.detectChanges,
+      hasSchema: !!validatedAction.schema,
       priority: validatedAction.priority?.level || 'medium'
     })
 
@@ -87,7 +91,7 @@ export const registerSingleAction = (
 
 /**
  * Compile protection pipeline at action registration
- * Only includes necessary protections based on action config
+ * Includes schema validation in the pipeline
  */
 export function compileProtectionPipeline(action: IO): ProtectionFn[] {
   const pipeline: ProtectionFn[] = []
@@ -96,7 +100,6 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
   if (action.repeat === 0) {
     io.set({...action, block: true})
     pipeline.push(ctx => {
-      // CRITICAL FIX: Log zero repeat block
       metricsReport.sensor.log(ctx.action.id, 'blocked', 'zero-repeat-block', {
         repeatValue: 0,
         blockReason: 'repeat: 0 configuration'
@@ -111,7 +114,6 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
   // Block check
   if (action.block === true) {
     pipeline.push(ctx => {
-      // CRITICAL FIX: Log service block
       metricsReport.sensor.log(
         ctx.action.id,
         'blocked',
@@ -132,7 +134,8 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
   const hasProtections = !!(
     action.throttle ||
     action.debounce ||
-    action.detectChanges
+    action.detectChanges ||
+    action.schema
   )
   if (hasProtections && action.priority?.level !== 'critical') {
     pipeline.push(ctx => {
@@ -149,6 +152,37 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
         }
       }
       return {pass: true}
+    })
+  }
+
+  // Schema validation - run early in pipeline
+  if (action.schema) {
+    pipeline.push(ctx => {
+      const validationResult = validate(action.schema!, ctx.payload)
+
+      if (!validationResult.ok) {
+        sensor.log(ctx.action.id, 'blocked', 'schema-validation', {
+          validationErrors: validationResult.errors,
+          payloadType: typeof ctx.payload,
+          schemaValidation: false
+        })
+        return {
+          pass: false,
+          reason: `Schema validation failed: ${validationResult.errors.join(
+            ', '
+          )}`
+        }
+      }
+
+      sensor.log(ctx.action.id, 'info', 'schema-validation', {
+        schemaValidation: true,
+        payloadType: typeof ctx.payload
+      })
+
+      return {
+        pass: true,
+        payload: validationResult.data // Use validated/transformed data
+      }
     })
   }
 
@@ -178,7 +212,6 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
   // Debounce - simplified without creating timers here
   if (action.debounce && action.debounce > 0) {
     pipeline.push(ctx => {
-      // CRITICAL FIX: Log debounce delay
       sensor.log(ctx.action.id, 'info', 'debounce-delay', {
         debounceMs: action.debounce,
         willDelay: true
@@ -198,7 +231,6 @@ export function compileProtectionPipeline(action: IO): ProtectionFn[] {
     pipeline.push(ctx => {
       const hasChanged = io.hasChanged(ctx.action.id, ctx.payload)
       if (!hasChanged) {
-        // CRITICAL FIX: Log change detection skip
         metricsReport.sensor.log(ctx.action.id, 'skip', 'change-detection', {
           payloadUnchanged: true,
           skipReason: 'identical payload detected'

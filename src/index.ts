@@ -1,15 +1,12 @@
 // src/index.ts
-// Main exports with enhanced stream support
+// Main exports with schema validation support
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.1.0 2025 with Streams
-
-
-
+    Version 4.1.0 2025 with Schema Validation
 
     CYRE TARGET: is to make Cyre the least call-to-execution overhead per channel still having cutting edge features 
 
@@ -26,7 +23,7 @@ CYRE TODO:
 []  state-machine: experimental/testing stage
 []  cyre/server: server for client cyre applicants or others
 
-[]  schema: ??
+[]  schema: built in data validation
 
 []  TimeKeeper.cron():
 
@@ -59,13 +56,14 @@ import {cyreCompose} from './hooks/cyre-compose'
 import {useCyre} from './hooks/use-cyre'
 import {log} from './components/cyre-log'
 
+// Import schema system
+import schema from './schema/cyre-schema'
+
 // Import stream system
 import {createStream} from './stream'
 
-// Main exports - ensure these are properly exported
-export {cyre, log, useCyre, cyreCompose, createStream}
-
-// Export stream system
+// Main exports
+export {cyre, log, useCyre, cyreCompose, createStream, schema}
 
 // Export types with unique names to avoid conflicts
 export type {
@@ -102,18 +100,27 @@ export type {
   StreamConfig as CyreStreamConfig
 } from './types/stream'
 
+// Export schema types
+export type {
+  Schema as CyreSchema,
+  ValidationResult as CyreValidationResult,
+  Validator as CyreValidator,
+  Infer as CyreInfer
+} from './schema/cyre-schema'
+
 // Version information
 export const version = '4.1.0'
 
 // Also export cyre as the default export for maximum compatibility
 export default cyre
 
-// Enhanced global availability for UMD builds
+// Global availability for UMD builds
 if (typeof globalThis !== 'undefined') {
   globalThis.cyre = cyre
   globalThis.useCyre = useCyre
   globalThis.cyreCompose = cyreCompose
   globalThis.CyreStream = createStream
+  globalThis.CyreSchema = schema
 }
 
 // For browser environments that don't have globalThis
@@ -122,4 +129,5 @@ if (typeof window !== 'undefined') {
   ;(window as any).useCyre = useCyre
   ;(window as any).cyreCompose = cyreCompose
   ;(window as any).CyreStream = createStream
+  ;(window as any).CyreSchema = schema
 }

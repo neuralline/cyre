@@ -1,457 +1,298 @@
 // src/schema/cyre-schema.ts
-// Schema validation system for Cyre using functional approach
+// Advanced schema validation with action integration
 
-import type {ActionPayload, IO} from '../types/interface'
+import type {ActionPayload} from '../types/interface'
 import {log} from '../components/cyre-log'
 
 /*
 
       C.Y.R.E - S.C.H.E.M.A
       
-      Functional schema validation system:
-      - Runtime validation with TypeScript inference
+      Smart schema validation system:
+      - Concise functional API
+      - Direct action integration
+      - Runtime type safety
       - Composable validators
-      - Integration with action pipeline
-      - No external dependencies
-      - Functional programming approach
+      - Zero dependencies
 
 */
 
-// Base validation result type
+// Core validation types
 export type ValidationResult<T = unknown> =
-  | {ok: true; data: T; errors?: never}
-  | {ok: false; data?: never; errors: ValidationError[]}
+  | {ok: true; data: T}
+  | {ok: false; errors: string[]}
 
-// Validation error structure
-export interface ValidationError {
-  path: string[]
-  message: string
-  code: string
-  received?: unknown
-  expected?: string
+export type Validator<T = unknown> = (value: unknown) => ValidationResult<T>
+
+// Schema builder with type inference
+export interface Schema<T = unknown> {
+  (value: unknown): ValidationResult<T>
+  optional(): Schema<T | undefined>
+  nullable(): Schema<T | null>
+  default(value: T): Schema<T>
+  transform<U>(fn: (value: T) => U): Schema<U>
+  refine(fn: (value: T) => boolean, message?: string): Schema<T>
+  _type?: T // Type inference helper
 }
 
-// Schema validator function type
-export type SchemaValidator<T = unknown> = (
-  value: unknown,
-  path?: string[]
-) => ValidationResult<T>
+// Create schema factory
+const createSchema = <T>(validator: Validator<T>): Schema<T> => {
+  const schema = validator as Schema<T>
 
-// Schema builder type
-export type Schema<T = unknown> = {
-  parse: (value: unknown) => ValidationResult<T>
-  safeParse: (value: unknown) => ValidationResult<T>
-  validate: SchemaValidator<T>
-  optional: () => Schema<T | undefined>
-  nullable: () => Schema<T | null>
-  default: (defaultValue: T) => Schema<T>
-  transform: <U>(fn: (value: T) => U) => Schema<U>
-  refine: (fn: (value: T) => boolean, message?: string) => Schema<T>
-  _type: T // Type inference helper
-}
+  schema.optional = () =>
+    createSchema<T | undefined>(value =>
+      value === undefined ? {ok: true, data: undefined} : validator(value)
+    )
 
-// Create validation error
-const createError = (
-  path: string[],
-  message: string,
-  code: string,
-  received?: unknown,
-  expected?: string
-): ValidationError => ({
-  path,
-  message,
-  code,
-  received,
-  expected
-})
+  schema.nullable = () =>
+    createSchema<T | null>(value =>
+      value === null ? {ok: true, data: null} : validator(value)
+    )
 
-// Base schema factory
-const createSchema = <T>(validator: SchemaValidator<T>): Schema<T> => {
-  const parse = (value: unknown): ValidationResult<T> => {
-    return validator(value, [])
-  }
+  schema.default = (defaultValue: T) =>
+    createSchema<T>(value =>
+      value === undefined ? {ok: true, data: defaultValue} : validator(value)
+    )
 
-  const safeParse = parse // Same as parse in this implementation
+  schema.transform = <U>(fn: (value: T) => U) =>
+    createSchema<U>(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      try {
+        return {ok: true, data: fn(result.data)}
+      } catch (error) {
+        return {ok: false, errors: [`Transform failed: ${error}`]}
+      }
+    })
 
-  return {
-    parse,
-    safeParse,
-    validate: validator,
-    optional: () =>
-      createSchema<T | undefined>((value, path = []) => {
-        if (value === undefined) {
-          return {ok: true, data: undefined}
-        }
-        return validator(value, path)
-      }),
-    nullable: () =>
-      createSchema<T | null>((value, path = []) => {
-        if (value === null) {
-          return {ok: true, data: null}
-        }
-        return validator(value, path)
-      }),
-    default: (defaultValue: T) =>
-      createSchema<T>((value, path = []) => {
-        if (value === undefined) {
-          return {ok: true, data: defaultValue}
-        }
-        return validator(value, path)
-      }),
-    transform: <U>(fn: (value: T) => U) =>
-      createSchema<U>((value, path = []) => {
-        const result = validator(value, path)
-        if (!result.ok) return result
-        try {
-          return {ok: true, data: fn(result.data)}
-        } catch (error) {
-          return {
-            ok: false,
-            errors: [
-              createError(
-                path,
-                `Transform failed: ${error}`,
-                'transform_failed'
-              )
-            ]
-          }
-        }
-      }),
-    refine: (fn: (value: T) => boolean, message = 'Custom validation failed') =>
-      createSchema<T>((value, path = []) => {
-        const result = validator(value, path)
-        if (!result.ok) return result
-        if (!fn(result.data)) {
-          return {
-            ok: false,
-            errors: [createError(path, message, 'custom_validation')]
-          }
-        }
-        return result
-      }),
-    _type: undefined as any as T
-  }
+  schema.refine = (fn: (value: T) => boolean, message = 'Validation failed') =>
+    createSchema<T>(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return fn(result.data) ? result : {ok: false, errors: [message]}
+    })
+
+  return schema
 }
 
 // Primitive validators
-export const string = (): Schema<string> =>
-  createSchema((value, path = []) => {
-    if (typeof value === 'string') {
-      return {ok: true, data: value}
+export const string = () =>
+  createSchema<string>(value =>
+    typeof value === 'string'
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected string']}
+  )
+
+export const number = () =>
+  createSchema<number>(value =>
+    typeof value === 'number' && !isNaN(value)
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected number']}
+  )
+
+export const boolean = () =>
+  createSchema<boolean>(value =>
+    typeof value === 'boolean'
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected boolean']}
+  )
+
+export const any = () => createSchema<any>(value => ({ok: true, data: value}))
+
+// Constraint helpers
+export const min = (minVal: number) => (schema: Schema<number>) =>
+  schema.refine(val => val >= minVal, `Must be at least ${minVal}`)
+
+export const max = (maxVal: number) => (schema: Schema<number>) =>
+  schema.refine(val => val <= maxVal, `Must be at most ${maxVal}`)
+
+export const length = (len: number) => (schema: Schema<string>) =>
+  schema.refine(val => val.length === len, `Must be exactly ${len} characters`)
+
+export const minLength = (len: number) => (schema: Schema<string>) =>
+  schema.refine(val => val.length >= len, `Must be at least ${len} characters`)
+
+export const maxLength = (len: number) => (schema: Schema<string>) =>
+  schema.refine(val => val.length <= len, `Must be at most ${len} characters`)
+
+export const pattern = (regex: RegExp) => (schema: Schema<string>) =>
+  schema.refine(val => regex.test(val), 'Pattern does not match')
+
+export const email = (schema: Schema<string>) =>
+  pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)(schema)
+
+export const url = (schema: Schema<string>) =>
+  schema.refine(val => {
+    try {
+      new URL(val)
+      return true
+    } catch {
+      return false
     }
-    return {
-      ok: false,
-      errors: [
-        createError(path, 'Expected string', 'invalid_type', value, 'string')
-      ]
-    }
-  })
+  }, 'Invalid URL')
 
-export const number = (): Schema<number> =>
-  createSchema((value, path = []) => {
-    if (typeof value === 'number' && !isNaN(value)) {
-      return {ok: true, data: value}
-    }
-    return {
-      ok: false,
-      errors: [
-        createError(path, 'Expected number', 'invalid_type', value, 'number')
-      ]
-    }
-  })
+export const int = (schema: Schema<number>) =>
+  schema.refine(val => Number.isInteger(val), 'Must be integer')
 
-export const boolean = (): Schema<boolean> =>
-  createSchema((value, path = []) => {
-    if (typeof value === 'boolean') {
-      return {ok: true, data: value}
-    }
-    return {
-      ok: false,
-      errors: [
-        createError(path, 'Expected boolean', 'invalid_type', value, 'boolean')
-      ]
-    }
-  })
+export const positive = (schema: Schema<number>) =>
+  schema.refine(val => val > 0, 'Must be positive')
 
-// String refinements
-export const stringWithConstraints = (constraints: {
-  min?: number
-  max?: number
-  pattern?: RegExp
-  email?: boolean
-  url?: boolean
-}) => {
-  let schema = string()
-
-  if (constraints.min !== undefined) {
-    schema = schema.refine(
-      val => val.length >= constraints.min!,
-      `String must be at least ${constraints.min} characters`
-    )
-  }
-
-  if (constraints.max !== undefined) {
-    schema = schema.refine(
-      val => val.length <= constraints.max!,
-      `String must be at most ${constraints.max} characters`
-    )
-  }
-
-  if (constraints.pattern) {
-    schema = schema.refine(
-      val => constraints.pattern!.test(val),
-      'String does not match pattern'
-    )
-  }
-
-  if (constraints.email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    schema = schema.refine(val => emailRegex.test(val), 'Invalid email format')
-  }
-
-  if (constraints.url) {
-    schema = schema.refine(val => {
-      try {
-        new URL(val)
-        return true
-      } catch {
-        return false
-      }
-    }, 'Invalid URL format')
-  }
-
-  return schema
-}
-
-// Number refinements
-export const numberWithConstraints = (constraints: {
-  min?: number
-  max?: number
-  int?: boolean
-  positive?: boolean
-}) => {
-  let schema = number()
-
-  if (constraints.min !== undefined) {
-    schema = schema.refine(
-      val => val >= constraints.min!,
-      `Number must be at least ${constraints.min}`
-    )
-  }
-
-  if (constraints.max !== undefined) {
-    schema = schema.refine(
-      val => val <= constraints.max!,
-      `Number must be at most ${constraints.max}`
-    )
-  }
-
-  if (constraints.int) {
-    schema = schema.refine(val => Number.isInteger(val), 'Must be an integer')
-  }
-
-  if (constraints.positive) {
-    schema = schema.refine(val => val > 0, 'Must be a positive number')
-  }
-
-  return schema
-}
-
-// Object schema
-export const object = <T extends Record<string, Schema>>(
-  shape: T
-): Schema<{[K in keyof T]: T[K]['_type']}> => {
-  return createSchema((value, path = []) => {
+// Object validation
+export const object = <T extends Record<string, Schema>>(shape: T) =>
+  createSchema<{
+    [K in keyof T]: ReturnType<T[K]> extends ValidationResult<infer U>
+      ? U
+      : never
+  }>(value => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return {
-        ok: false,
-        errors: [
-          createError(path, 'Expected object', 'invalid_type', value, 'object')
-        ]
-      }
+      return {ok: false, errors: ['Expected object']}
     }
 
     const obj = value as Record<string, unknown>
     const result: Record<string, unknown> = {}
-    const errors: ValidationError[] = []
+    const errors: string[] = []
 
     for (const [key, schema] of Object.entries(shape)) {
-      const fieldResult = schema.validate(obj[key], [...path, key])
+      const fieldResult = schema(obj[key])
       if (fieldResult.ok) {
         result[key] = fieldResult.data
       } else {
-        errors.push(...fieldResult.errors)
+        errors.push(...fieldResult.errors.map(err => `${key}: ${err}`))
       }
     }
 
-    if (errors.length > 0) {
-      return {ok: false, errors}
-    }
-
-    return {ok: true, data: result as {[K in keyof T]: T[K]['_type']}}
+    return errors.length > 0
+      ? {ok: false, errors}
+      : {ok: true, data: result as any}
   })
-}
 
-// Array schema
-export const array = <T>(itemSchema: Schema<T>): Schema<T[]> => {
-  return createSchema((value, path = []) => {
+// Array validation
+export const array = <T>(itemSchema: Schema<T>) =>
+  createSchema<T[]>(value => {
     if (!Array.isArray(value)) {
-      return {
-        ok: false,
-        errors: [
-          createError(path, 'Expected array', 'invalid_type', value, 'array')
-        ]
-      }
+      return {ok: false, errors: ['Expected array']}
     }
 
     const result: T[] = []
-    const errors: ValidationError[] = []
+    const errors: string[] = []
 
     for (let i = 0; i < value.length; i++) {
-      const itemResult = itemSchema.validate(value[i], [...path, i.toString()])
+      const itemResult = itemSchema(value[i])
       if (itemResult.ok) {
         result.push(itemResult.data)
       } else {
-        errors.push(...itemResult.errors)
+        errors.push(...itemResult.errors.map(err => `[${i}]: ${err}`))
       }
     }
 
-    if (errors.length > 0) {
-      return {ok: false, errors}
-    }
-
-    return {ok: true, data: result}
+    return errors.length > 0 ? {ok: false, errors} : {ok: true, data: result}
   })
-}
 
-// Union schema
-export const union = <T extends readonly Schema[]>(
-  schemas: T
-): Schema<T[number]['_type']> => {
-  return createSchema((value, path = []) => {
-    const errors: ValidationError[] = []
-
+// Union validation
+export const union = <T extends readonly Schema[]>(...schemas: T) =>
+  createSchema<T[number] extends Schema<infer U> ? U : never>(value => {
     for (const schema of schemas) {
-      const result = schema.validate(value, path)
-      if (result.ok) {
-        return result
-      }
-      errors.push(...result.errors)
+      const result = schema(value)
+      if (result.ok) return result
     }
-
-    return {
-      ok: false,
-      errors: [
-        createError(path, 'No union variant matched', 'union_mismatch', value)
-      ]
-    }
+    return {ok: false, errors: ['No union variant matched']}
   })
-}
 
-// Literal schema
-export const literal = <T extends string | number | boolean>(
-  value: T
-): Schema<T> => {
-  return createSchema((input, path = []) => {
-    if (input === value) {
-      return {ok: true, data: value}
-    }
-    return {
-      ok: false,
-      errors: [
-        createError(
-          path,
-          `Expected literal ${value}`,
-          'invalid_literal',
-          input,
-          String(value)
-        )
-      ]
-    }
-  })
-}
+// Literal validation
+export const literal = <T extends string | number | boolean>(val: T) =>
+  createSchema<T>(value =>
+    value === val
+      ? {ok: true, data: val}
+      : {ok: false, errors: [`Expected ${val}`]}
+  )
 
-// Enum schema
-export const enumSchema = <T extends readonly string[]>(
-  values: T
-): Schema<T[number]> => {
-  return createSchema((input, path = []) => {
-    if (typeof input === 'string' && values.includes(input as T[number])) {
-      return {ok: true, data: input as T[number]}
-    }
-    return {
-      ok: false,
-      errors: [
-        createError(
-          path,
-          `Expected one of: ${values.join(', ')}`,
-          'invalid_enum',
-          input
-        )
-      ]
-    }
-  })
-}
+// Enum validation
+export const enums = <T extends readonly string[]>(...values: T) =>
+  createSchema<T[number]>(value =>
+    typeof value === 'string' && values.includes(value as T[number])
+      ? {ok: true, data: value as T[number]}
+      : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
+  )
 
-// Any schema (bypass validation)
-export const any = (): Schema<any> =>
-  createSchema(value => ({
-    ok: true,
-    data: value
-  }))
+// Composable validation chains
+export const pipe = <T, U>(
+  schema: Schema<T>,
+  ...transforms: Array<(s: Schema<T>) => Schema<U>>
+) =>
+  transforms.reduce((s, transform) => transform(s as any), schema) as Schema<U>
+
+// Smart builders for common patterns
+export const email_string = () => pipe(string(), email)
+export const url_string = () => pipe(string(), url)
+export const positive_int = () => pipe(number(), int, positive)
+export const id_string = () => pipe(string(), minLength(1), maxLength(100))
+export const safe_string = () => pipe(string(), maxLength(1000))
 
 // Type inference helper
-export type Infer<T extends Schema> = T['_type']
+export type Infer<T extends Schema> = T extends Schema<infer U> ? U : never
 
-// Utility for creating custom validators
-export const custom = <T>(
-  validator: (value: unknown) => value is T,
-  message = 'Custom validation failed'
-): Schema<T> => {
-  return createSchema((value, path = []) => {
-    if (validator(value)) {
-      return {ok: true, data: value}
-    }
-    return {
-      ok: false,
-      errors: [createError(path, message, 'custom_validation', value)]
-    }
-  })
-}
-
-// Integration with Cyre actions
-export const validateActionPayload = <T>(
+// Schema validation function for action integration
+export const validate = <T>(
   schema: Schema<T>,
   payload: ActionPayload
 ): ValidationResult<T> => {
-  const result = schema.parse(payload)
+  const result = schema(payload)
 
   if (!result.ok) {
-    log.error('Action payload validation failed:', result.errors)
+    log.error('Schema validation failed:', result.errors)
   }
 
   return result
 }
 
-// Action schema builder for Cyre integration
-export const actionSchema = <T extends Record<string, Schema>>(shape: T) => {
-  return object(shape)
+// Quick schema builders for common action payloads
+export const actionPayload = {
+  string: () => object({payload: string()}),
+  number: () => object({payload: number()}),
+  object: <T extends Record<string, Schema>>(shape: T) =>
+    object({payload: object(shape)}),
+  array: <T>(itemSchema: Schema<T>) => object({payload: array(itemSchema)}),
+  any: () => object({payload: any()})
 }
 
-// Export main schema builder
-export const cyreSchema = {
+// Export main schema API
+export const schema = {
+  // Primitives
   string,
   number,
   boolean,
+  any,
+
+  // Containers
   object,
   array,
   union,
   literal,
-  enum: enumSchema,
-  any,
-  custom,
-  stringWithConstraints,
-  numberWithConstraints,
-  actionSchema,
-  validateActionPayload
+  enums,
+
+  // Constraints
+  min,
+  max,
+  length,
+  minLength,
+  maxLength,
+  pattern,
+  email,
+  url,
+  int,
+  positive,
+
+  // Builders
+  pipe,
+  email_string,
+  url_string,
+  positive_int,
+  id_string,
+  safe_string,
+  actionPayload,
+
+  // Validation
+  validate
 }
+
+export default schema

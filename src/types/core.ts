@@ -1,5 +1,7 @@
-// src/types/core.ts - Updated with optimization fields
-// Core type definitions for CYRE - with protection pipeline support
+// src/types/core.ts
+// Core type definitions with schema validation support
+
+import type {Schema} from '../schema/cyre-schema'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
 export type ActionPayload = any
@@ -34,6 +36,8 @@ export interface CyreResponse<T = any> {
       payload?: ActionPayload
     }
     chainResult?: CyreResponse
+    validationPassed?: boolean
+    validationErrors?: string[]
     [key: string]: any
   }
 }
@@ -96,8 +100,12 @@ export interface IO {
   priority?: PriorityConfig
   /** Middleware functions to process action before execution */
   middleware?: string[]
+  /** Schema validation for payload */
+  schema?: Schema<any>
+  /** Block this action from execution */
+  block?: boolean
 
-  // Optimization fields (not exposed to users)
+  // Internal optimization fields
   /** Pre-compiled protection pipeline for performance */
   _protectionPipeline?: ProtectionFn[]
   /** Active debounce timer ID */
@@ -120,9 +128,7 @@ export type Result<T, E = Error> =
  */
 export type On = (...args: any[]) => any
 
-// src/types/protection.ts
-// Protection system type definitions
-
+// Protection system types
 export type ProtectionType =
   | 'system-recuperation'
   | 'required-payload'
@@ -130,6 +136,7 @@ export type ProtectionType =
   | 'throttle'
   | 'debounce'
   | 'change-detection'
+  | 'schema-validation'
 
 export interface BaseProtectionConfig {
   readonly type: ProtectionType
@@ -171,6 +178,11 @@ export interface ZeroRepeatConfig extends BaseProtectionConfig {
   readonly repeatValue: number | boolean
 }
 
+export interface SchemaValidationConfig extends BaseProtectionConfig {
+  readonly type: 'schema-validation'
+  readonly schema: Schema<any>
+}
+
 export type ProtectionConfig =
   | ThrottleConfig
   | DebounceConfig
@@ -178,6 +190,7 @@ export type ProtectionConfig =
   | RequiredPayloadConfig
   | SystemRecuperationConfig
   | ZeroRepeatConfig
+  | SchemaValidationConfig
 
 export interface ProtectionResult<T = unknown> {
   readonly success: boolean

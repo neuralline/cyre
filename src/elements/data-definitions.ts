@@ -1,6 +1,7 @@
 // src/elements/data-definitions.ts
+// Action data definitions with schema validation support
 
-// - Updated to better handle boolean values
+import type {Schema} from '../schema/cyre-schema'
 
 const dataDefinitions = {
   id: (attribute: string = '') => {
@@ -50,7 +51,6 @@ const dataDefinitions = {
         }
   },
 
-  // Updated to properly handle boolean values for repeat
   repeat: (attribute: any = 0) => {
     if (typeof attribute === 'number') {
       return {ok: true, payload: attribute}
@@ -83,9 +83,6 @@ const dataDefinitions = {
         }
   },
 
-  /**
-   * feature attributes
-   */
   group: (attribute: string = '') => {
     return typeof attribute === 'string'
       ? {ok: true, payload: attribute}
@@ -107,6 +104,7 @@ const dataDefinitions = {
           required: false
         }
   },
+
   _debounceTimer: (attribute: string = '') => {
     return typeof attribute === 'string'
       ? {ok: true, payload: attribute}
@@ -128,16 +126,18 @@ const dataDefinitions = {
           required: false
         }
   },
+
   _protectionPipeline: (attribute: any = []) => {
-    return typeof attribute === 'boolean'
+    return Array.isArray(attribute)
       ? {ok: true, payload: attribute}
       : {
           ok: false,
-          payload: false,
-          message: `'${attribute}' invalid action._bypassDebounce value`,
+          payload: [],
+          message: `'${attribute}' invalid action._protectionPipeline value`,
           required: false
         }
   },
+
   _bypassDebounce: (attribute: boolean = false) => {
     return typeof attribute === 'boolean'
       ? {ok: true, payload: attribute}
@@ -183,7 +183,6 @@ const dataDefinitions = {
   },
 
   at: (attribute: number = 0) => {
-    // const at = new Date()
     return {
       ok: false,
       payload: attribute,
@@ -191,14 +190,12 @@ const dataDefinitions = {
       required: false
     }
   },
-  // payload required validation feature
+
   required: (attribute: any = false) => {
-    // Handle boolean (simple required)
     if (typeof attribute === 'boolean') {
       return {ok: true, payload: attribute}
     }
 
-    // Handle string values for specific requirements
     if (typeof attribute === 'string') {
       const validValues = ['non-empty']
       if (validValues.includes(attribute)) {
@@ -219,6 +216,35 @@ const dataDefinitions = {
       message: `'${attribute}' action.required must be boolean or 'non-empty'`,
       required: false
     }
+  },
+
+  block: (attribute: boolean = false) => {
+    return typeof attribute === 'boolean'
+      ? {ok: true, payload: attribute}
+      : {
+          ok: false,
+          payload: false,
+          message: `'${attribute}' action.block must be a boolean`,
+          required: false
+        }
+  },
+
+  schema: (attribute: Schema | undefined = undefined) => {
+    if (attribute === undefined) {
+      return {ok: true, payload: undefined}
+    }
+
+    if (typeof attribute === 'function') {
+      return {ok: true, payload: attribute}
+    }
+
+    return {
+      ok: false,
+      payload: undefined,
+      message: `'${attribute}' invalid action.schema value. Must be a schema function`,
+      required: false
+    }
   }
 }
+
 export default dataDefinitions

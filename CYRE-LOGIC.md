@@ -1,4 +1,4 @@
-# CYRE Logic and Behavior Analysis
+# CYRE logic and behavior Analysis
 
 ## Core Architecture
 
