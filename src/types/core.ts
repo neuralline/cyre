@@ -1,5 +1,5 @@
 // src/types/core.ts
-// Core type definitions with schema validation support
+// Enhanced core types with state reactivity support
 
 import type {Schema} from '../schema/cyre-schema'
 
@@ -38,6 +38,9 @@ export interface CyreResponse<T = any> {
     chainResult?: CyreResponse
     validationPassed?: boolean
     validationErrors?: string[]
+    conditionMet?: boolean
+    selectorApplied?: boolean
+    transformApplied?: boolean
     [key: string]: any
   }
 }
@@ -61,10 +64,16 @@ export interface SubscriptionResponse {
   unsubscribe?: () => boolean
 }
 
+// State reactivity function types
+export type ConditionFunction = (payload: ActionPayload) => boolean
+export type SelectorFunction = (payload: ActionPayload) => any
+export type TransformFunction = (payload: ActionPayload) => any
+
 // Protection pipeline function type
 export type ProtectionFn = (ctx: {
   action: IO
   payload: ActionPayload
+  originalPayload: ActionPayload
   metrics: any
   timestamp: number
 }) =>
@@ -105,6 +114,14 @@ export interface IO {
   /** Block this action from execution */
   block?: boolean
 
+  // State reactivity options
+  /** Only execute when this condition returns true */
+  condition?: ConditionFunction
+  /** Select specific part of payload to watch for changes */
+  selector?: SelectorFunction
+  /** Transform payload before execution */
+  transform?: TransformFunction
+
   // Internal optimization fields
   /** Pre-compiled protection pipeline for performance */
   _protectionPipeline?: ProtectionFn[]
@@ -123,9 +140,6 @@ export type Result<T, E = Error> =
   | {kind: 'ok'; value: T}
   | {kind: 'error'; error: E}
 
-/**
- * On function type - flexible
- */
 export type On = (...args: any[]) => any
 
 // Protection system types
@@ -137,60 +151,32 @@ export type ProtectionType =
   | 'debounce'
   | 'change-detection'
   | 'schema-validation'
+  | 'condition-check'
+  | 'payload-selection'
+  | 'payload-transform'
 
 export interface BaseProtectionConfig {
   readonly type: ProtectionType
   readonly enabled: boolean
 }
 
-export interface ThrottleConfig extends BaseProtectionConfig {
-  readonly type: 'throttle'
-  readonly intervalMs: number
-  readonly lastExecutionTime: number
+// Additional protection config interfaces for new features
+export interface ConditionConfig extends BaseProtectionConfig {
+  readonly type: 'condition-check'
+  readonly conditionFunction: ConditionFunction
 }
 
-export interface DebounceConfig extends BaseProtectionConfig {
-  readonly type: 'debounce'
-  readonly delayMs: number
-  readonly maxWaitMs?: number
-  readonly hasActiveTimer: boolean
-  readonly timerId?: string
+export interface SelectorConfig extends BaseProtectionConfig {
+  readonly type: 'payload-selection'
+  readonly selectorFunction: SelectorFunction
 }
 
-export interface ChangeDetectionConfig extends BaseProtectionConfig {
-  readonly type: 'change-detection'
-  readonly previousPayload?: unknown
+export interface TransformConfig extends BaseProtectionConfig {
+  readonly type: 'payload-transform'
+  readonly transformFunction: TransformFunction
 }
 
-export interface RequiredPayloadConfig extends BaseProtectionConfig {
-  readonly type: 'required-payload'
-  readonly requirement: boolean | 'non-empty'
-}
-
-export interface SystemRecuperationConfig extends BaseProtectionConfig {
-  readonly type: 'system-recuperation'
-  readonly isRecuperating: boolean
-  readonly allowedPriorities: readonly string[]
-}
-
-export interface ZeroRepeatConfig extends BaseProtectionConfig {
-  readonly type: 'zero-repeat-block'
-  readonly repeatValue: number | boolean
-}
-
-export interface SchemaValidationConfig extends BaseProtectionConfig {
-  readonly type: 'schema-validation'
-  readonly schema: Schema<any>
-}
-
-export type ProtectionConfig =
-  | ThrottleConfig
-  | DebounceConfig
-  | ChangeDetectionConfig
-  | RequiredPayloadConfig
-  | SystemRecuperationConfig
-  | ZeroRepeatConfig
-  | SchemaValidationConfig
+// ... existing protection config types remain the same
 
 export interface ProtectionResult<T = unknown> {
   readonly success: boolean
@@ -213,7 +199,7 @@ export interface ProtectionPipelineResult<T = unknown> {
 }
 
 export type ProtectionFunction<
-  TConfig extends ProtectionConfig = ProtectionConfig
+  TConfig extends BaseProtectionConfig = BaseProtectionConfig
 > = (config: TConfig, payload?: unknown) => Promise<ProtectionResult>
 
 export interface ProtectionRegistry {

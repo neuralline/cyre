@@ -1,5 +1,5 @@
 // src/schema/cyre-schema.ts
-// Advanced schema validation with action integration
+// Schema validation with proper method chaining
 
 import type {ActionPayload} from '../types/interface'
 import {log} from '../components/cyre-log'
@@ -33,6 +33,24 @@ export interface Schema<T = unknown> {
   transform<U>(fn: (value: T) => U): Schema<U>
   refine(fn: (value: T) => boolean, message?: string): Schema<T>
   _type?: T // Type inference helper
+}
+
+// Constraint methods for number schema
+export interface NumberSchema extends Schema<number> {
+  min(minVal: number): NumberSchema
+  max(maxVal: number): NumberSchema
+  int(): NumberSchema
+  positive(): NumberSchema
+}
+
+// Constraint methods for string schema
+export interface StringSchema extends Schema<string> {
+  len(len: number): StringSchema
+  minLength(len: number): StringSchema
+  maxLength(len: number): StringSchema
+  pattern(regex: RegExp): StringSchema
+  email(): StringSchema
+  url(): StringSchema
 }
 
 // Create schema factory
@@ -75,16 +93,124 @@ const createSchema = <T>(validator: Validator<T>): Schema<T> => {
   return schema
 }
 
+// Create number schema with constraints
+const createNumberSchema = (validator: Validator<number>): NumberSchema => {
+  const baseSchema = createSchema(validator) as NumberSchema
+
+  baseSchema.min = (minVal: number) =>
+    createNumberSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data >= minVal
+        ? result
+        : {ok: false, errors: [`Must be at least ${minVal}`]}
+    })
+
+  baseSchema.max = (maxVal: number) =>
+    createNumberSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data <= maxVal
+        ? result
+        : {ok: false, errors: [`Must be at most ${maxVal}`]}
+    })
+
+  baseSchema.int = () =>
+    createNumberSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return Number.isInteger(result.data)
+        ? result
+        : {ok: false, errors: ['Must be integer']}
+    })
+
+  baseSchema.positive = () =>
+    createNumberSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data > 0
+        ? result
+        : {ok: false, errors: ['Must be positive']}
+    })
+
+  return baseSchema
+}
+
+// Create string schema with constraints
+const createStringSchema = (validator: Validator<string>): StringSchema => {
+  const baseSchema = createSchema(validator) as StringSchema
+
+  baseSchema.len = (len: number) =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data.length === len
+        ? result
+        : {ok: false, errors: [`Must be exactly ${len} characters`]}
+    })
+
+  baseSchema.minLength = (len: number) =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data.length >= len
+        ? result
+        : {ok: false, errors: [`Must be at least ${len} characters`]}
+    })
+
+  baseSchema.maxLength = (len: number) =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return result.data.length <= len
+        ? result
+        : {ok: false, errors: [`Must be at most ${len} characters`]}
+    })
+
+  baseSchema.pattern = (regex: RegExp) =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return regex.test(result.data)
+        ? result
+        : {ok: false, errors: ['Pattern does not match']}
+    })
+
+  baseSchema.email = () =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+      return emailRegex.test(result.data)
+        ? result
+        : {ok: false, errors: ['Invalid email format']}
+    })
+
+  baseSchema.url = () =>
+    createStringSchema(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      try {
+        new URL(result.data)
+        return result
+      } catch {
+        return {ok: false, errors: ['Invalid URL']}
+      }
+    })
+
+  return baseSchema
+}
+
 // Primitive validators
-export const string = () =>
-  createSchema<string>(value =>
+export const string = (): StringSchema =>
+  createStringSchema(value =>
     typeof value === 'string'
       ? {ok: true, data: value}
       : {ok: false, errors: ['Expected string']}
   )
 
-export const number = () =>
-  createSchema<number>(value =>
+export const number = (): NumberSchema =>
+  createNumberSchema(value =>
     typeof value === 'number' && !isNaN(value)
       ? {ok: true, data: value}
       : {ok: false, errors: ['Expected number']}
@@ -98,44 +224,6 @@ export const boolean = () =>
   )
 
 export const any = () => createSchema<any>(value => ({ok: true, data: value}))
-
-// Constraint helpers
-export const min = (minVal: number) => (schema: Schema<number>) =>
-  schema.refine(val => val >= minVal, `Must be at least ${minVal}`)
-
-export const max = (maxVal: number) => (schema: Schema<number>) =>
-  schema.refine(val => val <= maxVal, `Must be at most ${maxVal}`)
-
-export const length = (len: number) => (schema: Schema<string>) =>
-  schema.refine(val => val.length === len, `Must be exactly ${len} characters`)
-
-export const minLength = (len: number) => (schema: Schema<string>) =>
-  schema.refine(val => val.length >= len, `Must be at least ${len} characters`)
-
-export const maxLength = (len: number) => (schema: Schema<string>) =>
-  schema.refine(val => val.length <= len, `Must be at most ${len} characters`)
-
-export const pattern = (regex: RegExp) => (schema: Schema<string>) =>
-  schema.refine(val => regex.test(val), 'Pattern does not match')
-
-export const email = (schema: Schema<string>) =>
-  pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)(schema)
-
-export const url = (schema: Schema<string>) =>
-  schema.refine(val => {
-    try {
-      new URL(val)
-      return true
-    } catch {
-      return false
-    }
-  }, 'Invalid URL')
-
-export const int = (schema: Schema<number>) =>
-  schema.refine(val => Number.isInteger(val), 'Must be integer')
-
-export const positive = (schema: Schema<number>) =>
-  schema.refine(val => val > 0, 'Must be positive')
 
 // Object validation
 export const object = <T extends Record<string, Schema>>(shape: T) =>
@@ -214,20 +302,6 @@ export const enums = <T extends readonly string[]>(...values: T) =>
       : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
   )
 
-// Composable validation chains
-export const pipe = <T, U>(
-  schema: Schema<T>,
-  ...transforms: Array<(s: Schema<T>) => Schema<U>>
-) =>
-  transforms.reduce((s, transform) => transform(s as any), schema) as Schema<U>
-
-// Smart builders for common patterns
-export const email_string = () => pipe(string(), email)
-export const url_string = () => pipe(string(), url)
-export const positive_int = () => pipe(number(), int, positive)
-export const id_string = () => pipe(string(), minLength(1), maxLength(100))
-export const safe_string = () => pipe(string(), maxLength(1000))
-
 // Type inference helper
 export type Infer<T extends Schema> = T extends Schema<infer U> ? U : never
 
@@ -269,27 +343,6 @@ export const schema = {
   union,
   literal,
   enums,
-
-  // Constraints
-  min,
-  max,
-  length,
-  minLength,
-  maxLength,
-  pattern,
-  email,
-  url,
-  int,
-  positive,
-
-  // Builders
-  pipe,
-  email_string,
-  url_string,
-  positive_int,
-  id_string,
-  safe_string,
-  actionPayload,
 
   // Validation
   validate

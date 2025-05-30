@@ -1,28 +1,34 @@
 // src/libs/utils.ts
 
 /**
- * Creates a memoized version of a function that caches its results
+ * Memoization utility with proper cache management
  */
-export const memoize = <TArgs extends Array<unknown>, TResult>(
-  fn: (...args: TArgs) => TResult
-): ((...args: TArgs) => TResult) => {
-  const cache = new WeakMap()
+export const memoize = <TArgs extends unknown[], TReturn>(
+  fn: (...args: TArgs) => TReturn,
+  keyResolver?: (...args: TArgs) => string
+): ((...args: TArgs) => TReturn) => {
+  const cache = new Map<string, TReturn>()
+  const maxCacheSize = 100
 
-  return (...args: TArgs) => {
-    const key = args[0]
-    // Only use WeakMap if first arg is an object
-    if (typeof key === 'object' && key !== null) {
-      if (!cache.has(key)) {
-        cache.set(key, fn(...args))
-      }
-      return cache.get(key)
+  return (...args: TArgs): TReturn => {
+    const key = keyResolver ? keyResolver(...args) : JSON.stringify(args)
+
+    if (cache.has(key)) {
+      return cache.get(key)!
     }
 
-    // Fallback to regular function call for primitive args
-    return fn(...args)
+    const result = fn(...args)
+
+    // Manage cache size
+    if (cache.size >= maxCacheSize) {
+      const firstKey = cache.keys().next().value
+      cache.delete(firstKey)
+    }
+
+    cache.set(key, result)
+    return result
   }
 }
-
 /**
  * Composes multiple functions from left to right
  * @template T - Value type
@@ -38,34 +44,54 @@ export const memoize = <TArgs extends Array<unknown>, TResult>(
 export const pipe = <T>(initialValue: T, ...fns: Array<(value: T) => T>): T => {
   return fns.reduce((value, fn) => fn(value), initialValue)
 }
-
 /**
- * Performs deep equality comparison between two values
+ * Deep equality comparison with special handling for arrays and objects
  */
-export const isEqual = (a: unknown, b: unknown): boolean => {
-  if (Object.is(a, b)) return true
+export const isEqual = (a: any, b: any): boolean => {
+  // Same reference
+  if (a === b) return true
 
-  if (
-    typeof a !== 'object' ||
-    typeof b !== 'object' ||
-    a === null ||
-    b === null
-  ) {
-    return false
+  // Null/undefined checks
+  if (a == null || b == null) return a === b
+
+  // Type check
+  if (typeof a !== typeof b) return false
+
+  // Primitive types
+  if (typeof a !== 'object') return a === b
+
+  // Array comparison
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (!isEqual(a[i], b[i])) return false
+    }
+    return true
   }
 
-  if (Array.isArray(a) && Array.isArray(b)) {
-    return (
-      a.length === b.length && a.every((item, index) => isEqual(item, b[index]))
-    )
+  // Date comparison
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() === b.getTime()
   }
 
-  const keysA = Object.keys(a as object)
-  const keysB = Object.keys(b as object)
+  // RegExp comparison
+  if (a instanceof RegExp && b instanceof RegExp) {
+    return a.toString() === b.toString()
+  }
+
+  // Object comparison
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
 
   if (keysA.length !== keysB.length) return false
 
-  return keysA.every(key => isEqual((a as any)[key], (b as any)[key]))
+  for (const key of keysA) {
+    if (!keysB.includes(key)) return false
+    if (!isEqual(a[key], b[key])) return false
+  }
+
+  return true
 }
 
 /**
@@ -191,3 +217,46 @@ export const withEffect = <T>(effect: Effect<T>) => ({
     }),
   run: effect
 })
+
+// src/libs/utils.ts
+// Utility functions with proper deep comparison
+
+/*
+
+      C.Y.R.E - U.T.I.L.S
+      
+      Utility functions for deep comparison and state management
+
+*/
+
+/**
+ * Deep clone utility
+ */
+export const deepClone = <T>(obj: T): T => {
+  if (obj === null || typeof obj !== 'object') return obj
+  if (obj instanceof Date) return new Date(obj.getTime()) as unknown as T
+  if (obj instanceof Array)
+    return obj.map(item => deepClone(item)) as unknown as T
+  if (typeof obj === 'object') {
+    const cloned = {} as {[key: string]: any}
+    Object.keys(obj).forEach(key => {
+      cloned[key] = deepClone((obj as {[key: string]: any})[key])
+    })
+    return cloned as T
+  }
+  return obj
+}
+
+/**
+ * Safe JSON stringify with circular reference handling
+ */
+export const safeStringify = (obj: any): string => {
+  const seen = new Set()
+  return JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) return '[Circular]'
+      seen.add(value)
+    }
+    return value
+  })
+}

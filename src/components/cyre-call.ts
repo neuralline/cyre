@@ -1,5 +1,5 @@
 // src/components/cyre-call.ts
-// Fix for Cyre converting falsy values (0, undefined) to null
+// Call processing with proper payload flow and debounce handling
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
@@ -17,12 +17,7 @@ import {log} from './cyre-log'
 
       C.Y.R.E - C.A.L.L 
       
-      CRITICAL FIX: Cyre was converting falsy values to null
-      - 0 became null (breaking interval streams)
-      - undefined became null (breaking timer streams)
-      - false, empty string also affected
-      
-      Solution: Preserve exact values throughout call chain
+      Call processing with proper payload transformation through pipeline
 
 */
 
@@ -36,12 +31,16 @@ export async function processCall(
     hasPayload: payload !== undefined,
     actionType: action.type || 'unknown'
   })
+
+  const originalPayload = payload ?? action.payload
   const context: ProtectionContext = {
     action,
-    payload: payload ?? action.payload,
+    payload: originalPayload,
+    originalPayload,
     metrics: io.getMetrics(action.id),
     timestamp: Date.now()
   }
+
   const pipeline = action._protectionPipeline || []
 
   // Run protection pipeline
@@ -49,16 +48,12 @@ export async function processCall(
     const result = protection(context)
 
     if (!result.pass) {
-      // Handle delayed execution (debounce)
+      // Handle delayed execution (debounce) - preserve processed payload
       if (result.delayed && result.duration) {
-        sensor.debounce(
-          action.id,
-          result.duration,
-          1, // collapsed calls count
-          'protection-pipeline'
-        )
+        sensor.debounce(action.id, result.duration, 1, 'protection-pipeline')
         return useDebounce(action, context.payload, result.duration)
       }
+
       const protectionType = extractProtectionType(result.reason)
       sensor.log(action.id, protectionType, 'protection-pipeline', {
         reason: result.reason,
@@ -72,7 +67,7 @@ export async function processCall(
       }
     }
 
-    // Update payload if protection modified it
+    // Update payload if protection modified it (selector, transform, etc.)
     if (result.payload !== undefined) {
       context.payload = result.payload
     }
@@ -83,7 +78,7 @@ export async function processCall(
     return useSchedule(action, context.payload)
   }
 
-  // Direct execution
+  // Direct execution with processed payload
   const result = await useDispatch(action, context.payload)
 
   // Handle IntraLink chain reactions
@@ -122,6 +117,9 @@ function extractProtectionType(
   if (reason.includes('Throttled')) return 'throttle'
   if (reason.includes('unchanged')) return 'skip'
   if (reason.includes('not available')) return 'blocked'
+  if (reason.includes('Condition not met')) return 'skip'
+  if (reason.includes('Selector failed')) return 'error'
+  if (reason.includes('Transform failed')) return 'error'
   return 'error'
 }
 
@@ -139,6 +137,7 @@ function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
     repeat,
     scheduledExecution: true
   })
+
   const result = TimeKeeper.keep(
     interval,
     async () => {
@@ -179,14 +178,13 @@ function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
 }
 
 /**
- * Schedule delayed execution (debounce)
+ * Schedule delayed execution (debounce) - preserves processed payload
  */
 function useDebounce(
   action: IO,
   payload: ActionPayload,
   delay: number
 ): CyreResponse {
-  // Clear existing debounce timer
   if (action._debounceTimer) {
     TimeKeeper.forget(action._debounceTimer)
   }
@@ -203,6 +201,8 @@ function useDebounce(
         executedAfterDelay: delay,
         timestamp: Date.now()
       })
+
+      // Execute directly with processed payload - bypass pipeline since it already ran
       await useDispatch(action, payload)
     },
     1,

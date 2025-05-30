@@ -2,7 +2,7 @@
 
 > Neural Line - Reactive Event Manager  
 > **C.Y.R.E** ~/`SAYER`/  
-> Version 4.1.0
+> Version 4.3.0
 
 **The fastest, most reliable reactive state/event management library with industry-leading performance and zero-error. A unique channel-based architecture that runs both in Node and Browser. It's designed for 24/7 operation with advanced protection mechanisms like "Breath system". Task schedule with TimeKeeper etc... and its 60k. bEvolved from the original Quantum-Inception clock project (2016).**
 
@@ -20,8 +20,6 @@ CYRE delivers **industry-leading performance** with zero-error reliability:
 - **0.054ms** - Average execution latency
 - **0.000%** - Error rate across 23,100+ operations
 - **5.37MB** - Memory usage for 5,000 operations (10-20x more efficient)
-
-
 
 ## Quick Start
 

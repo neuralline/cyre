@@ -17,6 +17,7 @@ import {
   type CyreConfig,
   type PersistentState
 } from './context/persistent-state'
+import schema from './schema/cyre-schema'
 
 /* 
     Neural Line
@@ -566,6 +567,7 @@ export const cyre = {
       return false
     }
   },
+  schema,
 
   // State machine service
   stateMachine: stateMachineService
