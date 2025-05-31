@@ -43,29 +43,38 @@ export async function processCall(
   for (const protection of pipeline) {
     const result = protection(context)
 
-    if (!result.pass) {
+    // Handle async protection functions
+    const actualResult =
+      result && typeof result.then === 'function' ? await result : result
+
+    if (!actualResult.pass) {
       // Handle delayed execution (debounce) - preserve processed payload
-      if (result.delayed && result.duration) {
-        sensor.debounce(action.id, result.duration, 1, 'protection-pipeline')
-        return useDebounce(action, context.payload, result.duration)
+      if (actualResult.delayed && actualResult.duration) {
+        sensor.debounce(
+          action.id,
+          actualResult.duration,
+          1,
+          'protection-pipeline'
+        )
+        return useDebounce(action, context.payload, actualResult.duration)
       }
 
-      const protectionType = extractProtectionType(result.reason)
+      const protectionType = extractProtectionType(actualResult.reason)
       sensor.log(action.id, protectionType, 'protection-pipeline', {
-        reason: result.reason,
+        reason: actualResult.reason,
         protectionActive: true
       })
 
       return {
         ok: false,
         payload: null,
-        message: result.reason
+        message: actualResult.reason
       }
     }
 
     // Update payload if protection modified it (selector, transform, etc.)
-    if (result.payload !== undefined) {
-      context.payload = result.payload
+    if (actualResult.payload !== undefined) {
+      context.payload = actualResult.payload
     }
   }
 

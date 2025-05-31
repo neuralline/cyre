@@ -1,12 +1,12 @@
 // src/index.ts
-// Main exports with schema validation support
+// Main exports with group system support
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.1.0 2025 with Schema Validation
+    Version 4.2.0 2025 with Group System
 
     CYRE TARGET: is to make Cyre the least call-to-execution overhead per channel still having cutting edge features 
 
@@ -42,23 +42,19 @@ CYRE TODO:
 
 []  DM: Direct Message. ??
 
-[]  Smart Circuit Breaker. 
-  // Circuit breaker that learns failure patterns
-      const intelligentCircuitBreaker = (errorHistory: ErrorEvent[]) => {
-        const failurePattern = analyzeFailurePattern(errorHistory)
-        const recoveryTime = predictRecoveryTime(failurePattern)
-        
-        return shouldOpen(failurePattern) ? 
-          openCircuit(recoveryTime) : 
-          keepClosed()
-      }
-
 []  .action future features {
       block: boolean // this channel is no longer available
       required: boolean // payload is required on call
       maxWait: number : boolean
       immutable: boolean // can't change payload 
     }
+
+    NEW: Group System
+    [x] cyre.group() - Create channel groups with shared configuration
+    [x] Pattern-based channel matching with wildcards
+    [x] Shared middleware chains across group channels
+    [x] Group-level alerting and monitoring
+    [x] Automatic channel addition to matching groups
 */
 
 // Import the cyre instance and related utilities from app.ts
@@ -73,8 +69,11 @@ import schema from './schema/cyre-schema'
 // Import stream system
 import {createStream} from './stream'
 
+// Import group system
+import {groupOperations} from './components/cyre-group'
+
 // Main exports
-export {cyre, log, useCyre, cyreCompose, createStream, schema}
+export {cyre, log, useCyre, cyreCompose, createStream, schema, groupOperations}
 
 // Export types with unique names to avoid conflicts
 export type {
@@ -119,8 +118,21 @@ export type {
   Infer as CyreInfer
 } from './schema/cyre-schema'
 
+// Export group types
+export type {
+  GroupConfig as CyreGroupConfig,
+  GroupState as CyreGroupState,
+  GroupResult as CyreGroupResult,
+  GroupStats as CyreGroupStats,
+  GroupMetrics as CyreGroupMetrics,
+  GroupOperations as CyreGroupOperations,
+  AlertConfig as CyreAlertConfig,
+  AlertState as CyreAlertState,
+  GroupMiddleware as CyreGroupMiddleware
+} from './types/core'
+
 // Version information
-export const version = '4.1.0'
+export const version = '4.2.0'
 
 // Also export cyre as the default export for maximum compatibility
 export default cyre
@@ -132,6 +144,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.cyreCompose = cyreCompose
   globalThis.CyreStream = createStream
   globalThis.CyreSchema = schema
+  globalThis.CyreGroup = groupOperations
 }
 
 // For browser environments that don't have globalThis
@@ -141,4 +154,5 @@ if (typeof window !== 'undefined') {
   ;(window as any).cyreCompose = cyreCompose
   ;(window as any).CyreStream = createStream
   ;(window as any).CyreSchema = schema
+  ;(window as any).CyreGroup = groupOperations
 }

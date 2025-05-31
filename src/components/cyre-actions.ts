@@ -1,12 +1,12 @@
 // src/components/cyre-actions.ts
-// Action processing with proper repeat: 0 handling
-
+// Updated action registration with group middleware compilation
 import type {IO, ActionPayload} from '../types/interface'
-import {io} from '../context/state'
+import {io, middlewares} from '../context/state'
 import {metricsState} from '../context/metrics-state'
 import CyreChannel from './cyre-channels'
 import {sensor} from '../context/metrics-report'
 import {log} from './cyre-log'
+import {getChannelGroups} from './cyre-group'
 import {
   validate,
   object,
@@ -18,13 +18,13 @@ import {
 
 /*
 
-      C.Y.R.E - A.C.T.I.O.N.S
+      C.Y.R.E - U.N.I.F.I.E.D - P.I.P.E.L.I.N.E
       
-      Action processing with proper repeat: 0 blocking:
-      - Create channel (ID, existence, defaults)
-      - Validate action structure and functions
-      - Compile protection pipeline
-      - Store final action with compiled pipeline
+      Single pipeline that handles both individual and group protections:
+      - Group middleware integrated as standard middleware
+      - Natural execution order: group → individual → protections
+      - Single protection compilation and execution
+      - Clean separation of concerns
 
 */
 
@@ -41,36 +41,29 @@ export type ProtectionFn = (
 ) =>
   | {pass: true; payload?: ActionPayload}
   | {pass: false; reason: string; delayed?: boolean; duration?: number}
+  | Promise<{pass: true; payload?: ActionPayload}>
+  | Promise<{pass: false; reason: string; delayed?: boolean; duration?: number}>
 
-// Action schema for structure validation
+// Action schema for structure validation (unchanged)
 const actionSchema = object({
   id: string(),
   type: string().optional(),
   payload: any().optional(),
-
-  // State reactivity (functions validated separately)
   condition: any().optional(),
   selector: any().optional(),
   transform: any().optional(),
-
-  // Timing
   interval: number().optional(),
   delay: number().optional(),
   repeat: any().optional(),
   timeOfCreation: number().optional(),
-
-  // Protection
   detectChanges: boolean().optional(),
   debounce: number().optional(),
   throttle: number().optional(),
   schema: any().optional(),
   block: boolean().optional(),
   required: any().optional(),
-
-  // Priority
   priority: any().optional(),
-
-  // Internal
+  middleware: any().optional(),
   _protectionPipeline: any().optional(),
   _debounceTimer: string().optional()
 })
@@ -78,7 +71,7 @@ const actionSchema = object({
 /**
  * Validate action structure using schema
  */
-const validateActionStructure = (
+export const validateActionStructure = (
   action: IO
 ): {valid: boolean; errors?: string[]} => {
   const result = validate(actionSchema, action)
@@ -91,7 +84,7 @@ const validateActionStructure = (
 /**
  * Validate function attributes that schema can't handle
  */
-const validateFunctionAttributes = (action: IO): string[] => {
+export const validateFunctionAttributes = (action: IO): string[] => {
   const errors: string[] = []
 
   if (
@@ -100,18 +93,15 @@ const validateFunctionAttributes = (action: IO): string[] => {
   ) {
     errors.push('condition must be a function')
   }
-
   if (action.selector !== undefined && typeof action.selector !== 'function') {
     errors.push('selector must be a function')
   }
-
   if (
     action.transform !== undefined &&
     typeof action.transform !== 'function'
   ) {
     errors.push('transform must be a function')
   }
-
   if (action.schema !== undefined && typeof action.schema !== 'function') {
     errors.push('schema must be a schema function')
   }
@@ -125,7 +115,6 @@ const validateFunctionAttributes = (action: IO): string[] => {
 const validateActionAttributes = (action: IO): string[] => {
   const errors: string[] = []
 
-  // Validate repeat - allow 0 as valid value
   if (action.repeat !== undefined) {
     const isValid =
       typeof action.repeat === 'number' ||
@@ -134,31 +123,26 @@ const validateActionAttributes = (action: IO): string[] => {
     if (!isValid) {
       errors.push('repeat must be number, boolean, or Infinity')
     }
-    // Allow repeat: 0 - it's a valid configuration that means "don't execute"
   }
 
-  // Validate timing values
   if (
     action.debounce !== undefined &&
     (typeof action.debounce !== 'number' || action.debounce < 0)
   ) {
     errors.push('debounce must be a non-negative number')
   }
-
   if (
     action.throttle !== undefined &&
     (typeof action.throttle !== 'number' || action.throttle < 0)
   ) {
     errors.push('throttle must be a non-negative number')
   }
-
   if (
     action.interval !== undefined &&
     (typeof action.interval !== 'number' || action.interval < 0)
   ) {
     errors.push('interval must be a non-negative number')
   }
-
   if (
     action.delay !== undefined &&
     (typeof action.delay !== 'number' || action.delay < 0)
@@ -170,38 +154,152 @@ const validateActionAttributes = (action: IO): string[] => {
 }
 
 /**
- * Compile protection pipeline with proper repeat: 0 handling
+ * Get all middleware for this action (group + individual)
+ */
+const getAllMiddleware = (
+  actionId: string
+): {id: string; fn: any; source: 'group' | 'individual'}[] => {
+  const allMiddleware: {id: string; fn: any; source: 'group' | 'individual'}[] =
+    []
+
+  // 1. Get group middleware first (executes before individual middleware)
+  const channelGroups = getChannelGroups(actionId)
+  channelGroups.forEach(group => {
+    group.middlewareIds.forEach(middlewareId => {
+      const middleware = middlewares.get(middlewareId)
+      if (middleware) {
+        allMiddleware.push({
+          id: middlewareId,
+          fn: middleware.fn,
+          source: 'group'
+        })
+      }
+    })
+  })
+
+  // 2. Get individual action middleware (executes after group middleware)
+  const action = io.get(actionId)
+  if (action?.middleware) {
+    action.middleware.forEach(middlewareId => {
+      const middleware = middlewares.get(middlewareId)
+      if (middleware) {
+        allMiddleware.push({
+          id: middlewareId,
+          fn: middleware.fn,
+          source: 'individual'
+        })
+      }
+    })
+  }
+
+  return allMiddleware
+}
+
+/**
+ * Create middleware protection function
+ */
+const createMiddlewareProtection = (
+  middlewareList: {id: string; fn: any; source: 'group' | 'individual'}[]
+): ProtectionFn => {
+  if (middlewareList.length === 0) {
+    // Return pass-through protection if no middleware
+    return () => ({pass: true})
+  }
+
+  return async (ctx: ProtectionContext) => {
+    let currentPayload = ctx.payload
+
+    for (let i = 0; i < middlewareList.length; i++) {
+      const middleware = middlewareList[i]
+
+      try {
+        sensor.log(ctx.action.id, 'info', 'middleware-start', {
+          middlewareId: middleware.id,
+          source: middleware.source,
+          index: i
+        })
+
+        // Create next function for this middleware
+        const next = (nextPayload?: ActionPayload) => {
+          return Promise.resolve({
+            ok: true,
+            payload: nextPayload !== undefined ? nextPayload : currentPayload,
+            message: 'Middleware processing complete'
+          })
+        }
+
+        // Execute middleware
+        const result = await middleware.fn(currentPayload, next)
+
+        if (!result || !result.ok) {
+          const message = result?.message || 'Middleware blocked execution'
+          sensor.log(ctx.action.id, 'blocked', 'middleware-block', {
+            middlewareId: middleware.id,
+            source: middleware.source,
+            reason: message
+          })
+          return {
+            pass: false,
+            reason: `${middleware.source} middleware ${middleware.id} blocked: ${message}`
+          }
+        }
+
+        // Update payload for next middleware
+        if (result.payload !== null && result.payload !== undefined) {
+          currentPayload = result.payload
+        }
+
+        sensor.log(ctx.action.id, 'info', 'middleware-success', {
+          middlewareId: middleware.id,
+          source: middleware.source,
+          payloadTransformed: result.payload !== ctx.payload
+        })
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        sensor.log(ctx.action.id, 'error', 'middleware-error', {
+          middlewareId: middleware.id,
+          source: middleware.source,
+          error: errorMsg
+        })
+        return {
+          pass: false,
+          reason: `${middleware.source} middleware ${middleware.id} error: ${errorMsg}`
+        }
+      }
+    }
+
+    // All middleware passed
+    return {
+      pass: true,
+      payload: currentPayload
+    }
+  }
+}
+
+/**
+ * Unified protection pipeline compilation
  */
 const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
   const pipeline: ProtectionFn[] = []
 
-  // 1. Zero repeat block - CRITICAL FIX: This must come first and block all execution
+  // 1. Zero repeat block (fastest check)
   if (action.repeat === 0) {
-    pipeline.push(ctx => {
-      sensor.log(ctx.action.id, 'blocked', 'zero-repeat-block', {
-        repeatValue: 0,
-        blockReason: 'repeat: 0 configuration prevents all execution'
+    pipeline.push(() => {
+      sensor.log(action.id, 'blocked', 'zero-repeat-block', {
+        repeatValue: 0
       })
-      return {
-        pass: false,
-        reason: 'Action configured with repeat: 0 - execution blocked'
-      }
+      return {pass: false, reason: 'Action configured with repeat: 0'}
     })
-    // If repeat is 0, return early with only this protection
-    // No other protections should run because execution is completely blocked
-    return pipeline
   }
 
   // 2. Block check
   if (action.block === true) {
-    pipeline.push(ctx => {
-      sensor.log(ctx.action.id, 'blocked', 'service-unavailable', {
-        blockStatus: true,
-        blockReason: 'service marked as unavailable'
+    pipeline.push(() => {
+      sensor.log(action.id, 'blocked', 'service-unavailable', {
+        blockStatus: true
       })
       return {pass: false, reason: 'Service not available'}
     })
-    return pipeline
   }
 
   // 3. System recuperation check
@@ -214,12 +312,11 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     action.selector
   )
   if (hasProtections && action.priority?.level !== 'critical') {
-    pipeline.push(ctx => {
+    pipeline.push(() => {
       const state = metricsState.get()
       if (state.breathing.isRecuperating) {
-        sensor.log(ctx.action.id, 'blocked', 'system-recuperation', {
-          stressLevel: state.stress.combined,
-          isRecuperating: true
+        sensor.log(action.id, 'blocked', 'system-recuperation', {
+          stressLevel: state.stress.combined
         })
         return {
           pass: false,
@@ -235,15 +332,17 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     pipeline.push(ctx => {
       const validationResult = validate(action.schema!, ctx.payload)
       if (!validationResult.ok) {
+        const errors = Array.isArray(validationResult.errors)
+          ? validationResult.errors
+          : [String(validationResult.errors)]
+
         sensor.log(ctx.action.id, 'blocked', 'schema-validation', {
-          validationErrors: validationResult.errors,
+          validationErrors: errors,
           schemaValidation: false
         })
         return {
           pass: false,
-          reason: `Schema validation failed: ${validationResult.errors.join(
-            ', '
-          )}`
+          reason: `Schema validation failed: ${errors.join(', ')}`
         }
       }
       sensor.log(ctx.action.id, 'info', 'schema-validation', {
@@ -253,7 +352,13 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 5. Selector
+  // 5. ALL MIDDLEWARE (group + individual) - unified execution
+  const allMiddleware = getAllMiddleware(action.id)
+  if (allMiddleware.length > 0) {
+    pipeline.push(createMiddlewareProtection(allMiddleware))
+  }
+
+  // 6. Selector
   if (action.selector) {
     pipeline.push(ctx => {
       try {
@@ -265,7 +370,6 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
         sensor.log(ctx.action.id, 'error', 'payload-selection', {
-          selectorError: true,
           error: errorMsg
         })
         return {pass: false, reason: `Selector failed: ${errorMsg}`}
@@ -273,7 +377,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 6. Condition check
+  // 7. Condition check
   if (action.condition) {
     pipeline.push(ctx => {
       try {
@@ -291,7 +395,6 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
         sensor.log(ctx.action.id, 'error', 'condition-check', {
-          conditionError: true,
           error: errorMsg
         })
         return {pass: false, reason: `Condition check failed: ${errorMsg}`}
@@ -299,7 +402,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 7. Change detection
+  // 8. Change detection
   if (action.detectChanges) {
     pipeline.push(ctx => {
       const hasChanged = io.hasChanged(ctx.action.id, ctx.payload)
@@ -313,7 +416,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 8. Throttle
+  // 9. Throttle
   if (action.throttle && action.throttle > 0) {
     pipeline.push(ctx => {
       const lastExec = ctx.metrics?.lastExecutionTime || 0
@@ -329,10 +432,10 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 9. Debounce
+  // 10. Debounce
   if (action.debounce && action.debounce > 0) {
-    pipeline.push(ctx => {
-      sensor.log(ctx.action.id, 'info', 'debounce-delay', {
+    pipeline.push(() => {
+      sensor.log(action.id, 'info', 'debounce-delay', {
         debounceMs: action.debounce
       })
       return {
@@ -344,7 +447,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
     })
   }
 
-  // 10. Transform
+  // 11. Transform
   if (action.transform) {
     pipeline.push(ctx => {
       try {
@@ -356,7 +459,6 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
         sensor.log(ctx.action.id, 'error', 'payload-transform', {
-          transformError: true,
           error: errorMsg
         })
         return {pass: false, reason: `Transform failed: ${errorMsg}`}
@@ -368,7 +470,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
 }
 
 /**
- * Action registration with proper repeat: 0 handling
+ * Unified action registration
  */
 export const registerSingleAction = (
   attribute: IO
@@ -390,9 +492,11 @@ export const registerSingleAction = (
     // 2. Validate action structure
     const structureValidation = validateActionStructure(channel)
     if (!structureValidation.valid) {
-      const errorMessage = `Action structure invalid: ${structureValidation.errors!.join(
-        ', '
-      )}`
+      const errors = Array.isArray(structureValidation.errors)
+        ? structureValidation.errors
+        : [String(structureValidation.errors)]
+
+      const errorMessage = `Action structure invalid: ${errors.join(', ')}`
       sensor.error(channel.id, errorMessage, 'action-structure-validation')
       return {ok: false, message: errorMessage}
     }
@@ -417,7 +521,7 @@ export const registerSingleAction = (
       return {ok: false, message: errorMessage}
     }
 
-    // 5. Compile protection pipeline
+    // 5. Compile unified protection pipeline (includes group + individual middleware)
     const protectionPipeline = compileProtectionPipeline(channel)
 
     // 6. Create final action with compiled pipeline
@@ -426,25 +530,42 @@ export const registerSingleAction = (
       _protectionPipeline: protectionPipeline
     }
 
-    // 7. Store final action (overwrites channel)
+    // 7. Store final action
     io.set(finalAction)
 
-    const protectionInfo =
-      protectionPipeline.length > 0
-        ? `with ${protectionPipeline.length} protections`
-        : 'with no protections'
+    // Get integration info for logging
+    const channelGroups = getChannelGroups(finalAction.id)
+    const allMiddleware = getAllMiddleware(finalAction.id)
+    const groupMiddleware = allMiddleware.filter(m => m.source === 'group')
+    const individualMiddleware = allMiddleware.filter(
+      m => m.source === 'individual'
+    )
 
-    // Special logging for repeat: 0 actions
-    if (finalAction.repeat === 0) {
-      log.debug(
-        `Action ${finalAction.id} registered with repeat: 0 (will not execute)`
-      )
-    } else {
-      log.debug(`Action ${finalAction.id} registered ${protectionInfo}`)
-    }
+    const groupInfo =
+      channelGroups.length > 0
+        ? `in ${channelGroups.length} group(s): [${channelGroups
+            .map(g => g.id)
+            .join(', ')}]`
+        : 'in no groups'
+
+    const middlewareInfo =
+      allMiddleware.length > 0
+        ? `with ${groupMiddleware.length} group + ${individualMiddleware.length} individual middleware`
+        : 'with no middleware'
+
+    const protectionInfo = `${protectionPipeline.length} total protections`
+
+    log.debug(
+      `Action ${finalAction.id} registered with ${protectionInfo} ${middlewareInfo} ${groupInfo}`
+    )
 
     sensor.log(finalAction.id, 'info', 'action-registration', {
       protectionCount: protectionPipeline.length,
+      groupCount: channelGroups.length,
+      groupIds: channelGroups.map(g => g.id),
+      groupMiddlewareCount: groupMiddleware.length,
+      individualMiddlewareCount: individualMiddleware.length,
+      totalMiddlewareCount: allMiddleware.length,
       hasThrottle: !!(finalAction.throttle && finalAction.throttle > 0),
       hasDebounce: !!(finalAction.debounce && finalAction.debounce > 0),
       hasChangeDetection: !!finalAction.detectChanges,
@@ -452,17 +573,12 @@ export const registerSingleAction = (
       hasCondition: !!finalAction.condition,
       hasSelector: !!finalAction.selector,
       hasTransform: !!finalAction.transform,
-      priority: finalAction.priority?.level || 'medium',
-      repeatValue: finalAction.repeat,
-      willNeverExecute: finalAction.repeat === 0
+      priority: finalAction.priority?.level || 'medium'
     })
 
     return {
       ok: true,
-      message:
-        finalAction.repeat === 0
-          ? `Action registered with repeat: 0 (will not execute)`
-          : `Action registered ${protectionInfo}`,
+      message: `Action registered with ${protectionInfo} ${middlewareInfo} ${groupInfo}`,
       payload: finalAction
     }
   } catch (error) {
@@ -473,5 +589,5 @@ export const registerSingleAction = (
   }
 }
 
-// Export protection pipeline for testing
+// Export pipeline compilation for testing
 export {compileProtectionPipeline}

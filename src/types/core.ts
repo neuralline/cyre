@@ -132,6 +132,49 @@ export interface IO {
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
+  // Group configuration
+  group?: string
+
+  // Multi-sensor fusion
+  fusion?: {
+    spatial?: Array<{
+      id: string
+      location: {x: number; y: number}
+      weight?: number
+    }>
+    temporal?: string[]
+    method?: 'weighted' | 'kalman'
+  }
+
+  // Pattern recognition
+  patterns?: {
+    sequences?: Array<{name: string; conditions: string[]; timeout?: number}>
+    anomalies?: Array<{method: 'zscore' | 'iqr'; threshold: number}>
+  }
+
+  // Compiled pipelines (internal)
+  _fusionPipeline?: FusionFn[]
+  _patternPipeline?: PatternFn[]
+}
+
+export type FusionFn = (payload: any, context: FusionContext) => any
+export type PatternFn = (payload: any, history: any[]) => PatternResult
+
+export interface FusionContext {
+  spatialData: Array<{id: string; value: any; distance: number}>
+  temporalData: Array<{id: string; values: any[]}>
+}
+
+export interface PatternResult {
+  detected: boolean
+  patterns: Array<{name: string; confidence: number}>
+}
+
+export interface ChannelGroup {
+  id: string
+  channels: Set<string>
+  shared: {throttle?: number; schema?: any; priority?: any}
+  coordination: {emergency?: {triggers: string[]; action: string}}
 }
 
 export type ActionPipelineFunction = (...args: any[]) => any
@@ -229,4 +272,148 @@ export interface ProtectionContext {
     readonly debounceTimerId?: string
   }
   readonly timerManager: TimerManager
+}
+/**
+ * Group configuration following IO interface patterns
+ */
+export interface GroupConfig {
+  /** Channel patterns to match (supports wildcards like 'sensor-*', 'floor-2-*') */
+  channels: string[]
+  /** Shared configuration applied to all matching channels */
+  shared: Partial<IO> & {
+    /** Group-specific middleware chain */
+    middleware?: GroupMiddleware[]
+    /** Alert configurations */
+    alerts?: Record<string, AlertConfig>
+  }
+}
+
+/**
+ * Group middleware function type
+ */
+export type GroupMiddleware = (
+  payload: ActionPayload,
+  next: (payload?: ActionPayload) => Promise<any>
+) => Promise<any>
+
+/**
+ * Alert configuration
+ */
+export interface AlertConfig {
+  /** Threshold value for triggering alert */
+  threshold: number
+  /** Alert action identifier */
+  action: string
+  /** Alert condition type */
+  condition?: 'offline' | 'anomaly' | 'error' | 'custom'
+  /** Custom alert handler function */
+  handler?: (channelId: string, alertType: string, data: any) => void
+}
+
+/**
+ * Internal group state
+ */
+export interface GroupState {
+  /** Group identifier */
+  id: string
+  /** Group configuration */
+  config: GroupConfig
+  /** Set of matched channel IDs */
+  matchedChannels: Set<string>
+  /** Array of middleware IDs applied to this group */
+  middlewareIds: string[]
+  /** Alert states tracking */
+  alertStates: Map<string, AlertState>
+  /** Whether group is active */
+  isActive: boolean
+  /** Creation timestamp */
+  createdAt: number
+}
+
+/**
+ * Alert state tracking
+ */
+export interface AlertState {
+  /** Last time this alert was triggered */
+  lastTriggered: number
+  /** Number of times this alert has been triggered */
+  triggerCount: number
+  /** Whether alert is currently active */
+  isActive: boolean
+}
+
+/**
+ * Group operations result
+ */
+export interface GroupResult<T = any> {
+  /** Operation success status */
+  ok: boolean
+  /** Result message */
+  message: string
+  /** Optional payload data */
+  payload?: T
+}
+
+/**
+ * Group statistics
+ */
+export interface GroupStats {
+  /** Group identifier */
+  id: string
+  /** Number of matched channels */
+  channelCount: number
+  /** Number of active alerts */
+  activeAlerts: number
+  /** Total alert triggers */
+  totalAlertTriggers: number
+  /** Group uptime in milliseconds */
+  uptime: number
+  /** Middleware execution count */
+  middlewareExecutions: number
+}
+
+/**
+ * Group metrics
+ */
+export interface GroupMetrics {
+  /** Group statistics */
+  stats: GroupStats
+  /** Per-channel metrics */
+  channels: Record<
+    string,
+    {
+      executionCount: number
+      lastExecution: number
+      errors: number
+    }
+  >
+  /** Alert history */
+  alertHistory: Array<{
+    alertType: string
+    channelId: string
+    timestamp: number
+    data: any
+  }>
+}
+
+/**
+ * Group operations interface
+ */
+export interface GroupOperations {
+  /** Create a new group */
+  create: (groupId: string, config: GroupConfig) => GroupResult<GroupState>
+  /** Get group by ID */
+  get: (groupId: string) => GroupState | undefined
+  /** Update group configuration */
+  update: (groupId: string, updates: Partial<GroupConfig>) => GroupResult
+  /** Remove group */
+  remove: (groupId: string) => boolean
+  /** Get all groups */
+  getAll: () => GroupState[]
+  /** Get groups for a specific channel */
+  getChannelGroups: (channelId: string) => GroupState[]
+  /** Add channel to matching groups */
+  addChannelToGroups: (channelId: string) => void
+  /** Remove channel from groups */
+  removeChannelFromGroups: (channelId: string) => void
 }

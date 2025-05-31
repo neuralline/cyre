@@ -1,6 +1,7 @@
-// src/app.ts - Refactored initialization with persistent state support
+// src/app.ts - Updated with group system integration
 
 import type {IO, ActionPayload, CyreResponse} from './types/interface'
+import type {GroupConfig} from './types/core'
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
@@ -18,13 +19,18 @@ import {
   type PersistentState
 } from './context/persistent-state'
 import schema from './schema/cyre-schema'
+import {
+  groupOperations,
+  addChannelToGroups,
+  removeChannelFromGroups
+} from './components/cyre-group'
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.3.0 2025
+    Version 4.3.0 2025 with Group System
 
         example use:
         cyre.action({id: 'uber', payload: 44085648634})
@@ -33,18 +39,20 @@ import schema from './schema/cyre-schema'
         })
         cyre.call('uber') 
 
+        // Group system usage:
+        cyre.group('floor-2-sensors', {
+          channels: ['temp-floor2-*', 'motion-floor2-*'],
+          shared: {
+            middleware: [timestampValidator, securityCheck],
+            throttle: 1000,
+            schema: sensorSchema
+          }
+        })
+
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
     Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
 
     Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
-
-
-      C.Y.R.E - A.P.P
-      
-      Refactored with organized state and persistence:
-      - Clean initialization with config
-      - Persistent state support
-      - Minimal essential features only
 
 */
 
@@ -71,7 +79,7 @@ const initializeBreathing = (): void => {
 }
 
 /**
- * Action registration - simplified without external middleware
+ * Action registration with unified pipeline
  */
 const action = (
   attribute: IO | IO[]
@@ -86,7 +94,12 @@ const action = (
       const results = attribute.map(singleAction => {
         const result = registerSingleAction(singleAction)
         if (result.ok) {
-          persistence.autoSave() // Auto-save after action registration
+          // Add to matching groups and trigger recompilation
+          addChannelToGroups(singleAction.id)
+          // Recompile with group middleware included
+          const recompileResult = registerSingleAction(singleAction)
+          persistence.autoSave()
+          return recompileResult
         }
         return result
       })
@@ -102,7 +115,12 @@ const action = (
     } else {
       const result = registerSingleAction(attribute)
       if (result.ok) {
-        persistence.autoSave() // Auto-save after action registration
+        // Add to matching groups and trigger recompilation
+        addChannelToGroups(attribute.id)
+        // Recompile with group middleware included
+        const recompileResult = registerSingleAction(attribute)
+        persistence.autoSave()
+        return recompileResult
       }
       return result
     }
@@ -122,7 +140,7 @@ const action = (
 }
 
 /**
- * Call execution - simplified flow
+ * Call execution - unchanged, works with groups automatically
  */
 export const call = async (
   id: string,
@@ -153,6 +171,7 @@ export const call = async (
       message: `Channel not found: ${id}`
     }
   }
+
   const callStartTime = performance.now()
   try {
     sensor.log(id, 'call', 'call-entry', {
@@ -162,15 +181,10 @@ export const call = async (
       actionType: action.type || 'unknown',
       callInitiationTime: callStartTime
     })
-    // Execute optimized pipeline
+
+    // Execute optimized pipeline (includes group middleware automatically)
     const result = await processCall(action, payload)
 
-    // Handle IntraLink if present
-    // if (result.ok && result.metadata?.intraLink) {
-    //   const {id: chainId, payload: chainPayload} = result.metadata.intraLink
-    //   const chainResult = await call(chainId, chainPayload)
-    //   result.metadata.chainResult = chainResult
-    // }
     const totalCallTime = performance.now() - callStartTime
 
     sensor.log(id, 'info', 'call-completion', {
@@ -184,7 +198,6 @@ export const call = async (
     const errorMessage = error instanceof Error ? error.message : String(error)
     const totalCallTime = performance.now() - callStartTime
 
-    // CRITICAL FIX: Log call errors
     sensor.error(id, errorMessage, 'call-execution')
 
     return {
@@ -206,7 +219,6 @@ export const call = async (
 const on = (actionId: string, handler: Function): any => {
   const result = subscribe(actionId, handler)
   if (result.ok) {
-    // CRITICAL FIX: Log subscription events
     sensor.log(actionId, 'info', 'subscription', {
       subscriptionSuccess: true,
       timestamp: Date.now()
@@ -222,7 +234,7 @@ const on = (actionId: string, handler: Function): any => {
 }
 
 /**
- * Forget action - simplified cleanup
+ * Forget action with group cleanup
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -234,8 +246,10 @@ const forget = (id: string): boolean => {
     const subscriberRemoved = subscribers.forget(id)
     timeline.forget(id)
 
+    // Remove from groups
+    removeChannelFromGroups(id)
+
     if (actionRemoved || subscriberRemoved) {
-      //log.debug(`Removed action and subscriber for ${id}`)
       sensor.log(id, 'info', 'action-removal', {
         success: true,
         actionRemoved,
@@ -258,7 +272,7 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * Clear system - simplified
+ * Clear system with group cleanup
  */
 const clear = (): void => {
   try {
@@ -271,6 +285,11 @@ const clear = (): void => {
     timeline.clear()
     metricsReport.reset()
     metricsState.reset()
+
+    // Clear all groups
+    groupOperations.getAll().forEach(group => {
+      groupOperations.remove(group.id)
+    })
 
     stateMachineService.clear()
     persistence.autoSave()
@@ -320,7 +339,7 @@ const initialize = async (
     TimeKeeper.resume()
 
     log.sys(MSG.QUANTUM_HEADER)
-    log.success('Cyre initialized with state machine support')
+    log.success('Cyre initialized with group system support')
 
     const stats = persistence.getStats()
     log.debug(
@@ -335,7 +354,8 @@ const initialize = async (
         'breathing-system',
         'state-machines',
         'persistent-state',
-        'metrics-tracking'
+        'metrics-tracking',
+        'group-system'
       ],
       restoredActions: stats.actionCount,
       restoredSubscribers: stats.subscriberCount
@@ -351,7 +371,7 @@ const initialize = async (
 }
 
 /**
- * Main CYRE instance with comprehensive metrics
+ * Main CYRE instance with group system integration
  */
 export const cyre = {
   // Core methods
@@ -442,7 +462,6 @@ export const cyre = {
     }
   },
 
-  // CRITICAL FIX: Enhanced metrics with proper call tracking
   getMetrics: (channelId?: string) => {
     const state = metricsState.get()
     const systemStats = metricsReport.getSystemStats()
@@ -550,8 +569,8 @@ export const cyre = {
     try {
       const result = TimeKeeper.keep(duration, callback, 1, timerId)
       return result.kind === 'ok'
-        ? {ok: true}
-        : {ok: false, message: result.error.message}
+        ? {ok: true, message: 'TimeKeeper'}
+        : {ok: false, message: 'Forget'}
     } catch (error) {
       log.error(`Failed to set timer: ${error}`)
       return {ok: false, message: String(error)}
@@ -567,8 +586,34 @@ export const cyre = {
       return false
     }
   },
+
   schema,
 
   // State machine service
-  stateMachine: stateMachineService
+  stateMachine: stateMachineService,
+
+  // Group system methods
+  group: (groupId: string, config: GroupConfig) => {
+    return groupOperations.create(groupId, config)
+  },
+
+  getGroup: (groupId: string) => {
+    return groupOperations.get(groupId)
+  },
+
+  updateGroup: (groupId: string, updates: Partial<GroupConfig>) => {
+    return groupOperations.update(groupId, updates)
+  },
+
+  removeGroup: (groupId: string): boolean => {
+    return groupOperations.remove(groupId)
+  },
+
+  getAllGroups: () => {
+    return groupOperations.getAll()
+  },
+
+  getChannelGroups: (channelId: string) => {
+    return groupOperations.getChannelGroups(channelId)
+  }
 }
