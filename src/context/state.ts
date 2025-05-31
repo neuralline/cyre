@@ -9,7 +9,6 @@ import {metricsState, type MetricsState} from './metrics-state'
 import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
 export type MiddlewareFunction = (action: IO) => Promise<void>
-// Update to include proper middleware typing
 
 // Define a middleware type that works with the ISubscriber interface
 export interface IMiddleware extends ISubscriber {
@@ -59,13 +58,12 @@ export const io = {
       ioStore.set(action.id, enhanced)
 
       // Initialize action metrics properly with current timestamp
-
       const currentMetrics = actionMetrics.get(action.id)
 
       // Initialize metrics if they don't exist or are invalid
       if (!currentMetrics) {
         actionMetrics.set(action.id, {
-          lastExecutionTime: 0, // Keep as 0 until first execution
+          lastExecutionTime: 0,
           executionCount: 0,
           errors: []
         })
@@ -75,8 +73,6 @@ export const io = {
       if (action.detectChanges && action.payload !== undefined) {
         payloadHistory.set(action.id, action.payload)
       }
-
-      // Record call in quantum state
     } catch (error) {
       log.critical(
         `IO state corruption detected: ${
@@ -87,17 +83,14 @@ export const io = {
     }
   },
 
-  // Improved metrics update with proper validation and synchronization
   updateMetrics: (id: StateKey, update: Partial<StateActionMetrics>): void => {
     try {
-      // Get current metrics or create default if none exist
       const current = actionMetrics.get(id) || {
         lastExecutionTime: 0,
         executionCount: 0,
         errors: []
       }
 
-      // Merge updates with validation
       const updatedMetrics: StateActionMetrics = {
         ...current,
         lastExecutionTime:
@@ -111,14 +104,12 @@ export const io = {
         errors: update.errors || current.errors
       }
 
-      // Only update if there are actual changes
       const hasChanges =
         updatedMetrics.lastExecutionTime !== current.lastExecutionTime ||
         updatedMetrics.executionCount !== current.executionCount ||
         updatedMetrics.errors.length !== current.errors.length
 
       if (hasChanges) {
-        // Store updated metrics
         actionMetrics.set(id, updatedMetrics)
       }
     } catch (error) {
@@ -128,13 +119,11 @@ export const io = {
 
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
-  // Remove channel
   forget: (id: StateKey): boolean => {
     cleanupAction(id)
     return ioStore.forget(id)
   },
 
-  // Forget all channels and clear all related records
   clear: (): void => {
     try {
       ioStore.getAll().forEach(item => {
@@ -145,21 +134,17 @@ export const io = {
       ioStore.clear()
       metricsState.reset()
     } catch (error) {
-      // CRITICAL: Clear failure can cause memory leaks
       log.critical(`System clear failed: ${error}`)
       throw error
     }
   },
 
-  // Get all io state
   getAll: (): IO[] => ioStore.getAll(),
 
-  // Improved change detection with better logging
   hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
     try {
       const previousPayload = payloadHistory.get(id)
 
-      // If no previous payload, consider it changed
       if (previousPayload === undefined) {
         return true
       }
@@ -168,7 +153,7 @@ export const io = {
       return hasChanged
     } catch (error) {
       log.error(`Error in change detection for ${id}: ${error}`)
-      return true // Default to changed on error
+      return true
     }
   },
 
@@ -176,7 +161,6 @@ export const io = {
     return payloadHistory.get(id)
   },
 
-  // NEW: Update payload history after successful execution
   updatePayload: (id: StateKey, payload: ActionPayload): void => {
     try {
       payloadHistory.set(id, payload)
@@ -185,7 +169,6 @@ export const io = {
     }
   },
 
-  // Proper metrics retrieval with better logging and fallback
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
     const metrics = actionMetrics.get(id)
     if (metrics) {
@@ -195,7 +178,6 @@ export const io = {
     } else {
       log.debug(`No metrics found for ${id}`)
 
-      // If no legacy metrics exist but action exists, create minimal metrics
       const action = ioStore.get(id)
       if (action) {
         const newMetrics: StateActionMetrics = {
@@ -210,9 +192,6 @@ export const io = {
     return metrics
   },
 
-  /**
-   * Enhanced execution tracking that updates both legacy and enhanced metrics
-   */
   trackExecution: (id: StateKey, executionTime?: number): void => {
     try {
       const now = Date.now()
@@ -222,7 +201,6 @@ export const io = {
         errors: []
       }
 
-      // Update legacy metrics
       const updatedMetrics: StateActionMetrics = {
         ...currentMetrics,
         lastExecutionTime: now,
@@ -247,9 +225,6 @@ export const subscribers = {
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
   forget: (id: StateKey): boolean => {
     const result = subscriberStore.forget(id)
-    // if (result) {
-    //   log.debug(`Removed subscriber: ${id}`)
-    // }
     return result
   },
   clear: (): void => {
@@ -264,7 +239,6 @@ export const middlewares = {
       throw new Error('Invalid middleware format')
     }
 
-    // Store middleware in the central store
     middlewareStore.set(middleware.id, middleware)
   },
   get: (id: StateKey): IMiddleware | undefined => {
@@ -296,7 +270,9 @@ export const timeline = {
       .filter(t => t.status === 'active').length
     metricsState.update({activeFormations: activeCount})
   },
+
   get: (id: StateKey): Timer | undefined => timelineStore.get(id),
+
   forget: (id: StateKey): boolean => {
     const timers = timelineStore.getAll().filter(timer => timer.id === id)
     timers.forEach(timer => {
@@ -314,14 +290,22 @@ export const timeline = {
 
     return result
   },
+
   clear: (): void => {
     timelineStore.getAll().forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
+      if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
     })
     timelineStore.clear()
     metricsState.update({activeFormations: 0})
   },
-  getAll: (): Timer[] => timelineStore.getAll()
+
+  getAll: (): Timer[] => timelineStore.getAll(),
+
+  // Add the missing getActive method
+  getActive: (): Timer[] => {
+    return timelineStore.getAll().filter(timer => timer.status === 'active')
+  }
 }
 
 // Export readonly stores

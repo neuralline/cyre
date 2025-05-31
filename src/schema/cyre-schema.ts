@@ -1,5 +1,5 @@
 // src/schema/cyre-schema.ts
-// Schema validation with proper method chaining
+// Schema validation with proper method chaining and pipe functionality
 
 import type {ActionPayload} from '../types/interface'
 import {log} from '../components/cyre-log'
@@ -9,7 +9,7 @@ import {log} from '../components/cyre-log'
       C.Y.R.E - S.C.H.E.M.A
       
       Smart schema validation system:
-      - Concise functional API
+      - Concise functional API with pipe support
       - Direct action integration
       - Runtime type safety
       - Composable validators
@@ -302,6 +302,22 @@ export const enums = <T extends readonly string[]>(...values: T) =>
       : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
   )
 
+// PIPE FUNCTION - for composing schema transformations
+export const pipe = <T, U>(
+  schema: Schema<T>,
+  ...transforms: Array<(schema: Schema<T>) => Schema<U>>
+): Schema<U> => {
+  return transforms.reduce(
+    (acc, transform) => transform(acc as any),
+    schema as any
+  ) as Schema<U>
+}
+
+// EMAIL STRING - shorthand for string with email validation
+export const email_string = (): StringSchema => {
+  return string().email()
+}
+
 // Type inference helper
 export type Infer<T extends Schema> = T extends Schema<infer U> ? U : never
 
@@ -345,7 +361,11 @@ export const schema = {
   enums,
 
   // Validation
-  validate
+  validate,
+
+  // Composition
+  pipe,
+  email_string
 }
 
 export default schema

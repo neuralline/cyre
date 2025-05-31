@@ -1,5 +1,5 @@
 // src/components/cyre-actions.ts
-// Comprehensive action processing - handles all validation and compilation
+// Action processing with proper repeat: 0 handling
 
 import type {IO, ActionPayload} from '../types/interface'
 import {io} from '../context/state'
@@ -20,7 +20,7 @@ import {
 
       C.Y.R.E - A.C.T.I.O.N.S
       
-      Comprehensive action processing:
+      Action processing with proper repeat: 0 blocking:
       - Create channel (ID, existence, defaults)
       - Validate action structure and functions
       - Compile protection pipeline
@@ -125,7 +125,7 @@ const validateFunctionAttributes = (action: IO): string[] => {
 const validateActionAttributes = (action: IO): string[] => {
   const errors: string[] = []
 
-  // Validate repeat
+  // Validate repeat - allow 0 as valid value
   if (action.repeat !== undefined) {
     const isValid =
       typeof action.repeat === 'number' ||
@@ -134,6 +134,7 @@ const validateActionAttributes = (action: IO): string[] => {
     if (!isValid) {
       errors.push('repeat must be number, boolean, or Infinity')
     }
+    // Allow repeat: 0 - it's a valid configuration that means "don't execute"
   }
 
   // Validate timing values
@@ -169,20 +170,26 @@ const validateActionAttributes = (action: IO): string[] => {
 }
 
 /**
- * Compile protection pipeline with optimized ordering
+ * Compile protection pipeline with proper repeat: 0 handling
  */
 const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
   const pipeline: ProtectionFn[] = []
 
-  // 1. Zero repeat block (fastest check)
+  // 1. Zero repeat block - CRITICAL FIX: This must come first and block all execution
   if (action.repeat === 0) {
     pipeline.push(ctx => {
       sensor.log(ctx.action.id, 'blocked', 'zero-repeat-block', {
         repeatValue: 0,
-        blockReason: 'repeat: 0 configuration'
+        blockReason: 'repeat: 0 configuration prevents all execution'
       })
-      return {pass: false, reason: 'Action configured with repeat: 0'}
+      return {
+        pass: false,
+        reason: 'Action configured with repeat: 0 - execution blocked'
+      }
     })
+    // If repeat is 0, return early with only this protection
+    // No other protections should run because execution is completely blocked
+    return pipeline
   }
 
   // 2. Block check
@@ -194,6 +201,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
       })
       return {pass: false, reason: 'Service not available'}
     })
+    return pipeline
   }
 
   // 3. System recuperation check
@@ -360,7 +368,7 @@ const compileProtectionPipeline = (action: IO): ProtectionFn[] => {
 }
 
 /**
- * Comprehensive action registration
+ * Action registration with proper repeat: 0 handling
  */
 export const registerSingleAction = (
   attribute: IO
@@ -426,7 +434,14 @@ export const registerSingleAction = (
         ? `with ${protectionPipeline.length} protections`
         : 'with no protections'
 
-    log.debug(`Action ${finalAction.id} registered ${protectionInfo}`)
+    // Special logging for repeat: 0 actions
+    if (finalAction.repeat === 0) {
+      log.debug(
+        `Action ${finalAction.id} registered with repeat: 0 (will not execute)`
+      )
+    } else {
+      log.debug(`Action ${finalAction.id} registered ${protectionInfo}`)
+    }
 
     sensor.log(finalAction.id, 'info', 'action-registration', {
       protectionCount: protectionPipeline.length,
@@ -437,12 +452,17 @@ export const registerSingleAction = (
       hasCondition: !!finalAction.condition,
       hasSelector: !!finalAction.selector,
       hasTransform: !!finalAction.transform,
-      priority: finalAction.priority?.level || 'medium'
+      priority: finalAction.priority?.level || 'medium',
+      repeatValue: finalAction.repeat,
+      willNeverExecute: finalAction.repeat === 0
     })
 
     return {
       ok: true,
-      message: `Action registered ${protectionInfo}`,
+      message:
+        finalAction.repeat === 0
+          ? `Action registered with repeat: 0 (will not execute)`
+          : `Action registered ${protectionInfo}`,
       payload: finalAction
     }
   } catch (error) {
