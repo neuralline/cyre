@@ -24,6 +24,8 @@ import {
   addChannelToGroups,
   removeChannelFromGroups
 } from './components/cyre-group'
+import {awarenessBeats} from './context/awareness-beats'
+import payloadState from './context/payload-state'
 
 /* 
     Neural Line
@@ -79,11 +81,11 @@ const initializeBreathing = (): void => {
 }
 
 /**
- * Action registration with unified pipeline
+ * Action registration with async validation support
  */
-const action = (
+const action = async (
   attribute: IO | IO[]
-): {ok: boolean; message: string; payload?: any} => {
+): Promise<{ok: boolean; message: string; payload?: any}> => {
   if (metricsState.isLocked) {
     log.error(MSG.SYSTEM_LOCKED_CHANNELS)
     return {ok: false, message: MSG.SYSTEM_LOCKED_CHANNELS}
@@ -91,18 +93,18 @@ const action = (
 
   try {
     if (Array.isArray(attribute)) {
-      const results = attribute.map(singleAction => {
-        const result = registerSingleAction(singleAction)
-        if (result.ok) {
-          // Add to matching groups and trigger recompilation
-          addChannelToGroups(singleAction.id)
-          // Recompile with group middleware included
-          const recompileResult = registerSingleAction(singleAction)
-          persistence.autoSave()
-          return recompileResult
-        }
-        return result
-      })
+      const results = await Promise.all(
+        attribute.map(async singleAction => {
+          const result = await registerSingleAction(singleAction)
+          if (result.ok) {
+            addChannelToGroups(singleAction.id)
+            const recompileResult = await registerSingleAction(singleAction)
+            persistence.autoSave()
+            return recompileResult
+          }
+          return result
+        })
+      )
 
       const successful = results.filter(r => r.ok).length
       const total = results.length
@@ -113,12 +115,10 @@ const action = (
         payload: results
       }
     } else {
-      const result = registerSingleAction(attribute)
+      const result = await registerSingleAction(attribute)
       if (result.ok) {
-        // Add to matching groups and trigger recompilation
         addChannelToGroups(attribute.id)
-        // Recompile with group middleware included
-        const recompileResult = registerSingleAction(attribute)
+        const recompileResult = await registerSingleAction(attribute)
         persistence.autoSave()
         return recompileResult
       }
@@ -172,7 +172,7 @@ export const call = async (
     }
   }
 
-  const callStartTime = performance.now()
+  const callStartTime = Date.now()
   try {
     sensor.log(id, 'call', 'call-entry', {
       timestamp: Date.now(),
@@ -185,7 +185,7 @@ export const call = async (
     // Execute optimized pipeline (includes group middleware automatically)
     const result = await processCall(action, payload)
 
-    const totalCallTime = performance.now() - callStartTime
+    const totalCallTime = Date.now() - callStartTime
 
     sensor.log(id, 'info', 'call-completion', {
       success: result.ok,
@@ -321,6 +321,7 @@ const initialize = async (
       saveKey: config.saveKey,
       adapter: createLocalStorageAdapter()
     })
+    awarenessBeats.initialize(config.awareness || undefined)
 
     // Load persistent state
     if (config.persistentState) {
@@ -388,7 +389,7 @@ export const cyre = {
     io.hasChanged(id, payload),
   getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
   updatePayload: (id: string, payload: ActionPayload): void =>
-    io.updatePayload(id, payload),
+    payloadState.set(id, payload),
 
   // Persistent state methods
   saveState: async (key?: string): Promise<void> => {

@@ -121,10 +121,10 @@ const setupBuildingSensors = () => {
   })
 
   if (groupResult.ok) {
-    console.log('✅ Building sensor group created successfully')
+    console.log('Building sensor group created successfully')
   } else {
     console.error(
-      '❌ Failed to create building sensor group:',
+      'Failed to create building sensor group:',
       groupResult.message
     )
   }

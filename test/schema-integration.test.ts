@@ -23,8 +23,10 @@ describe('Schema Integration', () => {
 
   it('should validate payload with schema', async () => {
     const userSchema = schema.object({
-      id: schema.pipe(schema.number(), schema.positive),
-      name: schema.pipe(schema.string(), schema.minLength(2)),
+      id: schema.number().refine(n => n > 0, 'Must be positive'),
+      name: schema
+        .string()
+        .refine(s => s.length >= 2, 'Must be at least 2 characters'),
       email: schema.email_string()
     })
 
@@ -54,8 +56,10 @@ describe('Schema Integration', () => {
 
   it('should reject invalid payload', async () => {
     const userSchema = schema.object({
-      id: schema.pipe(schema.number(), schema.positive),
-      name: schema.pipe(schema.string(), schema.minLength(2)),
+      id: schema.number().refine(n => n > 0, 'Must be positive'),
+      name: schema
+        .string()
+        .refine(s => s.length >= 2, 'Must be at least 2 characters'),
       email: schema.email_string()
     })
 

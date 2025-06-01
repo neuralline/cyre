@@ -7,7 +7,15 @@ export default defineConfig({
     testTimeout: 15000, // 15 seconds instead of 5
     hookTimeout: 10000, // 10 seconds for setup/teardown
     // Reporters
-    reporters: ['default'],
+    reporters: [
+      [
+        'default',
+        {
+          summary: true,
+          includeConsoleOutput: true
+        }
+      ]
+    ],
     // Better test isolation
     isolate: true
   }

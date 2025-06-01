@@ -5,6 +5,7 @@ import {io} from '../context/state'
 import {IO} from '../types/interface'
 import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
+import payloadState from '../context/payload-state'
 
 /*
 
@@ -86,15 +87,16 @@ export const CyreChannel = (action: IO): ChannelResult => {
 
     // 2. Check if channel exists (log but don't fail)
     const exists = checkChannelExists(action.id)
-    if (exists) {
-      log.debug(`Channel ${action.id} already exists - updating`)
-    }
+    // if (exists) {
+    //   log.debug(`Channel ${action.id} already exists - updating`)
+    // }
 
     // 3. Set defaults and prepare channel
     const preparedChannel = setChannelDefaults(action)
 
     // 4. Store channel
     io.set(preparedChannel)
+    payloadState.set(preparedChannel.id, preparedChannel.payload, 'initial')
 
     const message = exists ? 'Channel updated' : MSG.CHANNEL_CREATED
 

@@ -1,5 +1,5 @@
 // src/components/cyre-call.ts
-// Call processing with proper payload flow and debounce handling
+// Call processing with proper payload flow through pipeline
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
@@ -8,6 +8,7 @@ import {TimeKeeper} from './cyre-timekeeper'
 import {ProtectionContext} from './cyre-actions'
 import {io} from '../context/state'
 import {log} from './cyre-log'
+import {call} from '../app'
 
 /*
 
@@ -21,12 +22,29 @@ export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
-  const startTime = performance.now()
   sensor.log(action.id, 'call', 'call-initiation', {
     timestamp: Date.now(),
     hasPayload: payload !== undefined,
     actionType: action.type || 'unknown'
   })
+
+  // Check pre-computed blocking state first
+  if (action._isBlocked) {
+    sensor.log(action.id, 'blocked', 'pre-computed-block', {
+      reason: action._blockReason
+    })
+    return {
+      ok: false,
+      payload: null,
+      message: action._blockReason || 'Action blocked'
+    }
+  }
+
+  // Fast path - direct execution
+  if (action._hasFastPath) {
+    sensor.log(action.id, 'info', 'fast-path-execution')
+    return useDispatch(action, payload)
+  }
 
   const originalPayload = payload ?? action.payload
   const context: ProtectionContext = {
@@ -39,7 +57,9 @@ export async function processCall(
 
   const pipeline = action._protectionPipeline || []
 
-  // Run protection pipeline
+  // Run protection pipeline and track payload transformations
+  let currentPayload = context.payload
+
   for (const protection of pipeline) {
     const result = protection(context)
 
@@ -56,7 +76,7 @@ export async function processCall(
           1,
           'protection-pipeline'
         )
-        return useDebounce(action, context.payload, actualResult.duration)
+        return useDebounce(action, currentPayload, actualResult.duration)
       }
 
       const protectionType = extractProtectionType(actualResult.reason)
@@ -72,25 +92,27 @@ export async function processCall(
       }
     }
 
-    // Update payload if protection modified it (selector, transform, etc.)
+    // CRITICAL: Update payload if protection modified it
     if (actualResult.payload !== undefined) {
-      context.payload = actualResult.payload
+      currentPayload = actualResult.payload
+      // Update context for next protection
+      context.payload = currentPayload
     }
   }
 
-  // Determine execution path
+  // Determine execution path with the final transformed payload
   if (needsScheduling(action)) {
-    return useSchedule(action, context.payload)
+    return useSchedule(action, currentPayload)
   }
 
-  // Direct execution with processed payload
-  const result = await useDispatch(action, context.payload)
+  // Direct execution with final processed payload
+  const result = await useDispatch(action, currentPayload)
 
   // Handle IntraLink chain reactions
   if (result.ok && result.metadata?.intraLink) {
     const {id: chainId, payload: chainPayload} = result.metadata.intraLink
     try {
-      const chainResult = await processCall(io.get(chainId)!, chainPayload)
+      const chainResult = await call(io.get(chainId)?.id!, chainPayload)
       result.metadata.chainResult = chainResult
     } catch (error) {
       log.error(`IntraLink chain failed for ${chainId}: ${error}`)

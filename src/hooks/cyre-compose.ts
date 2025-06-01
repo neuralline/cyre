@@ -7,9 +7,9 @@ import type {
   CyreResponse,
   Priority
 } from '../types/interface'
-import type {CyreChannel} from '../types/hooks-interface'
+import type {CyreChannel, HookResult} from '../types/hooks-interface'
 import {cyre} from '../app'
-import {metricsReport} from '../context/metrics-report'
+import {sensor} from '../context/metrics-report'
 
 /**
  * Options for composed channels
@@ -97,7 +97,7 @@ export function cyreCompose<TPayload = ActionPayload>(
       executionOrder: 0,
       results: [],
       errors: [],
-      timer: collectMetrics ? metricsReport.createTimer() : null
+      timer: collectMetrics ? Date.now() : null
     }
 
     if (context.timer) {
@@ -188,8 +188,6 @@ export function cyreCompose<TPayload = ActionPayload>(
             error
           })
 
-          enhancedResult.originalError = error
-
           // Stop execution if continueOnError is false
           if (!options.continueOnError) {
             debugLog('Stopping execution due to error', {
@@ -223,7 +221,7 @@ export function cyreCompose<TPayload = ActionPayload>(
           channelName: channel.name,
           executionOrder: context.executionOrder,
           skipped: false,
-          originalError: error
+          error: error
         }
 
         context.results.push(errorResult)
@@ -245,7 +243,7 @@ export function cyreCompose<TPayload = ActionPayload>(
       const compositionTiming = context.timer.createDetailedTiming()
 
       // Record in metrics system
-      metricsReport.trackDetailedExecution(composedId, compositionTiming)
+      sensor.log(composedId, compositionTiming)
 
       debugLog('Composition metrics recorded', {
         totalTime: compositionTiming.totals.totalExecution,
@@ -285,7 +283,7 @@ export function cyreCompose<TPayload = ActionPayload>(
         error: allSuccessful
           ? undefined
           : new Error('Some channels failed to update')
-      }
+      } as HookResult<boolean, Error>
     },
 
     // Subscription with composition-level handling

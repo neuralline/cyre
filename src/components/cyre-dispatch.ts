@@ -7,6 +7,7 @@ import {cyreExecute} from './cyre-execute'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {sensor} from '../context/metrics-report'
+import payloadState from '../context/payload-state'
 
 /*
 
@@ -77,7 +78,8 @@ export const useDispatch = async (
     if (result.ok) {
       if (action.detectChanges) {
         // Store exact payload value for change detection
-        io.updatePayload(action.id, currentPayload)
+
+        payloadState.set(action.id, action.payload, 'call')
       }
 
       // Track execution in metrics

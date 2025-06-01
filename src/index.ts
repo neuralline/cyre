@@ -44,9 +44,13 @@ CYRE TODO:
 
 []  .action future features {
       block: boolean // this channel is no longer available
+      no name yet: if call id is already in progress or in timeline: reset | ignore | debounce | update payload only| 
       required: boolean // payload is required on call
       maxWait: number : boolean
-      immutable: boolean // can't change payload 
+      immutable: boolean // can't modify payload
+      noDispatch: boolean //this channel won't be dispatch to .on listeners. 
+      Multi-Sensor Fusion //combines data from multiple channel payload to create more accurate, reliable, and comprehensive environmental understanding.
+      Event Pattern Recognition? // detects complex patterns, sequences, and anomalies in channel payload data streams using various algorithmic approaches.
     }
 
     NEW: Group System

@@ -225,7 +225,7 @@ export const boolean = () =>
 
 export const any = () => createSchema<any>(value => ({ok: true, data: value}))
 
-// Object validation
+// Object validation with proper default value handling
 export const object = <T extends Record<string, Schema>>(shape: T) =>
   createSchema<{
     [K in keyof T]: ReturnType<T[K]> extends ValidationResult<infer U>
@@ -241,7 +241,10 @@ export const object = <T extends Record<string, Schema>>(shape: T) =>
     const errors: string[] = []
 
     for (const [key, schema] of Object.entries(shape)) {
-      const fieldResult = schema(obj[key])
+      // Handle undefined values properly for default value support
+      const fieldValue = obj[key]
+      const fieldResult = schema(fieldValue)
+
       if (fieldResult.ok) {
         result[key] = fieldResult.data
       } else {
@@ -329,7 +332,7 @@ export const validate = <T>(
   const result = schema(payload)
 
   if (!result.ok) {
-    log.error('Schema validation failed:', result.errors)
+    log.error('Schema validation failed:' + result.errors)
   }
 
   return result

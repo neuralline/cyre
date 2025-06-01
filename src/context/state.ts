@@ -1,16 +1,27 @@
 // src/context/state.ts
-// Updated with proper payload history management for change detection
+// Refactored state management with payload separation
 
 import {log} from '../components/cyre-log'
-import type {ActionPayload, IO, ISubscriber, Timer} from '../types/interface'
-import {isEqual} from '../libs/utils'
+import type {IO, ISubscriber, Timer} from '../types/interface'
 import {metricsState, type MetricsState} from './metrics-state'
-
+import {payloadState} from './payload-state'
 import type {StateKey} from '../types/interface'
 import {createStore} from './create-store'
+
+/*
+
+      C.Y.R.E - S.T.A.T.E
+      
+      Refactored state management with clean separation:
+      - IO store: Configuration and behavior only
+      - Payload state: Separate payload management
+      - Clean interfaces and backward compatibility
+      - Enhanced state operations
+
+*/
+
 export type MiddlewareFunction = (action: IO) => Promise<void>
 
-// Define a middleware type that works with the ISubscriber interface
 export interface IMiddleware extends ISubscriber {
   fn: MiddlewareFunction
 }
@@ -30,7 +41,6 @@ const ioStore = createStore<IO>()
 const subscriberStore = createStore<ISubscriber>()
 const middlewareStore = createStore<IMiddleware>()
 const timelineStore = createStore<Timer>()
-const payloadHistory = createStore<ActionPayload>()
 const actionMetrics = createStore<StateActionMetrics>()
 
 // Utility functions for state management
@@ -40,16 +50,25 @@ const cleanupAction = (id: StateKey): void => {
     clearInterval(metrics.intervalId)
   }
   actionMetrics.forget(id)
-  payloadHistory.forget(id)
+  // Payload cleanup is handled by payloadState
 }
 
-// Export IO operations with proper metrics tracking and synchronization
+/**
+ * IO operations - configuration only, no payload data
+ */
 export const io = {
+  /**
+   * Set action configuration (no payload)
+   */
   set: (action: IO): void => {
     try {
       if (!action?.id) throw new Error('IO state: Action must have an id')
+
+      // Clean action of any payload data for separation
+      const {payload: _, ...cleanAction} = action as any
+
       const enhanced: IO = {
-        ...action,
+        ...cleanAction,
         timestamp: Date.now(),
         type: action.type || action.id
       }
@@ -60,7 +79,6 @@ export const io = {
       // Initialize action metrics properly with current timestamp
       const currentMetrics = actionMetrics.get(action.id)
 
-      // Initialize metrics if they don't exist or are invalid
       if (!currentMetrics) {
         actionMetrics.set(action.id, {
           lastExecutionTime: 0,
@@ -69,9 +87,10 @@ export const io = {
         })
       }
 
-      // Initialize payload history for change detection if needed
-      if (action.detectChanges && action.payload !== undefined) {
-        payloadHistory.set(action.id, action.payload)
+      // Handle payload separately if provided in legacy format
+      if ('payload' in action && action.payload !== undefined) {
+        payloadState.set(action.id, action.payload, 'initial')
+        //log.debug(`Migrated payload for ${action.id} to payload state`)
       }
     } catch (error) {
       log.critical(
@@ -83,6 +102,9 @@ export const io = {
     }
   },
 
+  /**
+   * Update action metrics
+   */
   updateMetrics: (id: StateKey, update: Partial<StateActionMetrics>): void => {
     try {
       const current = actionMetrics.get(id) || {
@@ -117,21 +139,33 @@ export const io = {
     }
   },
 
+  /**
+   * Get action configuration
+   */
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
+  /**
+   * Remove action configuration
+   */
   forget: (id: StateKey): boolean => {
     cleanupAction(id)
+    // Also remove payload
+    payloadState.forget(id)
     return ioStore.forget(id)
   },
 
+  /**
+   * Clear all action configurations
+   */
   clear: (): void => {
     try {
       ioStore.getAll().forEach(item => {
         if (item.id) cleanupAction(item.id)
       })
-      payloadHistory.clear()
       actionMetrics.clear()
       ioStore.clear()
+      // Clear payload state
+      payloadState.clear()
       metricsState.reset()
     } catch (error) {
       log.critical(`System clear failed: ${error}`)
@@ -139,45 +173,40 @@ export const io = {
     }
   },
 
+  /**
+   * Get all action configurations
+   */
   getAll: (): IO[] => ioStore.getAll(),
 
-  hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
-    try {
-      const previousPayload = payloadHistory.get(id)
-
-      if (previousPayload === undefined) {
-        return true
-      }
-
-      const hasChanged = !isEqual(newPayload, previousPayload)
-      return hasChanged
-    } catch (error) {
-      log.error(`Error in change detection for ${id}: ${error}`)
-      return true
-    }
+  /**
+   * Check if payload has changed (delegated to payload state)
+   */
+  hasChanged: (id: StateKey, newPayload: any): boolean => {
+    return payloadState.hasChanged(id, newPayload)
   },
 
-  getPrevious: (id: StateKey): ActionPayload | undefined => {
-    return payloadHistory.get(id)
+  /**
+   * Get previous payload (delegated to payload state)
+   */
+  getPrevious: (id: StateKey): any | undefined => {
+    return payloadState.getPrevious(id)
   },
 
-  updatePayload: (id: StateKey, payload: ActionPayload): void => {
-    try {
-      payloadHistory.set(id, payload)
-    } catch (error) {
-      log.error(`Failed to update payload history for ${id}: ${error}`)
-    }
+  /**
+   * Update payload (delegated to payload state)
+   */
+  updatePayload: (id: StateKey, payload: any): void => {
+    payloadState.set(id, payload, 'pipeline')
   },
 
+  /**
+   * Get action metrics
+   */
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
     const metrics = actionMetrics.get(id)
     if (metrics) {
-      // log.debug(
-      //   `Retrieved metrics for ${id}: lastExecution=${metrics.lastExecutionTime}, count=${metrics.executionCount}`
-      // )
+      return metrics
     } else {
-      log.debug(`No metrics found for ${id}`)
-
       const action = ioStore.get(id)
       if (action) {
         const newMetrics: StateActionMetrics = {
@@ -189,9 +218,12 @@ export const io = {
         return newMetrics
       }
     }
-    return metrics
+    return undefined
   },
 
+  /**
+   * Track execution
+   */
   trackExecution: (id: StateKey, executionTime?: number): void => {
     try {
       const now = Date.now()
@@ -211,10 +243,40 @@ export const io = {
     } catch (error) {
       log.error(`Failed to track execution for ${id}: ${error}`)
     }
+  },
+
+  /**
+   * Create action with initial payload (backward compatibility)
+   */
+  createWithPayload: (action: IO & {payload?: any}): void => {
+    const {payload, ...config} = action
+
+    // Set configuration
+    io.set(config)
+
+    // Set payload separately if provided
+    if (payload !== undefined) {
+      payloadState.set(action.id, payload, 'initial')
+    }
+  },
+
+  /**
+   * Get action with current payload (backward compatibility)
+   */
+  getWithPayload: (id: StateKey): (IO & {payload?: any}) | undefined => {
+    const config = io.get(id)
+    if (!config) return undefined
+
+    const currentPayload = payloadState.get(id)
+
+    return {
+      ...config,
+      payload: currentPayload
+    }
   }
 }
 
-// Keep existing subscribers and timeline exports
+// Keep existing subscribers and timeline exports (unchanged)
 export const subscribers = {
   add: (subscriber: ISubscriber): void => {
     if (!subscriber?.id || !subscriber?.fn) {
@@ -246,9 +308,6 @@ export const middlewares = {
   },
   forget: (id: StateKey): boolean => {
     const result = middlewareStore.forget(id)
-    if (result) {
-      // log.debug(`Removed middleware: ${id}`)
-    }
     return result
   },
   clear: (): void => {
@@ -302,9 +361,96 @@ export const timeline = {
 
   getAll: (): Timer[] => timelineStore.getAll(),
 
-  // Add the missing getActive method
   getActive: (): Timer[] => {
     return timelineStore.getAll().filter(timer => timer.status === 'active')
+  }
+}
+
+/**
+ * Migration utilities for smooth transition
+ */
+export const migrationUtils = {
+  /**
+   * Migrate existing actions with payload to new structure
+   */
+  migrateActions: (): {migrated: number; errors: string[]} => {
+    const errors: string[] = []
+    let migrated = 0
+
+    try {
+      const allActions = ioStore.getAll()
+
+      allActions.forEach(action => {
+        try {
+          if ('payload' in action) {
+            const {payload, ...config} = action as any
+
+            // Update action without payload
+            ioStore.set(action.id, config)
+
+            // Set payload in payload state
+            if (payload !== undefined) {
+              payloadState.set(action.id, payload, 'initial')
+              migrated++
+            }
+          }
+        } catch (error) {
+          errors.push(`Failed to migrate ${action.id}: ${error}`)
+        }
+      })
+    } catch (error) {
+      errors.push(`Migration failed: ${error}`)
+    }
+
+    log.info(
+      `Migration completed: ${migrated} actions migrated, ${errors.length} errors`
+    )
+    return {migrated, errors}
+  },
+
+  /**
+   * Validate separation - ensure no payload in IO store
+   */
+  validateSeparation: (): {valid: boolean; violations: string[]} => {
+    const violations: string[] = []
+
+    try {
+      const allActions = ioStore.getAll()
+
+      allActions.forEach(action => {
+        if ('payload' in action && (action as any).payload !== undefined) {
+          violations.push(`Action ${action.id} still contains payload data`)
+        }
+      })
+    } catch (error) {
+      violations.push(`Validation failed: ${error}`)
+    }
+
+    return {
+      valid: violations.length === 0,
+      violations
+    }
+  },
+
+  /**
+   * Get migration statistics
+   */
+  getStats: () => {
+    const ioStats = {
+      totalActions: ioStore.getAll().length,
+      withPayloadViolations: ioStore.getAll().filter(a => 'payload' in a).length
+    }
+
+    const payloadStats = payloadState.getStats()
+
+    return {
+      io: ioStats,
+      payload: payloadStats,
+      separationIntegrity: {
+        clean: ioStats.withPayloadViolations === 0,
+        violations: ioStats.withPayloadViolations
+      }
+    }
   }
 }
 

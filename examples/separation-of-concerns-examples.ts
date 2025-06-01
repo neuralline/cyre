@@ -72,7 +72,7 @@ cyre.action({
 // Channel handles: ID, defaults
 // Action handles: Validates throttle/debounce values, compiles 3 protections
 
-console.log('Action registered with throttle and debounce protections')
+//console.log('Action registered with throttle and debounce protections')
 
 // Example 4: Action with Function Validation
 console.log('\n4. Action with Function Validation')
@@ -85,7 +85,7 @@ cyre.action({
 // Channel handles: ID, defaults
 // Action handles: Validates functions, compiles 3 protections
 
-console.log('Action registered with 3 function-based protections')
+//console.log('Action registered with 3 function-based protections')
 
 // Example 5: Complex Action with Full Pipeline
 console.log('\n5. Complex Action with Full Protection Pipeline')

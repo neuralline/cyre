@@ -4,6 +4,7 @@
 import {log} from '../components/cyre-log'
 import {io, subscribers, timeline} from './state'
 import type {IO, ActionPayload, Timer} from '../types/interface'
+import payloadState from './payload-state'
 
 /*
 
@@ -117,7 +118,7 @@ const hydrate = (state: PersistentState): void => {
 
     // Restore payload history
     Object.entries(state.payloadHistory).forEach(([id, payload]) => {
-      io.updatePayload(id, payload)
+      payloadState.set(id, payload, 'initial')
     })
 
     // Note: Timer configs are stored but will need to be recreated by the application
