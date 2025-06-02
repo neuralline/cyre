@@ -3,6 +3,7 @@
 
 import type {Schema} from '../schema/cyre-schema'
 export type * from './timer'
+export type * from './orchestration'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
 export type ActionPayload = any
@@ -475,4 +476,87 @@ export interface PayloadSubscriptionOptions {
   filter?: (payload: ActionPayload) => boolean
   immediate?: boolean
   once?: boolean
+}
+
+export interface Cyre {
+  systemOrchestrations: {
+    register: () => {registered: string[]; failed: string[]}
+    start: (orchestrationId?: string) => {started: string[]; failed: string[]}
+    stop: (orchestrationId?: string) => {stopped: string[]; failed: string[]}
+    status: () => {
+      total: number
+      running: number
+      paused: number
+      orchestrations: Array<{
+        id: string
+        status: string
+        lastExecution: number
+        executionCount: number
+      }>
+    }
+    healthCheck: () => {
+      orchestrations: {
+        total: number
+        running: number
+        paused: number
+      }
+      breathing: {
+        stress: number
+        currentRate: number
+        isRecuperating: boolean
+      }
+      memory: {
+        actionCount: number
+        timelineCount: number
+      }
+    }
+  }
+  orchestration: {
+    create: (config: any) => any
+    start: (orchestrationId: string) => any
+    stop: (orchestrationId: string) => any
+    get: (orchestrationId: string) => any
+    list: () => any[]
+    remove: (orchestrationId: string) => boolean
+    trigger: (
+      orchestrationId: string,
+      triggerName: string,
+      payload?: any
+    ) => Promise<any>
+    createAndStart: (config: any) => any
+    getSystemOrchestrations: () => Array<{
+      id: string
+      status: string
+      metrics: any
+      lastExecution: number | undefined
+    }>
+  }
+  query: {
+    channels: (filter?: any) => any
+    payloads: (queryConfig?: any) => any
+    metrics: (queryConfig?: any) => any
+    subscribe: (
+      queryId: string,
+      queryConfig: any,
+      callback: (result: any) => void
+    ) => () => boolean
+    stats: () => any
+    clearCache: () => void
+    patterns: any
+  }
+  dev: {
+    createSimpleWorkflow: (id: string, steps: string[]) => any
+    trigger: (orchestrationId: string, payload?: any) => void
+    inspect: (channelId: string) => any
+    snapshot: () => any
+    getSystemMetrics: () => {
+      performance: {
+        totalCalls: number
+        callRate: number
+        totalErrors: number
+        uptime: number
+      }
+    }
+    triggerHealthCheck: () => Promise<any>
+  }
 }

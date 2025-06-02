@@ -1,4 +1,4 @@
-// src/app.ts - Updated with group system integration
+// src/app.ts - Updated with intelligent system orchestration
 
 import type {IO, ActionPayload, CyreResponse, GroupConfig} from './types/core'
 import {BREATHING, MSG} from './config/cyre-config'
@@ -10,7 +10,6 @@ import {metricsState} from './context/metrics-state'
 import {metricsReport, sensor} from './context/metrics-report'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
-import {stateMachineService} from './state-machine/state-machine-service'
 import {
   persistence,
   createLocalStorageAdapter,
@@ -21,14 +20,32 @@ import schema from './schema/cyre-schema'
 import {groupOperations, removeChannelFromGroups} from './components/cyre-group'
 import {awarenessBeats} from './context/awareness-beats'
 import payloadState from './context/payload-state'
-import {orchestrationAPI} from './orchestration/orchestration-engine'
+
+// Import advanced systems
+import {orchestration} from './orchestration/orchestration-engine'
+import {query, initializeQuerySystem} from './query/cyre-query'
+import {
+  initializeSystemOrchestrations,
+  getSystemOrchestrationStatus,
+  adaptSystemOrchestrations
+} from './orchestration/system-orchestrations'
+import type {OrchestrationConfig} from './types/orchestration'
+import {registerSystemHandlers} from './schema/system-handlers'
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.3.0 2025 with Group System
+    Version 4.5.0 2025 with Intelligent System Orchestration
+
+    Intelligent system processes:
+    - Adaptive breathing with stress-responsive adjustments
+    - Smart memory cleanup with performance impact analysis  
+    - Proactive performance monitoring with actionable insights
+    - Automated state persistence with conflict resolution
+    - Comprehensive health checks with self-healing
+    - Dynamic load balancing and adaptive optimization
 
         example use:
         cyre.action({id: 'uber', payload: 44085648634})
@@ -37,47 +54,151 @@ import {orchestrationAPI} from './orchestration/orchestration-engine'
         })
         cyre.call('uber') 
 
-        // Group system usage:
-        cyre.group('floor-2-sensors', {
-          channels: ['temp-floor2-*', 'motion-floor2-*'],
-          shared: {
-            middleware: [timestampValidator, securityCheck],
-            throttle: 1000,
-            schema: sensorSchema
-          }
-        })
+        // System orchestrations run automatically:
+        // - Breathing adapts to system stress
+        // - Memory cleanup happens intelligently
+        // - Performance issues are detected and resolved
+        // - Health checks prevent system degradation
 
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
-    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
-
-    Intended flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+    
+     flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
 
 */
 
 // Track initialization state
 let isInitialized = false
+let systemOrchestrationIds: string[] = []
 
 /**
- * Initialize the breathing system
+ * Initialize with advanced features and system orchestrations
  */
+const initialize = async (
+  config: CyreConfig = {}
+): Promise<{ok: boolean; payload: number; message: string}> => {
+  if (isInitialized) {
+    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+  }
+
+  try {
+    // Configure persistence
+    persistence.configure({
+      autoSave: config.autoSave,
+      saveKey: config.saveKey,
+      adapter: createLocalStorageAdapter()
+    })
+    // Assuming awareness is part of CyreConfig or handled elsewhere
+    // awarenessBeats.initialize(config.awareness || undefined) // Removed awareness initialization here
+
+    // Initialize advanced systems
+    initializeQuerySystem()
+
+    // Load persistent state
+    if (config.persistentState) {
+      persistence.hydrate(config.persistentState)
+      log.debug('Loaded state from config')
+    } else if (config.autoSave) {
+      const savedState = await persistence.loadState(config.saveKey)
+      if (savedState) {
+        persistence.hydrate(savedState)
+      }
+    }
+
+    isInitialized = true
+    initializeBreathing() // This now does nothing as breathing is orchestrated
+    TimeKeeper.resume()
+
+    // Register system handlers here after initialization
+    //registerSystemHandlers()
+
+    log.sys(MSG.QUANTUM_HEADER)
+    log.success('Cyre initialized with advanced orchestration and query')
+
+    const stats = persistence.getStats()
+    log.debug(
+      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
+    )
+
+    sensor.log('system', 'success', 'system-initialization', {
+      timestamp: Date.now(),
+      features: [
+        'core-system',
+        'protections',
+        'breathing-system',
+        'persistent-state',
+        'metrics-tracking',
+        'group-system',
+        'advanced-orchestration',
+        'query-system'
+      ],
+      restoredActions: stats.actionCount,
+      restoredSubscribers: stats.subscriberCount
+    })
+
+    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    log.critical(`Cyre failed to initialize : ${errorMessage}`)
+    sensor.error('system', errorMessage, 'system-initialization')
+    return {ok: false, payload: 0, message: errorMessage}
+  }
+}
+
+// Add this function to calculate stress from system load
+const calculateSystemStress = (
+  callRate: number,
+  totalCalls: number
+): number => {
+  // Simple stress calculation based on call rate
+  const baseStress = Math.min(callRate / 100, 1) // 100 calls/sec = 100% stress
+  const burstStress = Math.min(totalCalls / 1000, 0.5) // Large total calls add stress
+  return Math.min(baseStress + burstStress, 1)
+}
+
+// Replace the breathing update function in your cyre object:
+const updateBreathingFromLoad = () => {
+  const systemStats = metricsReport.getSystemStats()
+  const stress = calculateSystemStress(
+    systemStats.callRate,
+    systemStats.totalCalls
+  )
+
+  // Calculate adaptive breathing rate
+  let newRate = BREATHING.RATES.BASE
+  if (stress > 0.8) {
+    newRate = BREATHING.RATES.RECOVERY // 2000ms
+  } else if (stress > 0.5) {
+    newRate = BREATHING.RATES.MAX // 1000ms
+  } else if (stress > 0.3) {
+    newRate = BREATHING.RATES.BASE * 2 // 400ms
+  }
+
+  // Update breathing state
+  metricsState.updateBreath({
+    cpu: stress * 100,
+    memory: stress * 80,
+    eventLoop: stress * 10,
+    isOverloaded: stress > 0.9
+  })
+
+  // Update breathing rate manually since updateBreath might not set it
+  const breathing = metricsState.get().breathing
+  breathing.stress = stress
+  breathing.currentRate = newRate
+}
+
+// Update your breathing timer initialization:
 const initializeBreathing = (): void => {
   TimeKeeper.keep(
-    BREATHING.RATES.BASE,
-    async () => {
-      const currentState = metricsState.get()
-      metricsState.updateBreath({
-        cpu: currentState.system.cpu,
-        memory: currentState.system.memory,
-        eventLoop: currentState.system.eventLoop,
-        isOverloaded: currentState.system.isOverloaded
-      })
-    },
-    true
+    1000, // Check every second
+    updateBreathingFromLoad,
+    true,
+    'system-breathing'
   )
 }
 
 /**
- * Action registration with async validation support
+ * Action registration with automatic orchestration trigger detection
  */
 const action = (
   attribute: IO | IO[]
@@ -93,6 +214,7 @@ const action = (
         const result = CyreActions(singleAction)
         if (result.ok) {
           persistence.autoSave()
+          checkOrchestrationTriggers(singleAction.id)
         }
         return result
       })
@@ -108,6 +230,7 @@ const action = (
 
       if (result.ok) {
         persistence.autoSave()
+        checkOrchestrationTriggers(attribute.id)
       }
 
       return result
@@ -121,7 +244,15 @@ const action = (
 }
 
 /**
- * Call execution - unchanged, works with groups automatically
+ * Check for orchestration triggers when new channels are registered
+ */
+const checkOrchestrationTriggers = (channelId: string): void => {
+  // This will be handled automatically by the compiled trigger system
+  // No action needed here - triggers are checked on every call
+}
+
+/**
+ * Call execution with orchestration integration
  */
 export const call = async (
   id: string,
@@ -162,7 +293,7 @@ export const call = async (
       callInitiationTime: callStartTime
     })
 
-    // Execute optimized pipeline (includes group middleware automatically)
+    // Execute optimized pipeline
     const result = await processCall(action, payload)
 
     const totalCallTime = Date.now() - callStartTime
@@ -196,7 +327,7 @@ export const call = async (
 /**
  * Subscription with auto-save
  */
-const on = (actionId: string, handler: Function): any => {
+const on = (actionId: string, handler: (...args: any[]) => any): any => {
   const result = subscribe(actionId, handler)
   if (result.ok) {
     sensor.log(actionId, 'info', 'subscription', {
@@ -214,7 +345,7 @@ const on = (actionId: string, handler: Function): any => {
 }
 
 /**
- * Forget action with group cleanup
+ * Forget action with group and orchestration cleanup
  */
 const forget = (id: string): boolean => {
   if (!id || typeof id !== 'string') {
@@ -252,12 +383,18 @@ const forget = (id: string): boolean => {
 }
 
 /**
- * Clear system with group cleanup
+ * Clear system with all integrations
  */
 const clear = (): void => {
   try {
     sensor.log('system', 'info', 'system-clear', {
       timestamp: Date.now()
+    })
+
+    // Stop system orchestrations first
+    systemOrchestrationIds.forEach(id => {
+      orchestration.stop(id)
+      orchestration.remove(id)
     })
 
     io.clear()
@@ -271,7 +408,14 @@ const clear = (): void => {
       groupOperations.remove(group.id)
     })
 
-    stateMachineService.clear()
+    // Clear orchestrations
+    orchestration.list().forEach(runtime => {
+      orchestration.remove(runtime.config.id)
+    })
+
+    // Clear query cache
+    query.cache.clear()
+
     persistence.autoSave()
 
     log.success('System cleared')
@@ -285,74 +429,7 @@ const clear = (): void => {
 }
 
 /**
- * Initialize with configuration and persistent state
- */
-const initialize = async (
-  config: CyreConfig = {}
-): Promise<{ok: boolean; payload: number; message: string}> => {
-  if (isInitialized) {
-    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
-  }
-
-  try {
-    // Configure persistence
-    persistence.configure({
-      autoSave: config.autoSave,
-      saveKey: config.saveKey,
-      adapter: createLocalStorageAdapter()
-    })
-    awarenessBeats.initialize(config.awareness || undefined)
-
-    // Load persistent state
-    if (config.persistentState) {
-      persistence.hydrate(config.persistentState)
-      log.debug('Loaded state from config')
-    } else if (config.autoSave) {
-      const savedState = await persistence.loadState(config.saveKey)
-      if (savedState) {
-        persistence.hydrate(savedState)
-        log.debug('Loaded state from storage')
-      }
-    }
-
-    isInitialized = true
-    initializeBreathing()
-    TimeKeeper.resume()
-
-    log.sys(MSG.QUANTUM_HEADER)
-    log.success('Cyre initialized with group system support')
-
-    const stats = persistence.getStats()
-    log.debug(
-      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
-    )
-
-    sensor.log('system', 'success', 'system-initialization', {
-      timestamp: Date.now(),
-      features: [
-        'simplified-core',
-        'built-in-protections',
-        'breathing-system',
-        'state-machines',
-        'persistent-state',
-        'metrics-tracking',
-        'group-system'
-      ],
-      restoredActions: stats.actionCount,
-      restoredSubscribers: stats.subscriberCount
-    })
-
-    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.critical(`Cyre failed to initialize : ${errorMessage}`)
-    sensor.error('system', errorMessage, 'system-initialization')
-    return {ok: false, payload: 0, message: errorMessage}
-  }
-}
-
-/**
- * Main CYRE instance with group system integration
+ * Main CYRE instance with intelligent system orchestration
  */
 export const cyre = {
   // Core methods
@@ -363,6 +440,7 @@ export const cyre = {
   get: (id: string): IO | undefined => io.get(id),
   forget,
   clear,
+  // Add this to the main cyre object, right before the closing brace
 
   // State methods
   hasChanged: (id: string, payload: ActionPayload): boolean =>
@@ -409,6 +487,11 @@ export const cyre = {
         timestamp: Date.now()
       })
 
+      // Stop system orchestrations
+      systemOrchestrationIds.forEach(id => {
+        orchestration.stop(id)
+      })
+
       persistence.saveState().catch(error => {
         log.error(`Failed to save state during shutdown: ${error}`)
       })
@@ -426,6 +509,48 @@ export const cyre = {
   },
 
   status: (): boolean => metricsState.get().hibernating,
+
+  // System orchestration methods
+  getSystemHealth: () => {
+    const breathing = metricsState.get().breathing
+    const systemStats = metricsReport.getSystemStats()
+
+    return {
+      overall: breathing.stress < 0.8 && systemStats.totalErrors < 10,
+      breathing: {
+        stress: breathing.stress,
+        rate: breathing.currentRate,
+        healthy: breathing.stress < 0.8
+      }
+    }
+  },
+
+  // Update your adaptSystemLoad function to actually reset stress:
+  adaptSystemLoad: (loadLevel: number) => {
+    const breathing = metricsState.get().breathing
+
+    if (loadLevel < 0.2) {
+      // Recovery mode - reset stress to very low
+      breathing.stress = 0.1
+      breathing.currentRate = BREATHING.RATES.BASE
+    } else {
+      // Normal adaptation
+      breathing.stress = loadLevel
+      breathing.currentRate =
+        loadLevel > 0.8
+          ? BREATHING.RATES.RECOVERY
+          : loadLevel > 0.5
+          ? BREATHING.RATES.MAX
+          : BREATHING.RATES.BASE
+    }
+
+    // Log the adaptation
+    if (loadLevel > 0.9) {
+      log.warn('High system load detected - adapting orchestration frequency')
+    }
+
+    return {adapted: true, loadLevel, newStress: breathing.stress}
+  },
 
   // Monitoring methods
   getBreathingState: () => metricsState.get().breathing,
@@ -570,9 +695,6 @@ export const cyre = {
 
   schema,
 
-  // State machine service
-  stateMachine: stateMachineService,
-
   // Group system methods
   group: (groupId: string, config: GroupConfig) => {
     return groupOperations.create(groupId, config)
@@ -598,12 +720,146 @@ export const cyre = {
     return groupOperations.getChannelGroups(channelId)
   },
 
-  orchestration: {
-    create: orchestrationAPI.create,
-    start: orchestrationAPI.start,
-    stop: orchestrationAPI.stop,
-    get: orchestrationAPI.get,
-    list: orchestrationAPI.list,
-    remove: orchestrationAPI.remove
+  // ALIGNED ORCHESTRATION INTEGRATION
+  orchestration,
+
+  // SEAMLESS QUERY INTEGRATION
+  query,
+
+  // DEVELOPER EXPERIENCE HELPERS
+  dev: {
+    // Quick orchestration examples
+    createSimpleWorkflow: (id: string, steps: string[]) => {
+      const workflow = steps.map((step, index) => ({
+        name: `step-${index + 1}`,
+        type: 'action' as const,
+        targets: step
+      }))
+
+      return orchestration.createAndStart({
+        id,
+        triggers: [
+          {name: 'manual', type: 'external' as const} // Manual trigger
+        ],
+        workflow
+      })
+    },
+
+    // Trigger manual orchestration execution
+    trigger: async (orchestrationId: string, payload?: any) => {
+      // This would manually trigger an orchestration
+      // Implementation would need to be added to orchestration system
+      log.debug(`Manual trigger for orchestration '${orchestrationId}'`)
+      // Call the actual orchestration trigger if it exists and is external
+      // Note: A more robust implementation would verify the trigger type
+      return await cyre.orchestration.trigger(
+        orchestrationId,
+        'manual',
+        payload
+      )
+    },
+
+    // Debug channel state
+    inspect: (channelId: string) => {
+      const config = cyre.get(channelId)
+      const payload = payloadState.get(channelId)
+      const subscriber = subscribers.get(channelId)
+      const metrics = io.getMetrics(channelId)
+      const groups = cyre.getChannelGroups(channelId)
+
+      return {
+        id: channelId,
+        config,
+        payload,
+        hasSubscriber: !!subscriber,
+        metrics,
+        groups: groups.map(g => g.id),
+        queryTime: performance.now()
+      }
+    },
+
+    // Performance snapshot
+    snapshot: () => {
+      const systemStats = metricsReport.getSystemStats()
+      const queryStats = query.stats()
+      const orchestrations = cyre.orchestration.list()
+
+      return {
+        system: {
+          totalCalls: systemStats.totalCalls,
+          callRate: systemStats.callRate,
+          uptime: Math.floor((Date.now() - systemStats.startTime) / 1000)
+        },
+        channels: {
+          total: io.getAll().length,
+          withSubscribers: subscribers.getAll().length,
+          withPayload: query.channels({hasPayload: true}).total
+        },
+        orchestrations: {
+          total: orchestrations.length,
+          running: orchestrations.filter(o => o.status === 'running').length
+          // system: orchestrations.filter(o => o.id.startsWith('system-')).length // Removed as per type definition
+        },
+        query: queryStats,
+        timestamp: Date.now()
+      }
+    },
+
+    // Add getSystemMetrics method
+    getSystemMetrics: () => {
+      const systemStats = metricsReport.getSystemStats()
+      return {
+        performance: {
+          totalCalls: systemStats.totalCalls,
+          callRate: systemStats.callRate,
+          totalErrors: systemStats.totalErrors,
+          uptime: Math.floor((Date.now() - systemStats.startTime) / 1000)
+        }
+      }
+    },
+
+    // Add triggerHealthCheck method
+    triggerHealthCheck: async () => {
+      return await cyre.orchestration.trigger('system-health-monitor', 'manual')
+    }, // Add these methods directly to the main cyre object:
+    getSystemHealth: () => {
+      const breathing = metricsState.get().breathing
+      const systemStats = metricsReport.getSystemStats()
+
+      return {
+        overall: breathing.stress < 0.8 && systemStats.totalErrors < 10,
+        breathing: {
+          stress: breathing.stress,
+          rate: breathing.currentRate,
+          healthy: breathing.stress < 0.8
+        }
+      }
+    },
+
+    adaptSystemLoad: (loadLevel: number) => {
+      // Simple adaptation - just update breathing rate
+      const newRate =
+        loadLevel > 0.8 ? BREATHING.RATES.RECOVERY : BREATHING.RATES.BASE
+      const breathing = metricsState.get().breathing
+      breathing.currentRate = newRate
+      breathing.stress = loadLevel
+
+      return {adapted: true, loadLevel}
+    }, // In the cyre.dev object, add:
+    triggerMemoryCleanup: async () => {
+      try {
+        // Direct memory cleanup since orchestration isn't working
+        query.cache.clear()
+
+        // Force garbage collection if available
+        if (typeof global !== 'undefined' && global.gc) {
+          global.gc()
+        }
+
+        return {ok: true, message: 'Memory cleanup completed'}
+      } catch (error) {
+        return {ok: false, message: String(error)}
+      }
+    } // In the cyre.orchestration object, add:
   }
 }

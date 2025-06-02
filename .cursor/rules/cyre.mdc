@@ -1,0 +1,22 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Please follow modern best practices and create clean, maintainable code focusing on excellent UI/UX.  always use  latest methodologies. Thanks.
+
+Cyre is a reactive event/state managment library package for NPM.
+- analyse project for logical and technical error
+- use modern and latest functional typescript, 
+- SOLID principals,
+- minimise overlaps and duplicates 
+- clear separation of concern. 
+- Reserve my tag comments, descriptions and logics at the top of pages after imports. 
+- use file location comments at top of pages for project structure, add on new page.
+- No OOP, no Classes. use functional programming.
+- make sure new updates won't break test or update test
+- strict typescript 
+- src/types/ for interface and types. keep it organised
+- I don't want "fixed", emojis or "enhanced" comments or file names. keep original 
+- stop using enhanced, optimised, fixed, etc.. prefix and suffix ... its confusing!
+- should pre-compure, proactive and compile to minimise runtime overhead 

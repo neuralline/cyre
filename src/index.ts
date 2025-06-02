@@ -79,7 +79,7 @@ import {groupOperations} from './components/cyre-group'
 // Main exports
 
 // Import orchestration system
-import {orchestrationAPI} from './orchestration/orchestration-engine'
+import {orchestration} from './orchestration/orchestration-engine'
 
 // Add to existing exports
 export {
@@ -90,7 +90,7 @@ export {
   createStream,
   schema,
   groupOperations,
-  orchestrationAPI
+  orchestration
 }
 
 // Export orchestration types
@@ -99,7 +99,6 @@ export type {
   OrchestrationTrigger,
   WorkflowStep,
   OrchestrationAction,
-  OrchestrationContext,
   TriggerEvent,
   StepResult,
   ErrorHandlingConfig,

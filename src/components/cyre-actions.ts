@@ -1,5 +1,5 @@
 // src/components/cyre-actions.ts
-// Fix CyreActions to handle change detection properly (not mark as fast path)
+// v8 : increase this every time you update actions
 
 import {sensor} from '../context/metrics-report'
 import type {IO, ProtectionFn} from '../types/core'
@@ -12,9 +12,20 @@ import {io} from '../context/state'
 /*
 
       C.Y.R.E - A.C.T.I.O.N.S
+
+
+      pre-compute and compile action talents to minimise run time overhead and save it as easy to follow pipeline step by step instructions
+      Manages talents for the channel, specialized abilities that the channel possesses to control channel behavior!
       
-      Key fix: Change detection should NOT make action fast path
-      Change detection is handled separately in processCall, not in pipeline
+      Talent Categories:
+        Protection Talents:
+            throttle, debounce, block, fastPath, retry
+        Processing Talents:
+            schema, transform, condition, middleware
+        Flow Talents:
+            detectChanges, priority, required
+        Scheduling Talents:
+            interval, delay, repeat
 
 */
 
