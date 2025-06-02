@@ -1,31 +1,67 @@
 {
   "name": "cyre",
-  "version": "4.0.3",
-  "description": "Reactive and dynamic networking system with quantum-timed event orchestration, intelligent load balancing, and advanced state management for JavaScript applications",
-  "input": "src/index.ts",
+  "version": "4.3.0",
+  "description": "Neural Line - Reactive event manager with zero dependencies",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./hooks": {
+      "import": "./dist/hooks/index.js",
+      "types": "./dist/hooks/index.d.ts"
+    },
+    "./schema": {
+      "import": "./dist/schema/index.js",
+      "types": "./dist/schema/index.d.ts"
+    },
+    "./stream": {
+      "import": "./dist/stream/index.js",
+      "types": "./dist/stream/index.d.ts"
+    },
+    "./state-machine": {
+      "import": "./dist/state-machine/index.js",
+      "types": "./dist/state-machine/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "rimraf dist && vite build && tsc --emitDeclarationOnly --skipLibCheck --noImplicitAny false",
-    "build:types": "tsc --project tsconfig.build.json",
-    "build:lib": "vite build",
-    "build:full": "npm run build:lib && npm run build:types",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "coverage": "vitest run --coverage",
-    "lint": "eslint --ext .ts,.tsx src",
-    "lint:fix": "eslint --ext .ts,.tsx src --fix",
-    "type-check": "tsc --noEmit --skipLibCheck",
-    "prepublishOnly": "npm run test",
-    "clean": "rimraf dist coverage .vite",
-    "example": "pnpm tsx example/cyre-extended-tests.ts",
-    "roll": "rimraf dist && rollup -c && tsc --emitDeclarationOnly --skipLibCheck --noImplicitAny false"
+    "dev": "bun run build --watch",
+    "build": "bun run clean && bun run build:types && bun run build:esm && bun run build:cjs",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "build:esm": "bun build ./src/index.ts --outdir ./dist --format esm --splitting --chunk-naming '[name]-[hash].js'",
+    "build:cjs": "bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs",
+    "clean": "rm -rf dist",
+    "test": "bun test",
+    "vitest": "vitest run",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "bun run typecheck",
+    "prepublishOnly": "bun run build && bun run test",
+    "size": "bun run build && bundlesize",
+    "benchmark": "bun run example/industry-standard-tests.ts"
   },
-  "author": "Darik.",
+  "keywords": [
+    "reactive",
+    "events",
+    "state-management",
+    "functional",
+    "typescript",
+    "zero-dependency",
+    "performance"
+  ],
+  "author": "Cyre Team",
   "license": "MIT",
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/neuralline/cyre.git"
@@ -50,65 +86,21 @@
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vitest": "^3.1.4"
+    "vitest": "^3.1.4",
+    "typescript": "^5.8.3",
+    "@types/bun": "latest",
+    "bundlesize": "^0.18.2"
   },
-  "keywords": [
-    "pub/sub",
-    "publish/subscribe",
-    "reactive",
-    "subscribe",
-    "event manager",
-    "event",
-    "action-on-call",
-    "reducers",
-    "debounce",
-    "redux alternative"
+  "bundlesize": [
+    {
+      "path": "./dist/index.js",
+      "maxSize": "50kb"
+    }
   ],
-  "type": "module",
-  "sideEffects": false,
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.esm.js",
-  "browser": "./dist/index.umd.js",
-  "types": "./dist/types/index.d.ts",
-  "files": [
-    "dist",
-    "docs",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md",
-    "package.json"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/types/index.d.ts",
-      "import": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/index.esm.js"
-      },
-      "require": {
-        "types": "./dist/types/index.d.ts",
-        "default": "./dist/index.cjs"
-      },
-      "browser": {
-        "import": "./dist/index.esm.js",
-        "require": "./dist/index.cjs",
-        "default": "./dist/index.umd.js"
-      },
-      "node": {
-        "import": "./dist/index.esm.js",
-        "require": "./dist/index.cjs"
-      },
-      "default": "./dist/index.esm.js"
-    },
-    "./package.json": "./package.json"
-  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
   },
-  "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977",
-  "dependencies": {
-    "@rollup/plugin-typescript": "^12.1.2"
-  }
+  "sideEffects": false
 }

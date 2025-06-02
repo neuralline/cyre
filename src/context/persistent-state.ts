@@ -3,7 +3,7 @@
 
 import {log} from '../components/cyre-log'
 import {io, subscribers, timeline} from './state'
-import type {IO, ActionPayload, Timer} from '../types/interface'
+import type {IO, ActionPayload, Timer} from '../types/core'
 import payloadState from './payload-state'
 
 /*

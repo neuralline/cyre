@@ -1,7 +1,7 @@
 // src/schema/cyre-schema.ts
 // Schema validation with proper method chaining and pipe functionality
 
-import type {ActionPayload} from '../types/interface'
+import type {ActionPayload} from '../types/core'
 import {log} from '../components/cyre-log'
 
 /*
@@ -305,15 +305,25 @@ export const enums = <T extends readonly string[]>(...values: T) =>
       : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
   )
 
-// PIPE FUNCTION - for composing schema transformations
-export const pipe = <T, U>(
+// PIPE FUNCTION - for composing schema transformations (FIXED)
+export const pipe = <T>(
   schema: Schema<T>,
-  ...transforms: Array<(schema: Schema<T>) => Schema<U>>
-): Schema<U> => {
-  return transforms.reduce(
-    (acc, transform) => transform(acc as any),
-    schema as any
-  ) as Schema<U>
+  ...transforms: Array<(schema: Schema<T>) => Schema<any>>
+): Schema<any> => {
+  // Filter out undefined transforms and validate they are functions
+  const validTransforms = transforms.filter(
+    (transform): transform is (schema: Schema<T>) => Schema<any> =>
+      typeof transform === 'function'
+  )
+
+  if (validTransforms.length === 0) {
+    return schema
+  }
+
+  return validTransforms.reduce(
+    (acc, transform) => transform(acc),
+    schema as Schema<any>
+  )
 }
 
 // EMAIL STRING - shorthand for string with email validation

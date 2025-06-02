@@ -1,5 +1,5 @@
 // src/context/group-state.ts - New file
-import {ChannelGroup} from '../types/core'
+
 import {createStore} from './create-store'
 import {io} from './state'
 

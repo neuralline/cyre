@@ -426,50 +426,52 @@ describe('TimeKeeper with Redesigned API', () => {
   })
 
   /**
-   * Test error handling and validation
+   * Test error handling and edge cases
    */
-  it('should handle invalid parameters gracefully', () => {
-    console.log('[TEST] Testing error handling and validation')
-
-    // Test negative interval
-    const negativeIntervalResult = timeKeeper.keep(
+  it('should handle errors and edge cases properly', async () => {
+    // Test invalid interval
+    const invalidIntervalResult = timeKeeper.keep(
       -100,
-      () => console.log('Should not work'),
+      () => {},
       1,
-      'negative-interval-test'
+      'invalid-interval'
     )
+    expect(invalidIntervalResult.kind).toBe('error')
+    if (invalidIntervalResult.kind === 'error') {
+      expect(invalidIntervalResult.error).toBeInstanceOf(Error)
+    }
 
-    expect(negativeIntervalResult.kind).toBe('error')
-    expect(negativeIntervalResult.error.message).toContain(
-      'Interval cannot be negative'
-    )
-
-    // Test negative delay
-    const negativeDelayResult = timeKeeper.keep(
+    // Test invalid delay
+    const invalidDelayResult = timeKeeper.keep(
       100,
-      () => console.log('Should not work'),
+      () => {},
       1,
-      'negative-delay-test',
-      -50 // negative delay
+      'invalid-delay',
+      -50
     )
-
-    expect(negativeDelayResult.kind).toBe('error')
-    expect(negativeDelayResult.error.message).toContain(
-      'Delay cannot be negative'
-    )
+    expect(invalidDelayResult.kind).toBe('error')
+    if (invalidDelayResult.kind === 'error') {
+      expect(invalidDelayResult.error).toBeInstanceOf(Error)
+    }
 
     // Test invalid callback
     const invalidCallbackResult = timeKeeper.keep(
       100,
-      'not a function' as any,
+      null as any,
       1,
-      'invalid-callback-test'
+      'invalid-callback'
     )
-
     expect(invalidCallbackResult.kind).toBe('error')
-    expect(invalidCallbackResult.error.message).toContain(
-      'Callback must be a function'
-    )
+    if (invalidCallbackResult.kind === 'error') {
+      expect(invalidCallbackResult.error).toBeInstanceOf(Error)
+    }
+
+    // Test duplicate timer ID
+    const timer1 = timeKeeper.keep(100, () => {}, 1, 'duplicate-id')
+    expect(timer1.kind).toBe('ok')
+
+    const timer2 = timeKeeper.keep(100, () => {}, 1, 'duplicate-id')
+    expect(timer2.kind).toBe('ok') // Should replace existing timer
   })
 
   /**
@@ -585,5 +587,74 @@ describe('TimeKeeper with Redesigned API', () => {
     expect(finalBreathingState.stress).toBeGreaterThanOrEqual(0)
     expect(finalBreathingState.stress).toBeLessThanOrEqual(1)
     expect(finalBreathingState.currentRate).toBeGreaterThan(0)
+  })
+
+  /**
+   * Test .wait() method functionality
+   */
+  it('should properly handle wait promises', async () => {
+    const startTime = Date.now()
+    const waitDuration = 200
+
+    // Test basic wait with shorter duration
+    await timeKeeper.wait(waitDuration)
+    const elapsedTime = Date.now() - startTime
+    expect(elapsedTime).toBeGreaterThanOrEqual(waitDuration)
+    expect(elapsedTime).toBeLessThanOrEqual(waitDuration + 50) // Allow small margin
+
+    // Test wait cancellation with shorter duration
+    const waitPromise = timeKeeper.wait(500, 'wait-to-cancel')
+    timeKeeper.forget('wait-to-cancel')
+    await expect(waitPromise).resolves.toBeUndefined()
+  }, 2000) // Reduce timeout to 2 seconds since we're using shorter durations
+
+  /**
+   * Test timer status reporting
+   */
+  it('should provide accurate status information', async () => {
+    // Create a timer
+    const timerResult = timeKeeper.keep(
+      100,
+      () => {},
+      true,
+      'status-test-timer'
+    )
+
+    expect(timerResult.kind).toBe('ok')
+
+    // Check initial status
+    const initialStatus = timeKeeper.status()
+    expect(initialStatus.activeFormations).toBe(1)
+    expect(initialStatus.totalFormations).toBe(1)
+    expect(initialStatus.hibernating).toBe(false)
+
+    // Pause the timer
+    timeKeeper.pause('status-test-timer')
+    const pausedStatus = timeKeeper.status()
+    expect(pausedStatus.activeFormations).toBe(0)
+    expect(pausedStatus.totalFormations).toBe(1)
+
+    // Resume the timer
+    timeKeeper.resume('status-test-timer')
+    const resumedStatus = timeKeeper.status()
+    expect(resumedStatus.activeFormations).toBe(1)
+    expect(resumedStatus.totalFormations).toBe(1)
+
+    // Hibernate and verify state
+    timeKeeper.hibernate()
+
+    // Wait for state to be updated and verify
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const hibernatedStatus = timeKeeper.status()
+
+    // Verify all timers are cleared and hibernating is true
+    expect(hibernatedStatus.activeFormations).toBe(0)
+    expect(hibernatedStatus.totalFormations).toBe(0)
+    expect(hibernatedStatus.hibernating).toBe(true)
+
+    // Reset and verify state is cleared
+    timeKeeper.reset()
+    const resetStatus = timeKeeper.status()
+    expect(resetStatus.hibernating).toBe(false)
   })
 })

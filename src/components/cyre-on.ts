@@ -3,7 +3,7 @@
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
-import type {EventHandler, SubscriptionResponse} from '../types/interface'
+import type {EventHandler, SubscriptionResponse} from '../types/core'
 import {log} from './cyre-log'
 
 /* 
@@ -193,7 +193,7 @@ export const subscribe = (
   fn?: EventHandler
 ): SubscriptionResponse => {
   // Check if system is locked
-  if (metricsState.isSystemLocked()) {
+  if (metricsState.isLocked()) {
     log.error(MSG.SYSTEM_LOCKED_SUBSCRIBERS)
     return {
       ok: false,

@@ -2,10 +2,10 @@
 // Refactored state management with payload separation
 
 import {log} from '../components/cyre-log'
-import type {IO, ISubscriber, Timer} from '../types/interface'
+import type {IO, ISubscriber, Timer} from '../types/core'
 import {metricsState, type MetricsState} from './metrics-state'
 import {payloadState} from './payload-state'
-import type {StateKey} from '../types/interface'
+import type {StateKey} from '../types/core'
 import {createStore} from './create-store'
 
 /*

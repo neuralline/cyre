@@ -1,5 +1,5 @@
 // src/components/cyre-dispatch.ts
-// Dispatch with schema validation support
+// Dispatch with schema validation support and proper payload state management
 
 import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
@@ -17,6 +17,7 @@ import payloadState from '../context/payload-state'
       - Preserve exact payload values including falsy ones
       - Include validation metadata in responses
       - Track schema validation performance
+      - Update payload state after successful execution
 
 */
 
@@ -76,11 +77,8 @@ export const useDispatch = async (
 
     // Update payload history after successful execution for change detection
     if (result.ok) {
-      if (action.detectChanges) {
-        // Store exact payload value for change detection
-
-        payloadState.set(action.id, action.payload, 'call')
-      }
+      // Store the payload that was actually used for execution
+      payloadState.set(action.id, currentPayload, 'call')
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)

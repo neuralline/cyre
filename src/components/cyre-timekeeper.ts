@@ -1,5 +1,5 @@
 // src/components/cyre-timekeeper.ts
-import type {Timer, TimerDuration, TimerRepeat} from '../types/interface'
+import type {Timer, TimerDuration, TimerRepeat} from '../types/timer'
 import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-log'
 import {metricsState, Result} from '../context/metrics-state'
@@ -96,6 +96,7 @@ const _quartz = {
       startTime: number
       executionId: string
       isExecuting: boolean
+      cleanup?: () => void
     }
   >(),
 
@@ -139,17 +140,26 @@ const _quartz = {
 
     let timeoutId: NodeJS.Timeout | number
 
-    switch (tier) {
-      case PrecisionTier.HIGH:
-        timeoutId = _quartz.createHighPrecisionTimer(wrappedCallback, duration)
-        break
-      case PrecisionTier.CHUNKED:
-        timeoutId = _quartz.createChunkedTimer(wrappedCallback, duration, id)
-        break
-      default:
-        timeoutId = TimerEnvironment.isTest
-          ? setTimeout(wrappedCallback, duration)
-          : _quartz.createMediumPrecisionTimer(wrappedCallback, duration)
+    // In test environment, use setTimeout with actual duration
+    if (TimerEnvironment.isTest) {
+      timeoutId = setTimeout(wrappedCallback, duration)
+    } else {
+      switch (tier) {
+        case PrecisionTier.HIGH:
+          timeoutId = _quartz.createHighPrecisionTimer(
+            wrappedCallback,
+            duration
+          )
+          break
+        case PrecisionTier.CHUNKED:
+          timeoutId = _quartz.createChunkedTimer(wrappedCallback, duration, id)
+          break
+        default:
+          timeoutId = _quartz.createMediumPrecisionTimer(
+            wrappedCallback,
+            duration
+          )
+      }
     }
 
     _quartz.activeTimers.set(id, {
@@ -645,27 +655,55 @@ export const TimeKeeper = {
       }
     }
   },
-  wait: async (
+  wait: (
     duration: number,
     id: string = `wait-${crypto.randomUUID()}`
   ): Promise<void> => {
-    return new Promise(resolve => {
-      // Clear any existing timer first
-      _quartz.clearTimer(id)
+    // Validate duration
+    if (duration <= 0) {
+      return Promise.resolve() // Resolve immediately for zero or negative durations
+    }
 
-      // Use simple setTimeout
-      const timeoutId = setTimeout(() => {
-        _quartz.activeTimers.delete(id)
-        resolve()
-      }, duration)
+    return new Promise((resolve, reject) => {
+      try {
+        // Clear any existing timer first
+        _quartz.clearTimer(id)
 
-      // Store for cancellation
-      _quartz.activeTimers.set(id, {
-        timeoutId,
-        startTime: Date.now(),
-        executionId: `${id}-${Date.now()}`,
-        isExecuting: false
-      })
+        // Use _quartz's timer creation for consistent behavior
+        const timeoutId = _quartz.createTimer(
+          () => {
+            // Clean up and resolve
+            _quartz.activeTimers.delete(id)
+            resolve()
+          },
+          duration,
+          id
+        )
+
+        // Store for cancellation
+        _quartz.activeTimers.set(id, {
+          timeoutId,
+          startTime: Date.now(),
+          executionId: `${id}-${Date.now()}`,
+          isExecuting: false
+        })
+
+        // Handle cancellation
+        const cleanup = () => {
+          _quartz.clearTimer(id)
+          _quartz.activeTimers.delete(id)
+          resolve() // Resolve on cancellation
+        }
+
+        // Store cleanup function for forget
+        _quartz.activeTimers.get(id)!.cleanup = cleanup
+      } catch (error) {
+        reject(
+          error instanceof Error
+            ? error
+            : new Error('Wait timer creation failed')
+        )
+      }
     })
   },
   forget: (id: string): void => {
@@ -739,6 +777,8 @@ export const TimeKeeper = {
 
   hibernate: (): void => {
     log.debug('TimeKeeper entering hibernation')
+
+    // Update metrics state first and ensure it's set
     metricsState.update({hibernating: true})
 
     // Clear all active timers
@@ -749,7 +789,21 @@ export const TimeKeeper = {
       }
     })
 
+    // Clear timeline after all timers are cleared
     timeline.clear()
+
+    // Double-check and force hibernation state
+    const currentState = metricsState.get()
+    if (!currentState.hibernating) {
+      metricsState.update({hibernating: true})
+    }
+
+    // Verify state is set
+    const finalState = metricsState.get()
+    if (!finalState.hibernating) {
+      log.critical('Failed to set hibernation state')
+      throw new Error('Failed to set hibernation state')
+    }
   },
 
   reset: (): void => {

@@ -5,11 +5,10 @@ import type {
   BreathingState,
   QuantumState as MetricsState,
   PerformanceMetrics,
-  Priority,
-  StateKey,
   SystemMetrics,
   SystemStress
-} from '../types/interface'
+} from '../types/system'
+import type {Priority, StateKey} from '../types/core'
 import {memoize} from '../libs/utils'
 import {createStore} from './create-store'
 import {log} from '../components/cyre-log'
@@ -94,12 +93,12 @@ export const metricsState = {
   hibernating: false,
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
-  isLocked: false,
+  _isLocked: false,
   initialize: false,
-  isShutdown: false,
+  _shutdown: false,
 
-  isSystemLocked: (): boolean => {
-    return metricsState.isLocked
+  isLocked: (): boolean => {
+    return metricsState._isLocked
   },
 
   get: (): Readonly<MetricsState> => {
@@ -244,8 +243,8 @@ export const metricsState = {
     metricsState.inRecuperation = false
     metricsState.hibernating = false
     metricsState.activeFormations = 0
-    metricsState.isLocked = false
-    metricsState.isShutdown = false
+    metricsState._isLocked = false
+    metricsState._shutdown = false
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
       metricsState.recuperationInterval = undefined

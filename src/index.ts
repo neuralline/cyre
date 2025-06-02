@@ -77,7 +77,38 @@ import {createStream} from './stream'
 import {groupOperations} from './components/cyre-group'
 
 // Main exports
-export {cyre, log, useCyre, cyreCompose, createStream, schema, groupOperations}
+
+// Import orchestration system
+import {orchestrationAPI} from './orchestration/orchestration-engine'
+
+// Add to existing exports
+export {
+  cyre,
+  log,
+  useCyre,
+  cyreCompose,
+  createStream,
+  schema,
+  groupOperations,
+  orchestrationAPI
+}
+
+// Export orchestration types
+export type {
+  OrchestrationConfig,
+  OrchestrationTrigger,
+  WorkflowStep,
+  OrchestrationAction,
+  OrchestrationContext,
+  TriggerEvent,
+  StepResult,
+  ErrorHandlingConfig,
+  MonitoringConfig,
+  AlertConfig,
+  ConditionFunction,
+  OrchestrationRuntime,
+  OrchestrationMetrics
+} from './types/orchestration'
 
 // Export types with unique names to avoid conflicts
 export type {
@@ -88,10 +119,8 @@ export type {
   ActionPayload as CyreActionPayload,
   Priority as CyrePriority,
   TimerDuration as CyreTimerDuration,
-  BreathingMetrics as CyreBreathingMetrics,
-  SystemMetrics as CyreSystemMetrics,
   CyreResponse as CyreCoreResponse
-} from './types/interface'
+} from './types/core'
 
 // Export hook types
 export type {

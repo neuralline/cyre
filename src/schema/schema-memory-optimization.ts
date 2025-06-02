@@ -1,405 +1,240 @@
 // src/schema/schema-memory-optimization.ts
-// Memory optimization for schema validation system
+// Schema memory optimization with object pooling
 
-import {log} from '../components/cyre-log'
+import type {Schema} from './cyre-schema'
 
 /*
 
-      C.Y.R.E - S.C.H.E.M.A - M.E.M.O.R.Y - O.P.T.I.M.I.Z.A.T.I.O.N
+      C.Y.R.E - S.C.H.E.M.A - M.E.M.O.R.Y
       
-      Memory management for schema validation:
-      - Object pooling for validation results
-      - Cache size limits and cleanup
-      - Memory leak prevention
-      - Performance monitoring
+      Memory optimization for schema validation:
+      - Schema caching
+      - Validation result pooling
+      - Memory usage tracking
+      - Performance optimization
 
 */
 
-interface CacheEntry<T = any> {
-  value: T
-  lastAccess: number
-  accessCount: number
-  size: number // Estimated memory usage in bytes
+interface CachedValidationResult {
+  ok: boolean
+  data?: any
+  errors?: string[]
 }
 
 interface CacheStats {
-  totalEntries: number
-  totalMemoryUsage: number
-  hitRate: number
-  missRate: number
-  evictionCount: number
+  hits: number
+  misses: number
+  size: number
+  maxSize: number
+}
+
+interface MemoryStats {
+  schemasSize: number
+  poolSize: number
+  totalAllocations: number
+  currentAllocations: number
 }
 
 // Configuration
 const CACHE_CONFIG = {
-  MAX_ENTRIES: 100,
-  MAX_MEMORY_MB: 10,
-  CLEANUP_INTERVAL: 30000, // 30 seconds
-  TTL: 300000, // 5 minutes
-  EVICTION_THRESHOLD: 0.8 // Start eviction at 80% capacity
+  MAX_SCHEMAS: 100,
+  MAX_POOL_SIZE: 50,
+  CLEANUP_THRESHOLD: 0.8
 }
 
-// Enhanced cache with memory management
-class MemoryManagedCache<T> {
-  private cache = new Map<string, CacheEntry<T>>()
-  private stats = {
-    hits: 0,
-    misses: 0,
-    evictions: 0,
-    totalMemoryUsage: 0
-  }
-  private cleanupTimer?: NodeJS.Timeout
+// Schema cache
+const schemaCache = new Map<string, Schema>()
 
-  constructor() {
-    this.startCleanupTimer()
-  }
+// Validation result pool
+const validationResultPool: CachedValidationResult[] = []
 
-  set(key: string, value: T): void {
-    const estimatedSize = this.estimateSize(value)
-    const now = Date.now()
-
-    // Check if we need to evict before adding
-    if (this.shouldEvict(estimatedSize)) {
-      this.evictLeastUsed()
-    }
-
-    // Remove existing entry if present
-    const existing = this.cache.get(key)
-    if (existing) {
-      this.stats.totalMemoryUsage -= existing.size
-    }
-
-    // Add new entry
-    const entry: CacheEntry<T> = {
-      value,
-      lastAccess: now,
-      accessCount: 1,
-      size: estimatedSize
-    }
-
-    this.cache.set(key, entry)
-    this.stats.totalMemoryUsage += estimatedSize
-  }
-
-  get(key: string): T | undefined {
-    const entry = this.cache.get(key)
-
-    if (entry) {
-      // Update access stats
-      entry.lastAccess = Date.now()
-      entry.accessCount++
-      this.stats.hits++
-      return entry.value
-    } else {
-      this.stats.misses++
-      return undefined
-    }
-  }
-
-  has(key: string): boolean {
-    return this.cache.has(key)
-  }
-
-  delete(key: string): boolean {
-    const entry = this.cache.get(key)
-    if (entry) {
-      this.stats.totalMemoryUsage -= entry.size
-      return this.cache.delete(key)
-    }
-    return false
-  }
-
-  clear(): void {
-    this.cache.clear()
-    this.stats.totalMemoryUsage = 0
-    this.stats.evictions = 0
-  }
-
-  size(): number {
-    return this.cache.size
-  }
-
-  getStats(): CacheStats {
-    const totalAccess = this.stats.hits + this.stats.misses
-    return {
-      totalEntries: this.cache.size,
-      totalMemoryUsage: this.stats.totalMemoryUsage,
-      hitRate: totalAccess > 0 ? this.stats.hits / totalAccess : 0,
-      missRate: totalAccess > 0 ? this.stats.misses / totalAccess : 0,
-      evictionCount: this.stats.evictions
-    }
-  }
-
-  private shouldEvict(newEntrySize: number): boolean {
-    const wouldExceedMemory =
-      this.stats.totalMemoryUsage + newEntrySize >
-      CACHE_CONFIG.MAX_MEMORY_MB * 1024 * 1024
-
-    const wouldExceedEntries =
-      this.cache.size >=
-      CACHE_CONFIG.MAX_ENTRIES * CACHE_CONFIG.EVICTION_THRESHOLD
-
-    return wouldExceedMemory || wouldExceedEntries
-  }
-
-  private evictLeastUsed(): void {
-    if (this.cache.size === 0) return
-
-    // Find least recently used entry
-    let lruKey = ''
-    let lruTime = Date.now()
-
-    for (const [key, entry] of this.cache) {
-      if (entry.lastAccess < lruTime) {
-        lruTime = entry.lastAccess
-        lruKey = key
-      }
-    }
-
-    if (lruKey) {
-      this.delete(lruKey)
-      this.stats.evictions++
-    }
-  }
-
-  private estimateSize(value: any): number {
-    // Simple size estimation
-    try {
-      if (typeof value === 'string') {
-        return value.length * 2 // Unicode characters
-      }
-
-      if (typeof value === 'function') {
-        return value.toString().length * 2 + 100 // Function overhead
-      }
-
-      if (typeof value === 'object' && value !== null) {
-        // Rough estimation for objects
-        const jsonString = JSON.stringify(value)
-        return jsonString.length * 2 + 50 // Object overhead
-      }
-
-      return 50 // Default for primitives
-    } catch {
-      return 100 // Fallback for circular references
-    }
-  }
-
-  private startCleanupTimer(): void {
-    this.cleanupTimer = setInterval(() => {
-      this.cleanup()
-    }, CACHE_CONFIG.CLEANUP_INTERVAL)
-  }
-
-  private cleanup(): void {
-    const now = Date.now()
-    const entriesToRemove: string[] = []
-
-    // Find expired entries
-    for (const [key, entry] of this.cache) {
-      if (now - entry.lastAccess > CACHE_CONFIG.TTL) {
-        entriesToRemove.push(key)
-      }
-    }
-
-    // Remove expired entries
-    entriesToRemove.forEach(key => {
-      this.delete(key)
-      this.stats.evictions++
-    })
-
-    // Log cleanup stats if significant
-    if (entriesToRemove.length > 0) {
-      log.debug(
-        `Schema cache cleanup: removed ${entriesToRemove.length} expired entries`
-      )
-    }
-  }
-
-  destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer)
-    }
-    this.clear()
-  }
+// Statistics
+let cacheStats: CacheStats = {
+  hits: 0,
+  misses: 0,
+  size: 0,
+  maxSize: CACHE_CONFIG.MAX_SCHEMAS
 }
 
-// Object pool for validation results
-class ValidationResultPool {
-  private pool: Array<{ok: boolean; data?: any; errors?: string[]}> = []
-  private maxSize = 50
+let memoryStats: MemoryStats = {
+  schemasSize: 0,
+  poolSize: 0,
+  totalAllocations: 0,
+  currentAllocations: 0
+}
 
-  get(): {ok: boolean; data?: any; errors?: string[]} {
-    if (this.pool.length > 0) {
-      const result = this.pool.pop()!
-      // Reset the object
+/**
+ * Schema cache management
+ */
+export const optimizedSchemaCache = {
+  /**
+   * Get schema from cache
+   */
+  get: (key: string): Schema | undefined => {
+    const schema = schemaCache.get(key)
+    if (schema) {
+      cacheStats.hits++
+      return schema
+    }
+    cacheStats.misses++
+    return undefined
+  },
+
+  /**
+   * Set schema in cache
+   */
+  set: (key: string, schema: Schema): void => {
+    // Check if we need to cleanup
+    if (schemaCache.size >= CACHE_CONFIG.MAX_SCHEMAS) {
+      cleanup()
+    }
+
+    schemaCache.set(key, schema)
+    cacheStats.size = schemaCache.size
+    memoryStats.schemasSize = schemaCache.size
+  },
+
+  /**
+   * Check if schema exists in cache
+   */
+  has: (key: string): boolean => {
+    return schemaCache.has(key)
+  },
+
+  /**
+   * Clear all cached schemas
+   */
+  clear: (): void => {
+    schemaCache.clear()
+    cacheStats.size = 0
+    cacheStats.hits = 0
+    cacheStats.misses = 0
+    memoryStats.schemasSize = 0
+  },
+
+  /**
+   * Get validation result from pool
+   */
+  getValidationResult: (): CachedValidationResult => {
+    memoryStats.totalAllocations++
+    memoryStats.currentAllocations++
+
+    if (validationResultPool.length > 0) {
+      const result = validationResultPool.pop()!
+      // Reset the result
       result.ok = false
       result.data = undefined
       result.errors = undefined
       return result
     }
 
-    return {ok: false}
-  }
+    // Create new result if pool is empty
+    return {
+      ok: false,
+      data: undefined,
+      errors: undefined
+    }
+  },
 
-  release(result: {ok: boolean; data?: any; errors?: string[]}): void {
-    if (this.pool.length < this.maxSize) {
-      // Clear references to prevent memory leaks
+  /**
+   * Release validation result back to pool
+   */
+  releaseValidationResult: (result: CachedValidationResult): void => {
+    memoryStats.currentAllocations--
+
+    if (validationResultPool.length < CACHE_CONFIG.MAX_POOL_SIZE) {
+      // Reset before returning to pool
+      result.ok = false
       result.data = undefined
       result.errors = undefined
-      this.pool.push(result)
+      validationResultPool.push(result)
+      memoryStats.poolSize = validationResultPool.length
     }
-  }
-
-  clear(): void {
-    this.pool.length = 0
-  }
-
-  size(): number {
-    return this.pool.length
-  }
-}
-
-// Global instances
-const schemaCache = new MemoryManagedCache()
-const validationPool = new ValidationResultPool()
-
-// Enhanced schema caching with memory management
-export const optimizedSchemaCache = {
-  set: <T>(key: string, value: T): void => {
-    schemaCache.set(key, value)
   },
 
-  get: <T>(key: string): T | undefined => {
-    return schemaCache.get(key)
-  },
-
-  has: (key: string): boolean => {
-    return schemaCache.has(key)
-  },
-
-  delete: (key: string): boolean => {
-    return schemaCache.delete(key)
-  },
-
-  clear: (): void => {
-    schemaCache.clear()
-    validationPool.clear()
-  },
-
+  /**
+   * Get cache statistics
+   */
   getStats: (): CacheStats => {
-    return schemaCache.getStats()
+    return {...cacheStats}
   },
 
-  // Memory optimization utilities
-  optimizeMemory: (): void => {
-    // Force cleanup
-    schemaCache.cleanup()
-
-    // Run garbage collection if available
-    if (typeof global !== 'undefined' && (global as any).gc) {
-      ;(global as any).gc()
-    }
+  /**
+   * Get memory statistics
+   */
+  getMemoryStats: (): MemoryStats => {
+    return {...memoryStats}
   },
 
-  // Get pooled validation result
-  getValidationResult: (): {ok: boolean; data?: any; errors?: string[]} => {
-    return validationPool.get()
+  /**
+   * Get cache hit ratio
+   */
+  getHitRatio: (): number => {
+    const total = cacheStats.hits + cacheStats.misses
+    return total > 0 ? cacheStats.hits / total : 0
   },
 
-  // Release validation result back to pool
-  releaseValidationResult: (result: {
-    ok: boolean
-    data?: any
-    errors?: string[]
-  }): void => {
-    validationPool.release(result)
-  },
+  /**
+   * Force cleanup
+   */
+  cleanup: (): void => {
+    cleanup()
+  }
+}
 
-  // Memory monitoring
-  getMemoryStats: () => ({
-    cache: schemaCache.getStats(),
-    pool: {
-      size: validationPool.size(),
-      maxSize: 50
-    },
-    recommendations: generateMemoryRecommendations()
+/**
+ * Cleanup old cache entries using LRU strategy
+ */
+const cleanup = (): void => {
+  const targetSize = Math.floor(
+    CACHE_CONFIG.MAX_SCHEMAS * CACHE_CONFIG.CLEANUP_THRESHOLD
+  )
+  const keysToRemove = Array.from(schemaCache.keys()).slice(
+    0,
+    schemaCache.size - targetSize
+  )
+
+  keysToRemove.forEach(key => {
+    schemaCache.delete(key)
   })
+
+  cacheStats.size = schemaCache.size
+  memoryStats.schemasSize = schemaCache.size
 }
 
-// Generate memory optimization recommendations
-const generateMemoryRecommendations = (): string[] => {
-  const stats = schemaCache.getStats()
-  const recommendations: string[] = []
-
-  if (stats.totalMemoryUsage > CACHE_CONFIG.MAX_MEMORY_MB * 1024 * 1024 * 0.8) {
-    recommendations.push(
-      'Consider reducing schema cache size or increasing memory limit'
-    )
-  }
-
-  if (stats.hitRate < 0.7) {
-    recommendations.push(
-      'Low cache hit rate - consider optimizing schema reuse patterns'
-    )
-  }
-
-  if (stats.evictionCount > 100) {
-    recommendations.push('High eviction count - consider increasing cache size')
-  }
-
-  if (recommendations.length === 0) {
-    recommendations.push('Memory usage is optimal')
-  }
-
-  return recommendations
+/**
+ * Warmup cache with common schemas
+ */
+export const warmupSchemaCache = (): void => {
+  // This could be populated with commonly used schemas
+  // For now, it's a placeholder for future optimization
 }
 
-// Memory monitoring for integration
-export const memoryMonitor = {
-  startMonitoring: (intervalMs = 60000): NodeJS.Timeout => {
-    return setInterval(() => {
-      const stats = optimizedSchemaCache.getMemoryStats()
+/**
+ * Get memory usage report
+ */
+export const getMemoryReport = () => {
+  const hitRatio = optimizedSchemaCache.getHitRatio()
 
-      if (
-        stats.cache.totalMemoryUsage >
-        CACHE_CONFIG.MAX_MEMORY_MB * 1024 * 1024 * 0.9
-      ) {
-        log.warn(
-          `Schema cache memory usage high: ${(
-            stats.cache.totalMemoryUsage /
-            1024 /
-            1024
-          ).toFixed(2)}MB`
-        )
-      }
-
-      if (stats.cache.hitRate < 0.5) {
-        log.warn(
-          `Schema cache hit rate low: ${(stats.cache.hitRate * 100).toFixed(
-            1
-          )}%`
-        )
-      }
-    }, intervalMs)
-  },
-
-  getReport: (): string => {
-    const stats = optimizedSchemaCache.getMemoryStats()
-    const memoryMB = stats.cache.totalMemoryUsage / 1024 / 1024
-
-    return `Schema Memory Report:
-- Cache Entries: ${stats.cache.totalEntries}
-- Memory Usage: ${memoryMB.toFixed(2)}MB
-- Hit Rate: ${(stats.cache.hitRate * 100).toFixed(1)}%
-- Pool Size: ${stats.pool.size}/${stats.pool.maxSize}
-- Recommendations: ${stats.recommendations.join(', ')}`
+  return {
+    cache: {
+      schemas: cacheStats.size,
+      maxSchemas: cacheStats.maxSize,
+      hitRatio: (hitRatio * 100).toFixed(2) + '%',
+      hits: cacheStats.hits,
+      misses: cacheStats.misses
+    },
+    pool: {
+      size: memoryStats.poolSize,
+      maxSize: CACHE_CONFIG.MAX_POOL_SIZE,
+      utilizationRatio:
+        ((memoryStats.poolSize / CACHE_CONFIG.MAX_POOL_SIZE) * 100).toFixed(2) +
+        '%'
+    },
+    allocations: {
+      total: memoryStats.totalAllocations,
+      current: memoryStats.currentAllocations,
+      pooled: memoryStats.poolSize
+    }
   }
-}
-
-// Cleanup function for shutdown
-export const cleanupSchemaMemory = (): void => {
-  schemaCache.destroy()
-  validationPool.clear()
-  log.debug('Schema memory cleanup completed')
 }

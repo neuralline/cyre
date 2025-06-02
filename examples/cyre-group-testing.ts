@@ -1,4 +1,4 @@
-// comprehensive-group-demo.ts
+// examples/cyre-group-testing.ts
 // Complete exploration of Cyre group system features for Node.js
 
 import {cyre, schema} from '../src/'

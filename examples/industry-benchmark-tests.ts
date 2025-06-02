@@ -234,7 +234,7 @@ const benchmarkBasicActionCall = async (): Promise<BenchmarkMetrics> => {
   )
 }
 
-// Benchmark Suite 2: Schema validation performance
+// Benchmark Suite 2: Schema validation performance - FIXED
 const benchmarkSchemaValidation = async (): Promise<BenchmarkMetrics> => {
   return runBenchmark(
     'Schema Validation',
@@ -242,9 +242,10 @@ const benchmarkSchemaValidation = async (): Promise<BenchmarkMetrics> => {
     async () => {
       cyre.clear()
 
+      // Use proper schema chaining API
       const userSchema = schema.object({
-        id: schema.pipe(schema.number(), schema.positive),
-        name: schema.pipe(schema.string(), schema.minLength(2)),
+        id: schema.number().positive(),
+        name: schema.string().minLength(2),
         email: schema.email_string()
       })
 

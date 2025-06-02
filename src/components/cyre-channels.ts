@@ -2,7 +2,7 @@
 // Focused channel creation - only handles ID, existence, and defaults
 
 import {io} from '../context/state'
-import {IO} from '../types/interface'
+import {IO} from '../types/core'
 import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
 import payloadState from '../context/payload-state'

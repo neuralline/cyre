@@ -2,14 +2,9 @@
 
 import {cyre} from '../app'
 import {log} from '../components/cyre-log'
-import type {IO} from '../types/interface'
+import type {IO} from '../types/core'
 import {SSRResult, SSROptions, HydrationOptions} from './types'
-import {
-  createSSRContext,
-  setSSRContext,
-  getSSRContext,
-  defaultSSROptions
-} from './ssr-context'
+import {createSSRContext, setSSRContext} from './ssr-context'
 
 /**
  * Prepares CYRE for server-side rendering

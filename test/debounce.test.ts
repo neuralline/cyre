@@ -1,50 +1,57 @@
 // test/debounce.test.ts
 
-import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
+import {describe, test, expect, beforeEach, afterEach} from 'bun:test'
 import {cyre} from '../src/app'
 
 describe('Debounce Functionality', () => {
   beforeEach(() => {
     // Mock process.exit
-    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    process.exit = () => undefined as never
 
     // Initialize cyre
     cyre.initialize()
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
+    // Clean up
+    cyre.clear()
   })
 
-  it('should properly debounce rapid calls', async () => {
+  test('should properly debounce rapid calls', async () => {
     console.log('[TEST] Testing debounce behavior')
 
     // Create unique action ID to prevent test interference
     const DEBOUNCE_ACTION_ID = `debounce-test-${Date.now()}`
 
-    // Counter for execution
-    let executionCount = 0
-    const executionTimestamps: number[] = []
+    // Track executions and calls
+    const executions: {timestamp: number; payload: any}[] = []
+    const calls: {timestamp: number; payload: any}[] = []
+    const debounceMessages: string[] = []
 
-    // Create a promise that will resolve when execution happens
-    const executionPromise = new Promise<void>(resolve => {
-      // Register action handler
-      cyre.on(DEBOUNCE_ACTION_ID, payload => {
-        const now = Date.now()
-        console.log(`[HANDLER] Debounce handler executed at ${now}:`, payload)
+    // Create a promise to track when the handler is called
+    let resolveHandler: (value: unknown) => void
+    const handlerPromise = new Promise(resolve => {
+      resolveHandler = resolve
+    })
 
-        executionCount++
-        executionTimestamps.push(now)
+    // Register handler
+    cyre.on(DEBOUNCE_ACTION_ID, payload => {
+      const now = Date.now()
+      console.log(`[HANDLER] Debounce handler executed at ${now}:`, payload)
 
-        // Allow promise to resolve after first execution
-        resolve()
-
-        return {
-          executed: true,
-          count: executionCount,
-          time: now
-        }
+      executions.push({
+        timestamp: now,
+        payload
       })
+
+      // Resolve the promise when handler is called
+      resolveHandler(true)
+
+      return {
+        executed: true,
+        count: executions.length,
+        time: now
+      }
     })
 
     // Create the action with debounce
@@ -56,23 +63,29 @@ describe('Debounce Functionality', () => {
     })
 
     // Make the initial call that should execute
-    await cyre.call(DEBOUNCE_ACTION_ID, {callNumber: 1, timestamp: Date.now()})
-
-    // Wait for first execution
-    await executionPromise
-    console.log('[TEST] First execution completed')
-
-    // Reset counter for second test phase
-    executionCount = 0
-    executionTimestamps.length = 0
-
-    // Create a tracking promise for rapid-fire testing
-    const trackingPromise = new Promise<void>(resolve => {
-      setTimeout(() => {
-        console.log(`[TEST] Final execution count: ${executionCount}`)
-        resolve()
-      }, 400) // Wait longer than debounce time
+    const initialCallTime = Date.now()
+    calls.push({
+      timestamp: initialCallTime,
+      payload: {callNumber: 1}
     })
+    console.log(`[TEST] Making initial call at ${initialCallTime}`)
+
+    const initialResult = await cyre.call(DEBOUNCE_ACTION_ID, {
+      callNumber: 1,
+      timestamp: initialCallTime
+    })
+    console.log('[TEST] Initial call result:', initialResult)
+
+    if (initialResult.message?.includes('Debounced')) {
+      debounceMessages.push(initialResult.message)
+    }
+
+    // Wait for debounce period and ensure execution
+    await Promise.race([
+      handlerPromise,
+      new Promise(resolve => setTimeout(resolve, 300))
+    ])
+    console.log('[TEST] First execution completed')
 
     // Now make multiple rapid calls that should be debounced
     const callCount = 8
@@ -80,30 +93,92 @@ describe('Debounce Functionality', () => {
       `[TEST] Making ${callCount} rapid calls that should be debounced`
     )
 
+    // Create a new promise for the final execution
+    let resolveFinalHandler: (value: unknown) => void
+    const finalHandlerPromise = new Promise(resolve => {
+      resolveFinalHandler = resolve
+    })
+
+    // Update the existing handler to resolve the final promise
+    cyre.forget(DEBOUNCE_ACTION_ID)
+    cyre.on(DEBOUNCE_ACTION_ID, payload => {
+      const now = Date.now()
+      console.log(`[HANDLER] Debounce handler executed at ${now}:`, payload)
+
+      executions.push({
+        timestamp: now,
+        payload
+      })
+
+      // Resolve the final promise
+      resolveFinalHandler(true)
+
+      return {
+        executed: true,
+        count: executions.length,
+        time: now
+      }
+    })
+
     for (let i = 0; i < callCount; i++) {
-      await cyre.call(DEBOUNCE_ACTION_ID, {
+      const callTime = Date.now()
+      calls.push({
+        timestamp: callTime,
+        payload: {callNumber: i + 10, iteration: i}
+      })
+      console.log(`[TEST] Making call ${i + 1} at ${callTime}`)
+
+      const result = await cyre.call(DEBOUNCE_ACTION_ID, {
         callNumber: i + 10,
         iteration: i,
-        timestamp: Date.now()
+        timestamp: callTime
       })
+      console.log(`[TEST] Call ${i + 1} result:`, result)
+
+      if (result.message?.includes('Debounced')) {
+        debounceMessages.push(result.message)
+      }
 
       // Add very small delay between calls
       await new Promise(resolve => setTimeout(resolve, 10))
     }
 
-    // Wait for debounce period to end
-    await trackingPromise
+    // Wait for final debounce period and ensure execution
+    await Promise.race([
+      finalHandlerPromise,
+      new Promise(resolve => setTimeout(resolve, 300))
+    ])
 
-    console.log(
-      `[TEST] Completed with ${executionCount} executions for ${callCount} calls`
-    )
+    // Detailed test results
+    const testDetails = {
+      allCallsDebounced: debounceMessages.every(msg =>
+        msg.includes('Debounced')
+      ),
+      executionCount: executions.length,
+      totalTime: Date.now() - initialCallTime,
+      debounceMessages,
+      executedAfterDelay: executions.some(
+        exec => exec.timestamp > initialCallTime + 250
+      ),
+      lastExecution: executions[executions.length - 1],
+      callCount: calls.length,
+      executions,
+      calls
+    }
+
+    console.log('[TEST] Test details:', testDetails)
 
     // For this test, we're specifically looking at the right debounce behavior:
     // Multiple rapid calls should result in at most ONE execution
-    expect(executionCount).toBeLessThanOrEqual(1)
+    expect(executions.length).toBeLessThanOrEqual(1)
+
+    // Additional assertions to help diagnose issues
+    expect(testDetails.allCallsDebounced).toBe(true)
+    expect(testDetails.executedAfterDelay).toBe(true)
+    expect(testDetails.debounceMessages.length).toBeGreaterThan(0)
   })
 
-  it('should use debounce to collapse rapid calls', async () => {
+  test('should use debounce to collapse rapid calls', async () => {
     console.log('[TEST] Testing debounce collapsing behavior')
 
     // Create unique action ID
@@ -111,6 +186,12 @@ describe('Debounce Functionality', () => {
 
     // Track executions
     const executions: {timestamp: number; payload: any}[] = []
+
+    // Create a promise to track when the handler is called
+    let resolveHandler: (value: unknown) => void
+    const handlerPromise = new Promise(resolve => {
+      resolveHandler = resolve
+    })
 
     // Register handler
     cyre.on(DEBOUNCE_ACTION_ID, payload => {
@@ -121,6 +202,9 @@ describe('Debounce Functionality', () => {
         timestamp: now,
         payload
       })
+
+      // Resolve the promise when handler is called
+      resolveHandler(true)
 
       return {handled: true, count: executions.length}
     })
@@ -136,11 +220,37 @@ describe('Debounce Functionality', () => {
     // Make initial call
     await cyre.call(DEBOUNCE_ACTION_ID, {sequence: 'first'})
 
-    // Wait a bit to ensure it executes
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // Wait for initial execution
+    await Promise.race([
+      handlerPromise,
+      new Promise(resolve => setTimeout(resolve, 250))
+    ])
 
     // Now make a series of very rapid calls
     console.log('[TEST] Making rapid sequence of calls')
+
+    // Create a new promise for the final execution
+    let resolveFinalHandler: (value: unknown) => void
+    const finalHandlerPromise = new Promise(resolve => {
+      resolveFinalHandler = resolve
+    })
+
+    // Update the existing handler to resolve the final promise
+    cyre.forget(DEBOUNCE_ACTION_ID)
+    cyre.on(DEBOUNCE_ACTION_ID, payload => {
+      const now = Date.now()
+      console.log(`[HANDLER] Executed with payload:`, payload)
+
+      executions.push({
+        timestamp: now,
+        payload
+      })
+
+      // Resolve the final promise
+      resolveFinalHandler(true)
+
+      return {handled: true, count: executions.length}
+    })
 
     for (let i = 0; i < 5; i++) {
       await cyre.call(DEBOUNCE_ACTION_ID, {
@@ -150,8 +260,11 @@ describe('Debounce Functionality', () => {
       await new Promise(resolve => setTimeout(resolve, 5))
     }
 
-    // Wait longer than debounce time to ensure processing completes
-    await new Promise(resolve => setTimeout(resolve, 300))
+    // Wait for final execution
+    await Promise.race([
+      finalHandlerPromise,
+      new Promise(resolve => setTimeout(resolve, 300))
+    ])
 
     // Make one final call
     await cyre.call(DEBOUNCE_ACTION_ID, {sequence: 'final'})

@@ -6,7 +6,7 @@ import type {
   ActionPayload,
   CyreResponse,
   Priority
-} from '../types/interface'
+} from '../types/core'
 import type {CyreChannel, HookResult} from '../types/hooks-interface'
 import {cyre} from '../app'
 import {sensor} from '../context/metrics-report'

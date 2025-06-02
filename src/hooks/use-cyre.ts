@@ -1,22 +1,16 @@
 // src/hooks/use-cyre.ts
 
 import {cyre} from '../app'
-import type {
-  IO,
-  EventHandler,
-  ActionPayload,
-  CyreResponse
-} from '../types/interface'
+import type {IO, EventHandler, ActionPayload, CyreResponse} from '../types/core'
 
 import {
   CyreHook,
   CyreHookOptions,
   CyreMiddleware,
   ChannelConfig,
-  ChannelHistoryEntry,
   HookResult,
   SubscriptionWithCleanup
-} from '../types/interface'
+} from '../types/hooks-interface'
 
 /*
 

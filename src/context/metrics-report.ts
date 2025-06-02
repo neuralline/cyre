@@ -2,7 +2,7 @@
 // Improvements to metrics collection sensor system
 
 import {createStore} from './create-store'
-import type {ActionId, Priority, StateKey} from '../types/interface'
+import type {ActionId, Priority, StateKey} from '../types/core'
 import {log} from '../components/cyre-log'
 
 export type EventType =

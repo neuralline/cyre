@@ -5,7 +5,7 @@ import {createStore} from './create-store'
 import {isEqual} from '../libs/utils'
 import {log} from '../components/cyre-log'
 import {sensor} from './metrics-report'
-import type {ActionPayload, StateKey} from '../types/interface'
+import type {ActionPayload, StateKey} from '../types/core'
 
 /*
 

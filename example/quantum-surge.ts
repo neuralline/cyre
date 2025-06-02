@@ -1,5 +1,5 @@
-import {cyre, log} from '../src/app'
-import type {CyreResponse} from '../src/interfaces/interface'
+import {cyre, log} from '../src/'
+import type {CyreResponse} from '../src/types/core'
 
 /*
  * C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E.

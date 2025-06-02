@@ -1,20 +1,23 @@
 // src/components/cyre-call.ts
-// Call processing with proper payload flow through pipeline
+// ACTUAL FIX: Use the compiled _protectionPipeline directly at runtime
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
-import {metricsReport, sensor} from '../context/metrics-report'
+import {sensor} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
-import {ProtectionContext} from './cyre-actions'
 import {io} from '../context/state'
+import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
 import {call} from '../app'
 
 /*
 
-      C.Y.R.E - C.A.L.L 
+      C.Y.R.E - C.A.L.L
       
-      Call processing with proper payload transformation through pipeline
+      THE REAL PROBLEM: Runtime wasn't using compiled _protectionPipeline
+      
+      SOLUTION: Execute the compiled pipeline functions directly
+      No re-extraction, no duplicate systems, just use what was compiled!
 
 */
 
@@ -24,100 +27,138 @@ export async function processCall(
 ): Promise<CyreResponse> {
   sensor.log(action.id, 'call', 'call-initiation', {
     timestamp: Date.now(),
-    hasPayload: payload !== undefined,
-    actionType: action.type || 'unknown'
+    hasPayload: payload !== undefined
   })
 
-  // Check pre-computed blocking state first
+  // STEP 1: Pre-computed blocking check (immediate exit)
   if (action._isBlocked) {
     sensor.log(action.id, 'blocked', 'pre-computed-block', {
       reason: action._blockReason
     })
     return {
       ok: false,
-      payload: null,
+      payload: undefined,
       message: action._blockReason || 'Action blocked'
     }
   }
 
-  // Fast path - direct execution
+  const originalPayload = payload ?? action.payload
+  let currentPayload = originalPayload
+
+  // STEP 2: Fast path - direct execution (no protections)
   if (action._hasFastPath) {
     sensor.log(action.id, 'info', 'fast-path-execution')
-    return useDispatch(action, payload)
+
+    // Update payload state for change detection
+    if (action._hasChangeDetection) {
+      payloadState.set(action.id, originalPayload, 'call')
+    }
+
+    return useDispatch(action, currentPayload)
   }
 
-  const originalPayload = payload ?? action.payload
-  const context: ProtectionContext = {
+  // STEP 3: Change detection (handled separately - not in pipeline)
+  if (action._hasChangeDetection) {
+    const hasChanged = payloadState.hasChanged(action.id, currentPayload)
+    if (!hasChanged) {
+      sensor.log(action.id, 'skip', 'change-detection-skip')
+      return {
+        ok: false,
+        payload: undefined,
+        message: 'Payload unchanged - execution skipped'
+      }
+    }
+  }
+
+  // STEP 4: Use compiled pipeline directly!
+  const compiledPipeline = action._protectionPipeline || []
+
+  if (compiledPipeline.length === 0) {
+    // No protections compiled - direct execution
+    return useDispatch(action, currentPayload)
+  }
+
+  // Create context for pipeline execution
+  const context = {
     action,
-    payload: originalPayload,
+    payload: currentPayload,
     originalPayload,
     metrics: io.getMetrics(action.id),
     timestamp: Date.now()
   }
 
-  const pipeline = action._protectionPipeline || []
+  // EXECUTE THE COMPILED PIPELINE FUNCTIONS DIRECTLY
+  for (let i = 0; i < compiledPipeline.length; i++) {
+    const protectionFn = compiledPipeline[i]
+    const protectionType = action._protectionTypes[i] // Use pre-computed type
 
-  // Run protection pipeline and track payload transformations
-  let currentPayload = context.payload
+    try {
+      // Call the compiled protection function
+      const result = await Promise.resolve(protectionFn(context))
 
-  for (const protection of pipeline) {
-    const result = protection(context)
+      if (!result.pass) {
+        // Handle delayed execution (debounce)
+        if (result.delayed && result.duration) {
+          return handleDebounceExecution(
+            action,
+            currentPayload,
+            result.duration
+          )
+        }
 
-    // Handle async protection functions
-    const actualResult =
-      result && typeof result.then === 'function' ? await result : result
+        // Handle blocking
+        sensor.log(action.id, protectionType, 'pipeline-protection-block', {
+          reason: result.reason,
+          protectionIndex: i,
+          protectionType
+        })
 
-    if (!actualResult.pass) {
-      // Handle delayed execution (debounce) - preserve processed payload
-      if (actualResult.delayed && actualResult.duration) {
-        sensor.debounce(
-          action.id,
-          actualResult.duration,
-          1,
-          'protection-pipeline'
-        )
-        return useDebounce(action, currentPayload, actualResult.duration)
+        return {
+          ok: false,
+          payload: undefined,
+          message: result.reason || 'Protection failed'
+        }
       }
 
-      const protectionType = extractProtectionType(actualResult.reason)
-      sensor.log(action.id, protectionType, 'protection-pipeline', {
-        reason: actualResult.reason,
-        protectionActive: true
-      })
+      // Update payload if protection transformed it
+      if (result.payload !== undefined) {
+        currentPayload = result.payload
+        context.payload = currentPayload
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      sensor.error(action.id, errorMessage, `pipeline-protection-${i}`)
 
       return {
         ok: false,
-        payload: null,
-        message: actualResult.reason
+        payload: undefined,
+        message: `Pipeline protection error: ${errorMessage}`
       }
     }
-
-    // CRITICAL: Update payload if protection modified it
-    if (actualResult.payload !== undefined) {
-      currentPayload = actualResult.payload
-      // Update context for next protection
-      context.payload = currentPayload
-    }
   }
 
-  // Determine execution path with the final transformed payload
-  if (needsScheduling(action)) {
-    return useSchedule(action, currentPayload)
+  // STEP 5: All protections passed - execute or schedule
+  if (action._isScheduled) {
+    return scheduleExecution(action, currentPayload)
   }
 
-  // Direct execution with final processed payload
+  // STEP 6: Update payload state for change detection
+  if (action._hasChangeDetection) {
+    payloadState.set(action.id, originalPayload, 'call')
+  }
+
+  // STEP 7: Final execution with transformed payload
   const result = await useDispatch(action, currentPayload)
 
-  // Handle IntraLink chain reactions
+  // Handle IntraLink chains
   if (result.ok && result.metadata?.intraLink) {
     const {id: chainId, payload: chainPayload} = result.metadata.intraLink
     try {
-      const chainResult = await call(io.get(chainId)?.id!, chainPayload)
+      const chainResult = await call(chainId, chainPayload)
       result.metadata.chainResult = chainResult
     } catch (error) {
       log.error(`IntraLink chain failed for ${chainId}: ${error}`)
-      result.metadata.chainError =
-        error instanceof Error ? error.message : String(error)
     }
   }
 
@@ -125,51 +166,186 @@ export async function processCall(
 }
 
 /**
- * Check if action needs scheduling
+ * Get protection type from compiled function metadata
  */
-function needsScheduling(action: IO): boolean {
-  return !!(
-    action.interval ||
-    action.delay !== undefined ||
-    (action.repeat !== undefined && action.repeat !== 1)
-  )
+function getProtectionType(protectionFn: Function): string {
+  // Use metadata added during compilation
+  const type = (protectionFn as any).__type
+  if (type) return type
+
+  // Fallback to analyzing function (should not happen in normal operation)
+  const funcStr = protectionFn.toString()
+  if (funcStr.includes('Throttled')) return 'throttle'
+  if (funcStr.includes('Debounced')) return 'debounce'
+  if (funcStr.includes('Schema')) return 'schema'
+  if (funcStr.includes('Condition')) return 'condition'
+  if (funcStr.includes('Selector')) return 'selector'
+  if (funcStr.includes('Transform')) return 'transform'
+
+  return 'unknown'
 }
 
 /**
- * Extract protection type from reason message for better metrics
+ * Handle debounce execution with proper timer management
  */
-function extractProtectionType(
-  reason: string
-): 'throttle' | 'blocked' | 'skip' | 'error' {
-  if (reason.includes('Throttled')) return 'throttle'
-  if (reason.includes('unchanged')) return 'skip'
-  if (reason.includes('not available')) return 'blocked'
-  if (reason.includes('Condition not met')) return 'skip'
-  if (reason.includes('Selector failed')) return 'error'
-  if (reason.includes('Transform failed')) return 'error'
-  return 'error'
-}
+function handleDebounceExecution(
+  action: IO,
+  payload: ActionPayload,
+  delay: number
+): CyreResponse {
+  // Clear existing debounce timer
+  if (action._debounceTimer) {
+    TimeKeeper.forget(action._debounceTimer)
+  }
 
-/**
- * Schedule timed execution (interval/delay/repeat)
- */
-function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
-  const interval = action.interval || action.delay || 0
-  const repeat = action.repeat ?? 1
-  const delay = action.delay
+  const timerId = `${action.id}-debounce-${Date.now()}`
+  action._debounceTimer = timerId
 
-  metricsReport.sensor.log(action.id, 'info', 'scheduling', {
-    interval,
+  // Schedule delayed execution
+  const timerResult = TimeKeeper.keep(
     delay,
-    repeat,
-    scheduledExecution: true
-  })
+    async () => {
+      try {
+        // Clear timer reference
+        action._debounceTimer = undefined
+
+        sensor.log(action.id, 'info', 'debounce-delayed-execution', {
+          executedAfterDelay: true,
+          timestamp: Date.now()
+        })
+
+        // Create context for delayed execution
+        const context = {
+          action: {...action, _bypassDebounce: true}, // Bypass debounce on re-execution
+          payload,
+          originalPayload: payload,
+          metrics: io.getMetrics(action.id),
+          timestamp: Date.now()
+        }
+
+        let currentPayload = payload
+        const pipeline = action._protectionPipeline || []
+        let debounceIndex = -1
+
+        // Find debounce protection index
+        for (let i = 0; i < pipeline.length; i++) {
+          if ((pipeline[i] as any).__type === 'debounce') {
+            debounceIndex = i
+            break
+          }
+        }
+
+        // Execute pipeline from after debounce
+        for (let i = debounceIndex + 1; i < pipeline.length; i++) {
+          const protectionFn = pipeline[i]
+          const protectionType = action._protectionTypes[i]
+
+          try {
+            const result = await Promise.resolve(protectionFn(context))
+            if (!result.pass) {
+              sensor.log(
+                action.id,
+                protectionType,
+                'pipeline-protection-block',
+                {
+                  reason: result.reason,
+                  protectionIndex: i,
+                  protectionType
+                }
+              )
+
+              return {
+                ok: false,
+                payload: undefined,
+                message: result.reason || 'Protection failed'
+              }
+            }
+
+            if (result.payload !== undefined) {
+              currentPayload = result.payload
+              context.payload = currentPayload
+            }
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error)
+            sensor.error(action.id, errorMessage, `pipeline-protection-${i}`)
+
+            return {
+              ok: false,
+              payload: undefined,
+              message: `Pipeline protection error: ${errorMessage}`
+            }
+          }
+        }
+
+        // Continue with normal execution flow
+        if (action._isScheduled) {
+          return scheduleExecution(action, currentPayload)
+        }
+
+        // Update payload state for change detection
+        if (action._hasChangeDetection) {
+          payloadState.set(action.id, currentPayload, 'call')
+        }
+
+        // Final execution with transformed payload
+        const result = await useDispatch(action, currentPayload)
+
+        // Handle IntraLink chains
+        if (result.ok && result.metadata?.intraLink) {
+          const {id: chainId, payload: chainPayload} = result.metadata.intraLink
+          try {
+            const chainResult = await call(chainId, chainPayload)
+            result.metadata.chainResult = chainResult
+          } catch (error) {
+            log.error(`IntraLink chain failed for ${chainId}: ${error}`)
+          }
+        }
+
+        return result
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        sensor.error(action.id, errorMessage, 'debounce-execution-error')
+        return {
+          ok: false,
+          payload: undefined,
+          message: `Debounce execution failed: ${errorMessage}`
+        }
+      }
+    },
+    1, // Execute once
+    timerId
+  )
+
+  if (timerResult.kind === 'error') {
+    return {
+      ok: false,
+      payload: null,
+      message: `Debounce scheduling failed: ${timerResult.error.message}`
+    }
+  }
+
+  return {
+    ok: false, // Debounce returns false initially
+    payload: null,
+    message: `Debounced - will execute in ${delay}ms`,
+    metadata: {delayed: true, duration: delay}
+  }
+}
+
+/**
+ * Schedule execution for intervals/delays
+ */
+function scheduleExecution(action: IO, payload: ActionPayload): CyreResponse {
+  const config = action._scheduleConfig!
+  const interval = config.interval || config.delay || 0
+  const repeat = config.repeat ?? 1
+  const delay = config.delay
 
   const result = TimeKeeper.keep(
     interval,
-    async () => {
-      await useDispatch(action, payload)
-    },
+    async () => await useDispatch(action, payload),
     repeat,
     action.id,
     delay
@@ -178,77 +354,15 @@ function useSchedule(action: IO, payload: ActionPayload): CyreResponse {
   if (result.kind === 'error') {
     return {
       ok: false,
-      payload: null,
-      message: `Scheduling failed: ${result.error.message}`,
-      error: result.error.message
-    }
-  }
-
-  const timingDesc =
-    delay !== undefined
-      ? `delay: ${delay}ms${
-          action.interval ? `, then interval: ${interval}ms` : ''
-        }`
-      : `interval: ${interval}ms`
-
-  return {
-    ok: true,
-    payload: null,
-    message: `Scheduled ${repeat} execution(s) with ${timingDesc}`,
-    metadata: {
-      scheduled: true,
-      interval,
-      delay,
-      repeat
-    }
-  }
-}
-
-/**
- * Schedule delayed execution (debounce) - preserves processed payload
- */
-function useDebounce(
-  action: IO,
-  payload: ActionPayload,
-  delay: number
-): CyreResponse {
-  if (action._debounceTimer) {
-    TimeKeeper.forget(action._debounceTimer)
-  }
-
-  const timerId = `${action.id}-debounce-${Date.now()}`
-  action._debounceTimer = timerId
-
-  const result = TimeKeeper.keep(
-    delay,
-    async () => {
-      action._debounceTimer = undefined
-
-      metricsReport.sensor.log(action.id, 'info', 'debounce-execution', {
-        executedAfterDelay: delay,
-        timestamp: Date.now()
-      })
-
-      // Execute directly with processed payload - bypass pipeline since it already ran
-      await useDispatch(action, payload)
-    },
-    1,
-    timerId
-  )
-
-  if (result.kind === 'error') {
-    return {
-      ok: false,
-      payload: null,
-      message: `Debounce scheduling failed: ${result.error.message}`,
-      error: result.error.message
+      payload: undefined,
+      message: `Scheduling failed: ${result.error.message}`
     }
   }
 
   return {
     ok: true,
-    payload: null,
-    message: `Debounced - will execute in ${delay}ms`,
-    metadata: {delayed: true, duration: delay}
+    payload: undefined,
+    message: 'Scheduled execution',
+    metadata: {scheduled: true, interval, delay, repeat}
   }
 }

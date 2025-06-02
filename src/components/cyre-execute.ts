@@ -1,7 +1,7 @@
 // src/components/cyre-execute.ts
 
 import {io} from '../context/state'
-import {IO, ActionPayload} from '../types/interface'
+import {IO, ActionPayload} from '../types/core'
 import {log} from './cyre-log'
 import {metricsReport} from '../context/metrics-report'
 import {MSG} from '../config/cyre-config'

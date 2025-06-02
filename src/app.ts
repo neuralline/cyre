@@ -1,7 +1,6 @@
 // src/app.ts - Updated with group system integration
 
-import type {IO, ActionPayload, CyreResponse} from './types/interface'
-import type {GroupConfig} from './types/core'
+import type {IO, ActionPayload, CyreResponse, GroupConfig} from './types/core'
 import {BREATHING, MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
@@ -9,7 +8,7 @@ import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState} from './context/metrics-state'
 import {metricsReport, sensor} from './context/metrics-report'
-import {registerSingleAction} from './components/cyre-actions'
+import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 import {stateMachineService} from './state-machine/state-machine-service'
 import {
@@ -19,13 +18,10 @@ import {
   type PersistentState
 } from './context/persistent-state'
 import schema from './schema/cyre-schema'
-import {
-  groupOperations,
-  addChannelToGroups,
-  removeChannelFromGroups
-} from './components/cyre-group'
+import {groupOperations, removeChannelFromGroups} from './components/cyre-group'
 import {awarenessBeats} from './context/awareness-beats'
 import payloadState from './context/payload-state'
+import {orchestrationAPI} from './orchestration/orchestration-engine'
 
 /* 
     Neural Line
@@ -83,59 +79,44 @@ const initializeBreathing = (): void => {
 /**
  * Action registration with async validation support
  */
-const action = async (
+const action = (
   attribute: IO | IO[]
-): Promise<{ok: boolean; message: string; payload?: any}> => {
-  if (metricsState.isLocked) {
+): {ok: boolean; message: string; payload?: any} => {
+  if (metricsState.isLocked()) {
     log.error(MSG.SYSTEM_LOCKED_CHANNELS)
     return {ok: false, message: MSG.SYSTEM_LOCKED_CHANNELS}
   }
 
   try {
     if (Array.isArray(attribute)) {
-      const results = await Promise.all(
-        attribute.map(async singleAction => {
-          const result = await registerSingleAction(singleAction)
-          if (result.ok) {
-            addChannelToGroups(singleAction.id)
-            const recompileResult = await registerSingleAction(singleAction)
-            persistence.autoSave()
-            return recompileResult
-          }
-          return result
-        })
-      )
+      const results = attribute.map(singleAction => {
+        const result = CyreActions(singleAction)
+        if (result.ok) {
+          persistence.autoSave()
+        }
+        return result
+      })
 
       const successful = results.filter(r => r.ok).length
-      const total = results.length
-
       return {
         ok: successful > 0,
-        message: `Registered ${successful}/${total} actions`,
+        message: `Registered ${successful}/${results.length} actions`,
         payload: results
       }
     } else {
-      const result = await registerSingleAction(attribute)
+      const result = CyreActions(attribute)
+
       if (result.ok) {
-        addChannelToGroups(attribute.id)
-        const recompileResult = await registerSingleAction(attribute)
         persistence.autoSave()
-        return recompileResult
       }
+
       return result
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     log.error(`Action registration failed: ${errorMessage}`)
-
-    sensor.log('system', 'error', 'action-registration', {
-      error: errorMessage
-    })
-
-    return {
-      ok: false,
-      message: `Action registration failed: ${errorMessage}`
-    }
+    sensor.log('system', 'error', 'action-registration', {error: errorMessage})
+    return {ok: false, message: `Action registration failed: ${errorMessage}`}
   }
 }
 
@@ -146,7 +127,6 @@ export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
-  // Fast validation
   if (!id || typeof id !== 'string') {
     sensor.log('unknown', 'error', 'call-validation', {
       invalidId: true,
@@ -616,5 +596,14 @@ export const cyre = {
 
   getChannelGroups: (channelId: string) => {
     return groupOperations.getChannelGroups(channelId)
+  },
+
+  orchestration: {
+    create: orchestrationAPI.create,
+    start: orchestrationAPI.start,
+    stop: orchestrationAPI.stop,
+    get: orchestrationAPI.get,
+    list: orchestrationAPI.list,
+    remove: orchestrationAPI.remove
   }
 }
