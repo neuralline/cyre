@@ -1,13 +1,13 @@
 // src/components/cyre-actions.ts
-// v8 : increase this every time you update actions
+// Action registration with talent compilation and optimization
 
 import {sensor} from '../context/metrics-report'
-import type {IO, ProtectionFn} from '../types/core'
-import {dataDefinitions} from '../schema/data-definitions'
+import type {IO} from '../types/core'
 import {addChannelToGroups, getChannelGroups} from './cyre-group'
 import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
 import {io} from '../context/state'
+import {compileAction} from '../schema/data-definitions'
 
 /*
 
@@ -26,6 +26,16 @@ import {io} from '../context/state'
             detectChanges, priority, required
         Scheduling Talents:
             interval, delay, repeat
+
+
+
+      C.Y.R.E - A.C.T.I.O.N.S
+
+      Action registration with talent compilation:
+      1. Validate basic structure
+      2. Compile action with talent discovery
+      3. Set optimization flags
+      4. Store compiled action
 
 */
 
@@ -60,7 +70,7 @@ const validateChannelId = (action: any): {valid: boolean; error?: string} => {
 }
 
 /**
- * Cross-attribute validation (timing relationships, etc.)
+ * Cross-attribute validation
  */
 const validateCrossAttributes = (action: Partial<IO>): string[] => {
   const errors: string[] = []
@@ -96,134 +106,29 @@ export const CyreActions = (action: IO): RegistrationResult => {
   try {
     // 1. Validate ID requirements
     const idValidation = validateChannelId(action)
-
     if (!idValidation.valid) {
       sensor.error(
         action?.id || 'unknown',
         idValidation.error!,
         'action-validation'
       )
-      return {
-        ok: false,
-        message: idValidation.error!
-      }
+      return {ok: false, message: idValidation.error!}
     }
 
     // 2. Check if channel exists
     const exists = io.get(action.id) !== undefined
     const now = Date.now()
 
-    // 3. Set defaults
-    const channel = {
+    // 3. Add timestamps and defaults
+    const actionWithDefaults = {
+      ...action,
       timeOfCreation: now,
       timestamp: now,
-      ...action,
       type: action.type || action.id
-    } as IO
-
-    // 4. Single-pass validation and pipeline compilation
-    const validatedAction: Partial<IO> = {}
-    const errors: string[] = []
-    const pipeline: ProtectionFn[] = []
-    let requiresPayloadCheck = false
-    let hasChangeDetection = false
-
-    // Create a Map of validators for faster lookups
-    const definition = new Map(Object.entries(dataDefinitions))
-
-    // Only process properties that have validators
-    for (const [key, value] of Object.entries(channel)) {
-      const validator = definition.get(key)
-
-      if (validator) {
-        const result = validator(value, pipeline)
-
-        if (!result.ok) {
-          // Early termination for blocking conditions
-          if (result.blocking) {
-            return {
-              ok: false,
-              message: result.error!,
-              payload: {
-                ...channel,
-                _isBlocked: true,
-                _blockReason: result.error!,
-                _hasFastPath: false,
-                _protectionPipeline: []
-              } as IO
-            }
-          }
-          errors.push(`${key}: ${result.error}`)
-        } else {
-          validatedAction[key] = result.data
-
-          if (result.requiresPayloadCheck) {
-            requiresPayloadCheck = true
-          }
-
-          if (key === 'detectChanges' && result.data === true) {
-            hasChangeDetection = true
-          }
-        }
-      } else {
-        validatedAction[key] = value
-      }
     }
 
-    // Early exit if validation failed
-    if (errors.length > 0) {
-      return {
-        ok: false,
-        message: `Validation failed: ${errors.join(', ')}`,
-        errors
-      }
-    }
-
-    // Required payload check
-    if (requiresPayloadCheck && validatedAction.required) {
-      if (
-        validatedAction.required === true &&
-        validatedAction.payload === undefined
-      ) {
-        return {
-          ok: false,
-          message: 'Required payload not provided',
-          payload: {
-            ...validatedAction,
-            _isBlocked: true,
-            _blockReason: 'Required payload not provided',
-            _hasFastPath: false,
-            _protectionPipeline: []
-          } as IO
-        }
-      }
-
-      if (validatedAction.required === 'non-empty') {
-        const payload = validatedAction.payload
-        if (
-          payload === undefined ||
-          payload === null ||
-          payload === '' ||
-          (Array.isArray(payload) && payload.length === 0) ||
-          (typeof payload === 'object' && Object.keys(payload).length === 0)
-        ) {
-          return {
-            ok: false,
-            message: 'Non-empty payload required',
-            payload: {
-              ...validatedAction,
-              _isBlocked: true,
-              _blockReason: 'Non-empty payload required',
-              _hasFastPath: false,
-              _protectionPipeline: []
-            } as IO
-          }
-        }
-      }
-    }
-
-    // Cross-attribute validation
-    const crossValidationErrors = validateCrossAttributes(validatedAction)
+    // 4. Cross-attribute validation
+    const crossValidationErrors = validateCrossAttributes(actionWithDefaults)
     if (crossValidationErrors.length > 0) {
       return {
         ok: false,
@@ -232,86 +137,39 @@ export const CyreActions = (action: IO): RegistrationResult => {
       }
     }
 
-    // FIXED: Determine fast path correctly
-    // Fast path only if NO pipeline protections AND NO change detection
-    const hasFastPath = pipeline.length === 0 && !hasChangeDetection
+    // 5. COMPILE ACTION WITH TALENT DISCOVERY
+    const compilation = compileAction(actionWithDefaults)
 
-    // Pre-determine scheduling status
-    const isScheduled = !!(
-      validatedAction.interval ||
-      validatedAction.delay !== undefined ||
-      (validatedAction.repeat !== undefined && validatedAction.repeat !== 1)
-    )
+    if (compilation.errors.length > 0) {
+      // Handle blocking conditions
+      if (compilation.compiledAction._isBlocked) {
+        io.set(compilation.compiledAction)
+        return {
+          ok: false,
+          message: compilation.compiledAction._blockReason!,
+          payload: compilation.compiledAction
+        }
+      }
 
-    // Pre-compute payload requirements
-    const requiresPayload =
-      validatedAction.required === true ||
-      validatedAction.required === 'non-empty' ||
-      validatedAction.detectChanges === true
-
-    // Pre-compute protection types for faster runtime lookups
-    const protectionTypes = pipeline.map(fn => {
-      const funcStr = fn.toString()
-      if (funcStr.includes('Throttled')) return 'throttle'
-      if (funcStr.includes('Debounced')) return 'debounce'
-      if (funcStr.includes('Schema')) return 'schema'
-      if (funcStr.includes('Condition')) return 'condition'
-      if (funcStr.includes('Selector')) return 'selector'
-      if (funcStr.includes('Transform')) return 'transform'
-      return 'unknown'
-    })
-
-    // Reorder pipeline to put block, throttle, debounce at the top
-    if (pipeline.length > 0) {
-      const criticalProtections = pipeline.filter(fn => {
-        const funcStr = fn.toString()
-        return funcStr.includes('Throttled') || funcStr.includes('Debounced')
-      })
-
-      const otherProtections = pipeline.filter(fn => {
-        const funcStr = fn.toString()
-        return !funcStr.includes('Throttled') && !funcStr.includes('Debounced')
-      })
-
-      pipeline.length = 0 // Clear pipeline
-      pipeline.push(...criticalProtections, ...otherProtections) // Reorder
+      return {
+        ok: false,
+        message: `Compilation failed: ${compilation.errors.join(', ')}`,
+        errors: compilation.errors
+      }
     }
 
-    const finalAction: IO = {
-      ...validatedAction,
-      _isBlocked: false,
-      _hasFastPath: hasFastPath,
-      _protectionPipeline: pipeline,
-      _isScheduled: isScheduled,
-      _scheduleConfig: isScheduled
-        ? {
-            interval: validatedAction.interval,
-            delay: validatedAction.delay,
-            repeat: validatedAction.repeat
-          }
-        : undefined,
-      _requiresPayload: requiresPayload,
-      _hasChangeDetection: validatedAction.detectChanges === true,
-      _protectionTypes: protectionTypes, // Store pre-computed protection types
-      _executionConfig: {
-        hasFastPath,
-        isScheduled,
-        requiresPayload,
-        hasChangeDetection: validatedAction.detectChanges === true,
-        protectionCount: pipeline.length
-      }
-    } as IO
+    const finalAction = compilation.compiledAction
 
-    // Add to groups
+    // 6. Add to groups
     addChannelToGroups(finalAction.id)
 
-    // Store compiled action
+    // 7. Store compiled action
     io.set(finalAction)
 
-    // Initialize payload state if provided
-    if ('payload' in channel && channel.payload !== undefined) {
+    // 8. Initialize payload state if provided
+    if ('payload' in action && action.payload !== undefined) {
       try {
-        payloadState.set(finalAction.id, channel.payload, 'initial')
+        payloadState.set(finalAction.id, action.payload, 'initial')
       } catch (error) {
         log.warn(
           `Payload initialization failed for ${finalAction.id}: ${error}`
@@ -319,30 +177,38 @@ export const CyreActions = (action: IO): RegistrationResult => {
       }
     }
 
-    // Logging and metrics
+    // 9. Generate status message based on compilation results
     const channelGroups = getChannelGroups(finalAction.id)
-    const protectionCount = pipeline.length
-    const isBlocked = finalAction._isBlocked
-
-    const statusMsg = isBlocked
-      ? `BLOCKED: ${finalAction._blockReason}`
-      : hasFastPath
-      ? 'FAST PATH (no protections)'
-      : `${protectionCount} protections compiled`
-
     const actionMessage = exists ? 'Action updated' : 'Action registered'
+
+    let statusMsg: string
+    if (finalAction._hasFastPath) {
+      statusMsg = 'Fast path (no talents)'
+    } else {
+      const features: string[] = []
+      if (finalAction._hasProtections) features.push('protections')
+      if (finalAction._hasProcessing) {
+        const talentCount = finalAction._processingTalents?.length || 0
+        features.push(`${talentCount} processing talents`)
+      }
+      if (finalAction._hasScheduling) features.push('scheduling')
+      statusMsg = features.join(', ')
+    }
 
     log.debug(`${actionMessage} ${finalAction.id}: ${statusMsg}`)
 
     sensor.log(finalAction.id, 'info', 'action-registration', {
       isUpdate: exists,
-      attributeCount: Object.keys(channel).length,
-      pipelineLength: protectionCount,
-      hasFastPath,
-      hasChangeDetection, // Include change detection info
-      isBlocked: false,
+      attributeCount: Object.keys(action).length,
+      hasFastPath: finalAction._hasFastPath,
+      hasProtections: finalAction._hasProtections,
+      hasProcessing: finalAction._hasProcessing,
+      hasScheduling: finalAction._hasScheduling,
+      processingTalents: finalAction._processingTalents,
+      isBlocked: finalAction._isBlocked,
       groupCount: channelGroups.length,
-      groupIds: channelGroups.map(g => g.id)
+      groupIds: channelGroups.map(g => g.id),
+      compilationSuccess: true
     })
 
     return {

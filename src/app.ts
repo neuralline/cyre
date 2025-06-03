@@ -18,19 +18,13 @@ import {
 } from './context/persistent-state'
 import schema from './schema/cyre-schema'
 import {groupOperations, removeChannelFromGroups} from './components/cyre-group'
-import {awarenessBeats} from './context/awareness-beats'
 import payloadState from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
 import {query, initializeQuerySystem} from './query/cyre-query'
-import {
-  initializeSystemOrchestrations,
-  getSystemOrchestrationStatus,
-  adaptSystemOrchestrations
-} from './orchestration/system-orchestrations'
 import type {OrchestrationConfig} from './types/orchestration'
-import {registerSystemHandlers} from './schema/system-handlers'
+import {debounce, throttle} from './schema/talent-definitions'
 
 /* 
     Neural Line
@@ -282,6 +276,62 @@ export const call = async (
       message: `Channel not found: ${id}`
     }
   }
+
+  let response = {}
+
+  // STEP 1: Pre-computed blocking check (immediate exit)
+  if (action._isBlocked) {
+    sensor.log(action.id, 'blocked', 'pre-computed-block', {
+      reason: action._blockReason
+    })
+    return {
+      ok: false,
+      payload: undefined,
+      message: action._blockReason || 'Action blocked'
+    }
+  }
+
+  const originalPayload = payload ?? action.payload
+  let currentPayload = originalPayload
+
+  if (action.throttle && action.throttle > 0) {
+    const response = throttle(action, action.payload)
+    if (!response.ok)
+      return {
+        ok: false,
+        payload: undefined,
+        message: response.message || 'throttled'
+      }
+  } //throttle check
+
+  if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
+    const response = debounce(action, action.payload)
+  }
+
+  if (!response.ok) {
+    // Debounce blocked the call
+
+    // No delay configured, just block
+    sensor.log(action.id, 'debounce', 'call-blocked', {
+      reason: response.message,
+      debounceMs: action.debounce
+    })
+
+    return {
+      ok: false,
+      payload: undefined,
+      message: response.message || 'Debounced',
+      metadata: {
+        debounced: true
+      }
+    }
+  }
+
+  // Debounce passed (maxWait exceeded or bypass), continue with execution
+  sensor.log(action.id, 'info', 'debounce-passed', {
+    reason: response.message,
+    bypassDebounce: action._bypassDebounce
+  })
 
   const callStartTime = Date.now()
   try {

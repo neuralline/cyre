@@ -1,75 +1,73 @@
-// src/schema/data-definitions-fixed.ts
-// Fixed data-definitions with proper pipeline compilation order
+// src/schema/data-definitions.ts
+// Data validation with talent discovery and flag setting
 
 import {schema} from '../schema/cyre-schema'
 import type {IO, ActionPayload} from '../types/core'
+import {hasTalent, type TalentName} from './talent-definitions'
 
 /*
 
-      C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S - F.I.X.E.D
+      C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S
       
-      Fixed pipeline compilation order:
-      1. System protections first (throttle, debounce)
-      2. User protections in order (schema, condition, selector, transform)
-      3. Proper change detection integration
-      4. Correct blocking logic
+      Data validation with talent integration:
+      - Validates all user inputs
+      - Sets flags for call processor optimization  
+      - Discovers talents by field name matching
+      - No pipeline creation for protection talents
 
 */
-
-interface ProtectionFn {
-  (ctx: ProtectionContext): ProtectionResult | Promise<ProtectionResult>
-}
-
-interface ProtectionContext {
-  action: IO
-  payload: ActionPayload
-  originalPayload: ActionPayload
-  metrics: any
-  timestamp: number
-}
-
-interface ProtectionResult {
-  pass: boolean
-  payload?: ActionPayload
-  reason?: string
-  delayed?: boolean
-  duration?: number
-}
 
 interface DataDefResult {
   ok: boolean
   data?: any
   error?: string
-  // Pipeline compilation flags
   blocking?: boolean
-  protectionFn?: ProtectionFn
-  protectionOrder?: number // NEW: Order priority
-  requiresPayloadCheck?: boolean
+  talentName?: TalentName
 }
 
-// Protection order constants
-const PROTECTION_ORDER = {
-  THROTTLE: 1,
-  DEBOUNCE: 2,
-  SCHEMA: 3,
-  CONDITION: 4,
-  SELECTOR: 5,
-  TRANSFORM: 6,
-  CHANGE_DETECTION: 7
+// Talent categories for optimization flags
+const PROTECTION_TALENTS = [
+  'block',
+  'throttle',
+  'debounce',
+  'recuperation'
+] as const
+const PROCESSING_TALENTS = [
+  'schema',
+  'condition',
+  'selector',
+  'transform',
+  'detectChanges',
+  'required'
+] as const
+const SCHEDULING_TALENTS = ['interval'] as const
+
+// Helper to check if field maps to talent
+const discoverTalent = (fieldName: string): TalentName | null => {
+  if (hasTalent(fieldName)) {
+    return fieldName as TalentName
+  }
+
+  // Special cases for compound talents
+  if (['interval', 'delay', 'repeat'].includes(fieldName)) {
+    return 'interval' // All scheduling fields map to interval talent
+  }
+
+  return null
 }
 
-// Fixed data-definitions with proper ordering
+// Main data definitions with talent discovery
 export const dataDefinitions = {
   // Core required - can block
-  id: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  id: (value: any): DataDefResult => {
     if (typeof value !== 'string' || value.length === 0) {
       return {ok: false, error: 'ID must be non-empty string', blocking: true}
     }
     return {ok: true, data: value}
   },
 
-  // Blocking conditions - immediate termination
-  repeat: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  // Blocking conditions
+  repeat: (value: any): DataDefResult => {
     if (typeof value !== 'number' && typeof value !== 'boolean') {
       return {ok: false, error: 'Repeat must be number or boolean'}
     }
@@ -83,209 +81,101 @@ export const dataDefinitions = {
         blocking: true
       }
     }
-    return {ok: true, data: value}
+    return {ok: true, data: value, talentName: 'interval'}
   },
 
-  block: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  block: (value: any): DataDefResult => {
     if (typeof value !== 'boolean') {
       return {ok: false, error: 'Block must be boolean'}
     }
     if (value === true) {
       return {ok: false, error: 'Service not available', blocking: true}
     }
-    return {ok: true, data: value}
+    return {ok: true, data: value, talentName: 'block'}
   },
 
-  required: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
-    if (typeof value !== 'boolean' && value !== 'non-empty') {
-      return {ok: false, error: 'Required must be boolean or "non-empty"'}
-    }
-    return {ok: true, data: value, requiresPayloadCheck: true}
-  },
-
-  // FIXED: Throttle - system protection (order 1)
-  throttle: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  // Protection talents (pre-pipeline)
+  throttle: (value: any): DataDefResult => {
     if (typeof value !== 'number' || value < 0) {
       return {ok: false, error: 'Throttle must be non-negative number'}
     }
-
-    if (value > 0) {
-      const throttleProtection: ProtectionFn = (ctx: ProtectionContext) => {
-        const lastExec = ctx.metrics?.lastExecutionTime || 0
-        if (lastExec === 0) return {pass: true}
-
-        const elapsed = ctx.timestamp - lastExec
-        if (elapsed < value) {
-          const remaining = value - elapsed
-          return {pass: false, reason: `Throttled - ${remaining}ms remaining`}
-        }
-        return {pass: true}
-      }
-
-      // Insert at correct position based on order
-      insertProtectionByOrder(
-        pipeline,
-        throttleProtection,
-        PROTECTION_ORDER.THROTTLE
-      )
-    }
-
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.THROTTLE}
+    return {ok: true, data: value, talentName: 'throttle'}
   },
 
-  // FIXED: Debounce - system protection (order 2)
-  debounce: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  debounce: (value: any): DataDefResult => {
     if (typeof value !== 'number' || value < 0) {
       return {ok: false, error: 'Debounce must be non-negative number'}
     }
-
-    if (value > 0) {
-      const debounceProtection: ProtectionFn = () => ({
-        pass: false,
-        reason: `Debounced - will execute in ${value}ms`,
-        delayed: true,
-        duration: value
-      })
-
-      insertProtectionByOrder(
-        pipeline,
-        debounceProtection,
-        PROTECTION_ORDER.DEBOUNCE
-      )
-    }
-
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.DEBOUNCE}
+    return {ok: true, data: value, talentName: 'debounce'}
   },
 
-  // FIXED: Schema - user protection (order 3)
-  schema: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  // Processing talents (pipeline)
+  schema: (value: any): DataDefResult => {
     if (!value || typeof value !== 'function') {
       return {ok: false, error: 'Schema must be a validation function'}
     }
-
-    const schemaProtection: ProtectionFn = (ctx: ProtectionContext) => {
-      try {
-        const result = value(ctx.payload)
-        if (!result.ok) {
-          return {
-            pass: false,
-            reason: `Schema validation failed: ${result.errors.join(', ')}`
-          }
-        }
-        return {pass: true, payload: result.data}
-      } catch (error) {
-        return {
-          pass: false,
-          reason: `Schema error: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        }
-      }
-    }
-
-    insertProtectionByOrder(pipeline, schemaProtection, PROTECTION_ORDER.SCHEMA)
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.SCHEMA}
+    return {ok: true, data: value, talentName: 'schema'}
   },
 
-  // FIXED: Condition - user protection (order 4)
-  condition: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  condition: (value: any): DataDefResult => {
     if (typeof value !== 'function') {
       return {ok: false, error: 'Condition must be a function'}
     }
-
-    const conditionProtection: ProtectionFn = (ctx: ProtectionContext) => {
-      try {
-        const conditionMet = value(ctx.payload)
-        if (!conditionMet) {
-          return {pass: false, reason: 'Condition not met - execution skipped'}
-        }
-        return {pass: true}
-      } catch (error) {
-        return {
-          pass: false,
-          reason: `Condition error: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        }
-      }
-    }
-
-    insertProtectionByOrder(
-      pipeline,
-      conditionProtection,
-      PROTECTION_ORDER.CONDITION
-    )
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.CONDITION}
+    return {ok: true, data: value, talentName: 'condition'}
   },
 
-  // FIXED: Selector - user protection (order 5)
-  selector: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  selector: (value: any): DataDefResult => {
     if (typeof value !== 'function') {
       return {ok: false, error: 'Selector must be a function'}
     }
-
-    const selectorProtection: ProtectionFn = (ctx: ProtectionContext) => {
-      try {
-        const selectedData = value(ctx.payload)
-        return {pass: true, payload: selectedData}
-      } catch (error) {
-        return {
-          pass: false,
-          reason: `Selector error: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        }
-      }
-    }
-
-    insertProtectionByOrder(
-      pipeline,
-      selectorProtection,
-      PROTECTION_ORDER.SELECTOR
-    )
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.SELECTOR}
+    return {ok: true, data: value, talentName: 'selector'}
   },
 
-  // FIXED: Transform - user protection (order 6)
-  transform: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  transform: (value: any): DataDefResult => {
     if (typeof value !== 'function') {
       return {ok: false, error: 'Transform must be a function'}
     }
-
-    const transformProtection: ProtectionFn = (ctx: ProtectionContext) => {
-      try {
-        const transformedPayload = value(ctx.payload)
-        return {pass: true, payload: transformedPayload}
-      } catch (error) {
-        return {
-          pass: false,
-          reason: `Transform error: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        }
-      }
-    }
-
-    insertProtectionByOrder(
-      pipeline,
-      transformProtection,
-      PROTECTION_ORDER.TRANSFORM
-    )
-    return {ok: true, data: value, protectionOrder: PROTECTION_ORDER.TRANSFORM}
+    return {ok: true, data: value, talentName: 'transform'}
   },
 
-  // FIXED: Change detection - special handling (not in pipeline)
-  detectChanges: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  detectChanges: (value: any): DataDefResult => {
     if (typeof value !== 'boolean') {
       return {ok: false, error: 'DetectChanges must be boolean'}
     }
+    return {ok: true, data: value, talentName: 'detectChanges'}
+  },
 
-    // Change detection is handled separately in processCall, not in pipeline
+  required: (value: any): DataDefResult => {
+    if (typeof value !== 'boolean' && value !== 'non-empty') {
+      return {ok: false, error: 'Required must be boolean or "non-empty"'}
+    }
+    return {ok: true, data: value, talentName: 'required'}
+  },
+
+  // Scheduling talents (post-pipeline)
+  interval: (value: any): DataDefResult => {
+    if (typeof value !== 'number' || value < 0) {
+      return {ok: false, error: 'Interval must be non-negative number'}
+    }
+    return {ok: true, data: value, talentName: 'interval'}
+  },
+
+  delay: (value: any): DataDefResult => {
+    if (typeof value !== 'number' || value < 0) {
+      return {ok: false, error: 'Delay must be non-negative number'}
+    }
+    return {ok: true, data: value, talentName: 'interval'}
+  },
+
+  maxWait: (value: any): DataDefResult => {
+    if (typeof value !== 'number' || value < 0) {
+      return {ok: false, error: 'MaxWait must be non-negative number'}
+    }
     return {ok: true, data: value}
   },
 
-  // Priority - complex validation (unchanged)
-  priority: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  // Priority validation
+  priority: (value: any): DataDefResult => {
     if (typeof value !== 'object' || value === null) {
       return {ok: false, error: 'Priority must be an object'}
     }
@@ -310,120 +200,126 @@ export const dataDefinitions = {
     return {ok: true, data: result.data}
   },
 
-  // Simple validations - no pipeline additions (unchanged)
-  interval: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
-    if (typeof value !== 'number' || value < 0) {
-      return {ok: false, error: 'Interval must be non-negative number'}
-    }
-    return {ok: true, data: value}
-  },
-
-  delay: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
-    if (typeof value !== 'number' || value < 0) {
-      return {ok: false, error: 'Delay must be non-negative number'}
-    }
-    return {ok: true, data: value}
-  },
-
-  maxWait: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
-    if (typeof value !== 'number' || value < 0) {
-      return {ok: false, error: 'MaxWait must be non-negative number'}
-    }
-    return {ok: true, data: value}
-  },
-
-  log: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  // Simple validations
+  log: (value: any): DataDefResult => {
     if (typeof value !== 'boolean') {
       return {ok: false, error: 'Log must be boolean'}
     }
     return {ok: true, data: value}
   },
 
-  middleware: (value: any, pipeline: ProtectionFn[]): DataDefResult => {
+  middleware: (value: any): DataDefResult => {
     if (!Array.isArray(value)) {
       return {ok: false, error: 'Middleware must be an array'}
     }
     return {ok: true, data: value}
   },
 
-  // Pass-through attributes (unchanged)
-  type: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  payload: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  group: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  tags: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
+  // Pass-through attributes
+  type: (value: any): DataDefResult => ({ok: true, data: value}),
+  payload: (value: any): DataDefResult => ({ok: true, data: value}),
+  group: (value: any): DataDefResult => ({ok: true, data: value}),
+  tags: (value: any): DataDefResult => ({ok: true, data: value}),
 
-  // Internal fields (unchanged)
-  _protectionPipeline: (
-    value: any,
-    pipeline: ProtectionFn[]
-  ): DataDefResult => ({ok: true, data: value}),
-  _debounceTimer: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  _bypassDebounce: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  _isBlocked: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  _blockReason: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  _hasFastPath: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  timestamp: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  }),
-  timeOfCreation: (value: any, pipeline: ProtectionFn[]): DataDefResult => ({
-    ok: true,
-    data: value
-  })
+  // Internal fields (optimization flags)
+  _hasFastPath: (value: any): DataDefResult => ({ok: true, data: value}),
+  _hasProtections: (value: any): DataDefResult => ({ok: true, data: value}),
+  _hasProcessing: (value: any): DataDefResult => ({ok: true, data: value}),
+  _hasScheduling: (value: any): DataDefResult => ({ok: true, data: value}),
+  _processingTalents: (value: any): DataDefResult => ({ok: true, data: value}),
+  _debounceTimer: (value: any): DataDefResult => ({ok: true, data: value}),
+  _bypassDebounce: (value: any): DataDefResult => ({ok: true, data: value}),
+  _firstDebounceCall: (value: any): DataDefResult => ({ok: true, data: value}),
+  _isBlocked: (value: any): DataDefResult => ({ok: true, data: value}),
+  _blockReason: (value: any): DataDefResult => ({ok: true, data: value}),
+  timestamp: (value: any): DataDefResult => ({ok: true, data: value}),
+  timeOfCreation: (value: any): DataDefResult => ({ok: true, data: value})
 } as const
 
 /**
- * Insert protection function at correct position based on order
+ * Compile action with talent discovery and pipeline building
  */
-function insertProtectionByOrder(
-  pipeline: ProtectionFn[],
-  protection: ProtectionFn,
-  order: number
-): void {
-  // Add order metadata to function for sorting
-  ;(protection as any).__order = order
+export const compileAction = (
+  action: Partial<IO>
+): {
+  compiledAction: IO
+  errors: string[]
+  hasFastPath: boolean
+} => {
+  const errors: string[] = []
+  const compiledAction: Partial<IO> = {}
+  const processingPipeline: TalentName[] = []
 
-  // Insert protection
-  pipeline.push(protection)
+  // Track talent categories
+  let hasProtections = false
+  let hasScheduling = false
 
-  // Sort pipeline by order
-  pipeline.sort((a, b) => {
-    const orderA = (a as any).__order || 999
-    const orderB = (b as any).__order || 999
-    return orderA - orderB
-  })
+  // Process fields in order to preserve user-defined execution sequence
+  const actionKeys = Object.keys(action)
+
+  for (const key of actionKeys) {
+    const value = action[key as keyof typeof action]
+    const definition = dataDefinitions[key as keyof typeof dataDefinitions]
+
+    if (definition) {
+      const result = definition(value)
+
+      if (!result.ok) {
+        if (result.blocking) {
+          // Early return for blocking conditions
+          return {
+            compiledAction: {
+              ...action,
+              _isBlocked: true,
+              _blockReason: result.error!
+            } as IO,
+            errors: [result.error!],
+            hasFastPath: false
+          }
+        }
+        errors.push(`${key}: ${result.error}`)
+      } else {
+        compiledAction[key as keyof IO] = result.data
+
+        // Build pipeline based on talent category
+        if (result.talentName) {
+          if (PROTECTION_TALENTS.includes(result.talentName as any)) {
+            hasProtections = true
+          } else if (PROCESSING_TALENTS.includes(result.talentName as any)) {
+            // Add to pipeline in user-defined order
+            processingPipeline.push(result.talentName)
+          } else if (SCHEDULING_TALENTS.includes(result.talentName as any)) {
+            hasScheduling = true
+          }
+        }
+      }
+    } else {
+      // Pass through unknown fields
+      compiledAction[key as keyof IO] = value
+    }
+  }
+
+  // Set optimization flags
+  const hasProcessing = processingPipeline.length > 0
+  const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
+
+  // Build final compiled action
+  const finalAction: IO = {
+    ...compiledAction,
+    _hasFastPath: hasFastPath,
+    _hasProtections: hasProtections,
+    _hasProcessing: hasProcessing,
+    _hasScheduling: hasScheduling,
+    _processingPipeline: processingPipeline, // Save compiled pipeline
+    _isBlocked: false
+  } as IO
+
+  return {
+    compiledAction: finalAction,
+    errors,
+    hasFastPath
+  }
 }
 
-/**
- * Get pipeline execution order for debugging
- */
-export function getPipelineOrder(pipeline: ProtectionFn[]): number[] {
-  return pipeline.map(fn => (fn as any).__order || 999)
-}
+// Remove redundant function - pipeline is now built during compilation
+// export const getProcessingTalentsInOrder = (action: IO): TalentName[] => {

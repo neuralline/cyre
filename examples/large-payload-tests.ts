@@ -1,8 +1,8 @@
 // tests/performance/large-payload-tests.ts
 // Test Cyre with realistic large JSON payloads
 
-import {cyre} from '../../src'
-import type {ActionPayload} from '../../src/types/core'
+import {cyre} from '../src'
+import type {ActionPayload} from '../src/types/core'
 
 // ops/s = operations per second (how many cyre.call() can complete per second)
 

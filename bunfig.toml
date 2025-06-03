@@ -9,7 +9,7 @@ production = false
 
 [test]
 # Test configuration
-coverage = true
+#coverage = true
 timeout = 30000
 preload = ["./test/setup.ts"]
 

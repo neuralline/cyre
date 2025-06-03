@@ -9,7 +9,7 @@
     "allowJs": true,
     "checkJs": false,
     "jsx": "preserve",
-    "declaration": false,
+    "declaration": true,
     "declarationMap": false,
     "sourceMap": true,
     "outDir": "./dist",
@@ -50,6 +50,6 @@
       "cyre/*": ["src/*"]
     }
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "coverage", "**/*.d.ts"]
 }

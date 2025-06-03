@@ -37,6 +37,7 @@
   "scripts": {
     "dev": "bun run build --watch",
     "build": "bun run clean && bun run build:types && bun run build:esm && bun run build:cjs",
+    "build:vite": " bun run clean &&  vite build &&  vite build:types ",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
     "build:esm": "bun build ./src/index.ts --outdir ./dist --format esm --splitting --chunk-naming '[name]-[hash].js'",
     "build:cjs": "bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs",
