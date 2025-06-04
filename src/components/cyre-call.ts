@@ -1,22 +1,25 @@
 // src/components/cyre-call.ts
-// Updated call processor with debounce talent integration before pipeline
+// Call processor with proper talent pipeline integration
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
 import {sensor} from '../context/metrics-report'
 import {io} from '../context/state'
 import payloadState from '../context/payload-state'
-import {scheduleExecution} from '../schema/talent-definitions'
+import {
+  scheduleExecution,
+  executeProcessingPipeline
+} from '../schema/talent-definitions'
 
 /*
 
-      C.Y.R.E - C.A.L.L - W.I.T.H - D.E.B.O.U.N.C.E
+      C.Y.R.E - C.A.L.L - P.R.O.C.E.S.S.O.R
       
-      Updated call flow with debounce talent integration:
-      1. Execute debounce talent BEFORE pipeline
-      2. If debounced, schedule callback to processCall after delay
-      3. If allowed, continue with normal pipeline execution
-      4. Debounce talent manages its own state and timing
+      Call flow with proper talent pipeline integration:
+      1. Execute processing talents pipeline (selector, condition, transform, etc.)
+      2. Check for scheduling requirements (interval/delay/repeat)
+      3. Update payload state for change detection
+      4. Dispatch to final handler
 
 */
 
@@ -24,93 +27,87 @@ export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
-  sensor.log(action.id, 'call', 'call-initiation', {
+  sensor.log(action.id, 'call', 'call-processing', {
     timestamp: Date.now(),
-    hasPayload: payload !== undefined
+    hasPayload: payload !== undefined,
+    hasFastPath: action._hasFastPath,
+    hasProcessing: action._hasProcessing,
+    hasScheduling: action._hasScheduling
   })
 
   const originalPayload = payload ?? action.payload
   let currentPayload = originalPayload
 
-  // STEP 2: DEBOUNCE TALENT EXECUTION (Before Pipeline)
-
-  // STEP 3: Continue with existing pipeline logic
-  const compiledPipeline = action._protectionPipeline || []
-
-  if (compiledPipeline.length === 0) {
-    // No protections compiled - direct execution
+  // STEP 1: Fast path check - no processing needed
+  if (action._hasFastPath) {
     sensor.log(action.id, 'info', 'fast-path-execution')
-    return useDispatch(action, currentPayload)
+    return await useDispatch(action, currentPayload)
   }
 
-  // Create context for pipeline execution
-  const context = {
-    action,
-    payload: currentPayload,
-    originalPayload,
-    metrics: io.getMetrics(action.id),
-    timestamp: Date.now()
-  }
+  // STEP 2: Execute processing talents pipeline
+  if (action._hasProcessing) {
+    sensor.log(action.id, 'info', 'processing-pipeline-start', {
+      talents: action._processingTalents || []
+    })
 
-  // EXECUTE THE COMPILED PIPELINE FUNCTIONS (excluding debounce)
-  for (let i = 0; i < compiledPipeline.length; i++) {
-    const protectionFn = compiledPipeline[i]
-    const protectionType = action._protectionTypes?.[i] || 'unknown'
+    const pipelineResult = executeProcessingPipeline(action, currentPayload)
 
-    // Skip debounce protection since we handled it already
-    if (protectionType === 'debounce') {
-      continue
-    }
-
-    try {
-      // Call the compiled protection function
-      const result = await Promise.resolve(protectionFn(context))
-
-      if (!result.pass) {
-        // Handle blocking
-        sensor.log(action.id, protectionType, 'pipeline-protection-block', {
-          reason: result.reason,
-          protectionIndex: i,
-          protectionType
-        })
-
-        return {
-          ok: false,
-          payload: undefined,
-          message: result.reason || 'Protection failed'
-        }
-      }
-
-      // Update payload if protection transformed it
-      if (result.payload !== undefined) {
-        currentPayload = result.payload
-        context.payload = currentPayload
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      sensor.error(action.id, errorMessage, `pipeline-protection-${i}`)
+    if (!pipelineResult.ok) {
+      sensor.log(action.id, 'error', 'processing-pipeline-blocked', {
+        reason: pipelineResult.message,
+        error: pipelineResult.error
+      })
 
       return {
         ok: false,
-        payload: undefined,
-        message: `Pipeline protection error: ${errorMessage}`
+        payload: pipelineResult.payload,
+        message: pipelineResult.message || 'Processing pipeline failed'
       }
     }
+
+    // Update payload with processed result
+    currentPayload = pipelineResult.payload
+
+    sensor.log(action.id, 'success', 'processing-pipeline-complete', {
+      payloadTransformed: currentPayload !== originalPayload,
+      finalPayloadType: typeof currentPayload
+    })
   }
 
-  // STEP 4: All protections passed - execute or schedule
-  if (action._isScheduled) {
+  // STEP 3: Check for scheduling requirements
+  if (
+    action._hasScheduling &&
+    (action.interval || action.delay || action.repeat)
+  ) {
+    sensor.log(action.id, 'info', 'scheduling-execution', {
+      interval: action.interval,
+      delay: action.delay,
+      repeat: action.repeat
+    })
+
     return scheduleExecution(action, currentPayload)
   }
 
-  // STEP 5: Update payload state for change detection
-  if (action._hasChangeDetection) {
+  // STEP 4: Update payload state for change detection history
+  if (action.detectChanges) {
     payloadState.set(action.id, currentPayload, 'call')
+    sensor.log(action.id, 'info', 'payload-state-updated', {
+      payloadType: typeof currentPayload
+    })
   }
 
-  // STEP 6: Final execution with transformed payload
+  // STEP 5: Final execution with processed payload
+  sensor.log(action.id, 'info', 'dispatching-to-handler', {
+    finalPayloadType: typeof currentPayload,
+    payloadProcessed: currentPayload !== originalPayload
+  })
+
   const result = await useDispatch(action, currentPayload)
+
+  sensor.log(action.id, 'info', 'call-processing-complete', {
+    success: result.ok,
+    executionTime: result.metadata?.executionTime
+  })
 
   return result
 }

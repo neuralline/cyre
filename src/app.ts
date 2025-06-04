@@ -33,6 +33,9 @@ import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
 import {intelligence} from './schema/fusion-plugin'
 import {dev} from './dev/dev'
 import {registerSystemIntelligence} from './intelligence/system-orchestrations'
+import {cyreMetrics} from './analysis/metrics-integration'
+import {metricsAnalyzer} from './analysis/metrics-analyzer'
+import {initializeMetrics, metrics} from './metrics'
 
 /* 
     Neural Line
@@ -110,6 +113,13 @@ const initialize = async (
       autoSave: config.autoSave,
       saveKey: config.saveKey,
       adapter: createLocalStorageAdapter()
+    })
+
+    // Initialize metrics system
+    initializeMetrics({
+      maxEvents: 1000,
+      retentionTime: 3600000, // 1 hour
+      cleanupInterval: 300000 // 5 minutes
     })
     // Assuming awareness is part of CyreConfig or handled elsewhere
     // awarenessBeats.initialize(config.awareness || undefined) // Removed awareness initialization here
@@ -775,6 +785,81 @@ export const cyre = {
   dev,
 
   schedule,
+  // ENHANCED METRICS SYSTEM
+  // Add metrics interface
+  metrics: {
+    // Core metrics methods
+    record: (
+      actionId: string,
+      eventType: string,
+      location?: string,
+      metadata?: any
+    ) => {
+      return metrics.record(actionId, eventType as any, location, metadata)
+    },
+
+    // Analysis methods
+    analyze: (timeWindow?: number) => metrics.analyze(timeWindow),
+    healthCheck: () => metrics.healthCheck(),
+    report: (options?: any) => metrics.report(options),
+    analyzeChannel: (channelId: string, timeWindow?: number) => {
+      const result = metrics.analyzeChannel(channelId, timeWindow)
+      if (!result) {
+        console.log(`❌ Channel '${channelId}' not found`)
+        return null
+      }
+      return result
+    },
+
+    // Monitoring methods
+    startLiveMonitoring: (interval?: number) =>
+      metrics.startLiveMonitoring(interval),
+    watchMetric: (metric: string, threshold?: number) =>
+      metrics.watchMetric(metric as any, threshold),
+    snapshot: () => metrics.snapshot(),
+    exportData: (timeWindow?: number) => metrics.exportData(timeWindow),
+
+    // System methods
+    reset: () => metrics.reset(),
+
+    // Expose sensor for direct use
+    sensor: {
+      log: sensor.log,
+      execution: sensor.execution,
+      error: sensor.error,
+      call: sensor.call,
+      success: sensor.success,
+      info: sensor.info,
+      warning: sensor.warning,
+      critical: sensor.critical,
+      throttle: sensor.throttle,
+      debounce: sensor.debounce,
+      skip: sensor.skip,
+      blocked: sensor.blocked
+    }
+  },
+
+  // Enhanced getMetricsReport
+  getMetricsReport: () => {
+    return metricsAnalyzer.analyze()
+  },
+
+  // Enhanced getPerformanceInsights
+  getPerformanceInsights: (actionId?: string): string[] => {
+    const analysis = metricsAnalyzer.analyze()
+
+    if (actionId) {
+      const channel = analysis.channels.find(ch => ch.id === actionId)
+      if (channel) {
+        return channel.issues.length > 0
+          ? channel.issues
+          : ['Channel is performing well']
+      }
+      return [`Channel '${actionId}' not found`]
+    }
+
+    return analysis.recommendations
+  },
 
   get: (id: string): IO | undefined => io.get(id),
   // Add this to the main cyre object, right before the closing brace
