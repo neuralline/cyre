@@ -1,5 +1,5 @@
 // src/components/cyre-actions.ts
-// Action registration with talent compilation and optimization
+// Action registration with proper talent compilation and path indexing
 
 import {sensor} from '../context/metrics-report'
 import type {IO} from '../types/core'
@@ -8,34 +8,18 @@ import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
 import {io} from '../context/state'
 import {compileAction} from '../schema/data-definitions'
+import {pathEngine} from '../schema/path-engine'
 
 /*
 
       C.Y.R.E - A.C.T.I.O.N.S
 
-
-      pre-compute and compile action talents to minimise run time overhead and save it as easy to follow pipeline step by step instructions
-      Manages talents for the channel, specialized abilities that the channel possesses to control channel behavior!
-      
-      Talent Categories:
-        Protection Talents:
-            throttle, debounce, block, fastPath, retry
-        Processing Talents:
-            schema, transform, condition, middleware
-        Flow Talents:
-            detectChanges, priority, required
-        Scheduling Talents:
-            interval, delay, repeat
-
-
-
-      C.Y.R.E - A.C.T.I.O.N.S
-
-      Action registration with talent compilation:
+      Action registration with talent compilation and path indexing:
       1. Validate basic structure
       2. Compile action with talent discovery
       3. Set optimization flags
-      4. Store compiled action
+      4. Index paths for fast lookup
+      5. Store compiled action
 
 */
 
@@ -99,6 +83,13 @@ const validateCrossAttributes = (action: Partial<IO>): string[] => {
     errors.push('maxWait must be greater than debounce')
   }
 
+  // Path validation
+  if (action.path) {
+    if (!pathEngine.isValidPath(action.path)) {
+      errors.push('path must be a valid hierarchical path')
+    }
+  }
+
   return errors
 }
 
@@ -118,6 +109,17 @@ export const CyreActions = (action: IO): RegistrationResult => {
     // 2. Check if channel exists
     const exists = io.get(action.id) !== undefined
     const now = Date.now()
+
+    // If channel exists and has a path, remove it from path indexes first
+    if (exists) {
+      const existingAction = io.get(action.id)
+      if (existingAction?.path) {
+        pathEngine.remove(action.id)
+        sensor.log(action.id, 'info', 'path-removed-for-update', {
+          oldPath: existingAction.path
+        })
+      }
+    }
 
     // 3. Add timestamps and defaults
     const actionWithDefaults = {
@@ -160,13 +162,38 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
     const finalAction = compilation.compiledAction
 
-    // 6. Add to groups
+    // 6. INDEX PATH IF PROVIDED
+    if (finalAction.path && pathEngine.isValidPath(finalAction.path)) {
+      try {
+        pathEngine.add(finalAction.id, finalAction.path)
+
+        sensor.log(finalAction.id, 'info', 'path-indexed', {
+          path: finalAction.path,
+          segments: pathEngine.parse(finalAction.path).length,
+          indexed: true,
+          isUpdate: exists
+        })
+
+        // Verify indexing worked
+        const indexedPath = pathEngine.getPath(finalAction.id)
+        if (indexedPath !== finalAction.path) {
+          log.warn(
+            `Path indexing mismatch for ${finalAction.id}: expected '${finalAction.path}', got '${indexedPath}'`
+          )
+        }
+      } catch (error) {
+        log.error(`Path indexing failed for ${finalAction.id}: ${error}`)
+        sensor.error(finalAction.id, String(error), 'path-indexing')
+      }
+    }
+
+    // 7. Add to groups
     addChannelToGroups(finalAction.id)
 
-    // 7. Store compiled action
+    // 8. Store compiled action
     io.set(finalAction)
 
-    // 8. Initialize payload state if provided
+    // 9. Initialize payload state if provided
     if ('payload' in action && action.payload !== undefined) {
       try {
         payloadState.set(finalAction.id, action.payload, 'initial')
@@ -177,7 +204,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
       }
     }
 
-    // 9. Generate status message based on compilation results
+    // 10. Generate status message based on compilation results
     const channelGroups = getChannelGroups(finalAction.id)
     const actionMessage = exists ? 'Action updated' : 'Action registered'
 
@@ -195,7 +222,12 @@ export const CyreActions = (action: IO): RegistrationResult => {
       statusMsg = features.join(', ')
     }
 
-    log.debug(`${actionMessage} ${finalAction.id}: ${statusMsg}`)
+    // Add path info to status if available
+    if (finalAction.path) {
+      statusMsg += ` (path: ${finalAction.path})`
+    }
+
+    //log.debug(`${actionMessage} ${finalAction.id}: ${statusMsg}`)
 
     sensor.log(finalAction.id, 'info', 'action-registration', {
       isUpdate: exists,
@@ -208,6 +240,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
       isBlocked: finalAction._isBlocked,
       groupCount: channelGroups.length,
       groupIds: channelGroups.map(g => g.id),
+      path: finalAction.path,
+      pathIndexed: !!finalAction.path,
       compilationSuccess: true
     })
 

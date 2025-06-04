@@ -24,7 +24,15 @@ import payloadState from './context/payload-state'
 import {orchestration} from './orchestration/orchestration-engine'
 import {query, initializeQuerySystem} from './query/cyre-query'
 import type {OrchestrationConfig} from './types/orchestration'
-import {debounce, throttle} from './schema/talent-definitions'
+
+import {pathPlugin} from './schema/path-plugin'
+
+import {createBranch} from './hooks/create-branch'
+import {schedule} from './components/cyre-schedule'
+import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
+import {intelligence} from './schema/fusion-plugin'
+import {dev} from './dev/dev'
+import {registerSystemIntelligence} from './intelligence/system-orchestrations'
 
 /* 
     Neural Line
@@ -54,14 +62,35 @@ import {debounce, throttle} from './schema/talent-definitions'
         // - Performance issues are detected and resolved
         // - Health checks prevent system degradation
 
+        Path System Features:
+        - Hierarchical channel organization: 'app/users/profile/settings'
+        - Pattern-based operations: 'building/* /temperature'
+        - Foreign key indexing for O(1) performance
+        - Clean plugin architecture with private internals
+        - Backward compatibility with existing flat IDs
+
+        example use:
+        // ID-based
+        cyre.action({id: 'user-profile', payload: userData})
+        cyre.on('user-profile', handler)
+        cyre.call('user-profile', newData)
+
+        // path-based  
+        cyre.action({id: 'user-profile', path: 'app/users/profile', payload: userData})
+        cyre.path.call('app/users/*', newData)  // Call all user channels
+        cyre.path.on('app/*', handler)          // Subscribe to all app events
+
+    Flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+    Path: pathEngine indexes → pattern matching → foreign key lookups → batch operations
+
+
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
     
-     flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+     
 
 */
 
 // Track initialization state
-let isInitialized = false
 let systemOrchestrationIds: string[] = []
 
 /**
@@ -70,11 +99,12 @@ let systemOrchestrationIds: string[] = []
 const initialize = async (
   config: CyreConfig = {}
 ): Promise<{ok: boolean; payload: number; message: string}> => {
-  if (isInitialized) {
-    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
-  }
-
   try {
+    log.sys(MSG.QUANTUM_HEADER)
+
+    if (metricsState._init) {
+      return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+    }
     // Configure persistence
     persistence.configure({
       autoSave: config.autoSave,
@@ -98,37 +128,51 @@ const initialize = async (
       }
     }
 
-    isInitialized = true
     initializeBreathing() // This now does nothing as breathing is orchestrated
     TimeKeeper.resume()
 
     // Register system handlers here after initialization
     //registerSystemHandlers()
 
-    log.sys(MSG.QUANTUM_HEADER)
     log.success('Cyre initialized with advanced orchestration and query')
 
     const stats = persistence.getStats()
+
+    // NEW: Register system intelligence orchestrations
+    const intelligenceResults = await registerSystemIntelligence(orchestration)
+    systemOrchestrationIds.push(...intelligenceResults.registered)
+
+    if (intelligenceResults.failed.length > 0) {
+      log.warn(
+        `Failed to register ${intelligenceResults.failed.length} intelligence orchestrations`
+      )
+    } else {
+      log.success(
+        `Registered ${intelligenceResults.registered.length} intelligence orchestrations`
+      )
+    }
     log.debug(
-      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
+      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers, `
     )
 
     sensor.log('system', 'success', 'system-initialization', {
       timestamp: Date.now(),
       features: [
         'core-system',
+        'branch-system',
         'protections',
         'breathing-system',
         'persistent-state',
         'metrics-tracking',
         'group-system',
         'advanced-orchestration',
-        'query-system'
+        'query-system',
+        'path-addressing'
       ],
       restoredActions: stats.actionCount,
       restoredSubscribers: stats.subscriberCount
     })
-
+    metricsState.init()
     return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -158,7 +202,8 @@ const updateBreathingFromLoad = () => {
   )
 
   // Calculate adaptive breathing rate
-  let newRate = BREATHING.RATES.BASE
+  let newRate: (typeof BREATHING.RATES)[keyof typeof BREATHING.RATES] =
+    BREATHING.RATES.BASE
   if (stress > 0.8) {
     newRate = BREATHING.RATES.RECOVERY // 2000ms
   } else if (stress > 0.5) {
@@ -246,7 +291,7 @@ const checkOrchestrationTriggers = (channelId: string): void => {
 }
 
 /**
- * Call execution with orchestration integration
+ * Call execution with pre-pipeline protections
  */
 export const call = async (
   id: string,
@@ -277,74 +322,301 @@ export const call = async (
     }
   }
 
-  let response = {}
-
-  // STEP 1: Pre-computed blocking check (immediate exit)
-  if (action._isBlocked) {
-    sensor.log(action.id, 'blocked', 'pre-computed-block', {
-      reason: action._blockReason
-    })
-    return {
-      ok: false,
-      payload: undefined,
-      message: action._blockReason || 'Action blocked'
-    }
-  }
-
+  const callStartTime = Date.now()
   const originalPayload = payload ?? action.payload
-  let currentPayload = originalPayload
 
-  if (action.throttle && action.throttle > 0) {
-    const response = throttle(action, action.payload)
-    if (!response.ok)
+  try {
+    sensor.log(id, 'call', 'call-entry', {
+      timestamp: callStartTime,
+      hasPayload: payload !== undefined,
+      payloadType: typeof payload,
+      actionType: action.type || 'unknown'
+    })
+
+    // PRE-PIPELINE PROTECTIONS (Block, Throttle, Debounce, Recuperation)
+
+    // STEP 1: Pre-computed blocking check (immediate exit)
+    if (action._isBlocked) {
+      sensor.log(action.id, 'blocked', 'pre-computed-block', {
+        reason: action._blockReason
+      })
       return {
         ok: false,
         payload: undefined,
-        message: response.message || 'throttled'
-      }
-  } //throttle check
-
-  if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
-    const response = debounce(action, action.payload)
-  }
-
-  if (!response.ok) {
-    // Debounce blocked the call
-
-    // No delay configured, just block
-    sensor.log(action.id, 'debounce', 'call-blocked', {
-      reason: response.message,
-      debounceMs: action.debounce
-    })
-
-    return {
-      ok: false,
-      payload: undefined,
-      message: response.message || 'Debounced',
-      metadata: {
-        debounced: true
+        message: action._blockReason || 'Action blocked'
       }
     }
-  }
 
-  // Debounce passed (maxWait exceeded or bypass), continue with execution
-  sensor.log(action.id, 'info', 'debounce-passed', {
-    reason: response.message,
-    bypassDebounce: action._bypassDebounce
-  })
+    // STEP 2: Block talent check
+    if (action.block === true) {
+      sensor.log(action.id, 'blocked', 'talent-block')
+      return {
+        ok: false,
+        payload: undefined,
+        message: 'Action is blocked'
+      }
+    }
 
-  const callStartTime = Date.now()
-  try {
-    sensor.log(id, 'call', 'call-entry', {
-      timestamp: Date.now(),
-      hasPayload: payload !== undefined,
-      payloadType: typeof payload,
-      actionType: action.type || 'unknown',
-      callInitiationTime: callStartTime
+    // STEP 3: Recuperation check
+    const breathing = metricsState.get().breathing
+    if (breathing.isRecuperating && action.priority?.level !== 'critical') {
+      sensor.log(action.id, 'blocked', 'talent-recuperation', {
+        stress: breathing.stress,
+        priority: action.priority?.level || 'medium'
+      })
+      return {
+        ok: false,
+        payload: undefined,
+        message: 'System is recuperating - only critical actions allowed'
+      }
+    }
+
+    // STEP 4: Throttle check
+    if (action.throttle && action.throttle > 0) {
+      const metrics = io.getMetrics(action.id)
+      const lastExecTime = metrics?.lastExecutionTime || 0
+
+      if (lastExecTime > 0) {
+        const elapsed = Date.now() - lastExecTime
+        if (elapsed < action.throttle) {
+          const remaining = action.throttle - elapsed
+          sensor.log(action.id, 'throttle', 'talent-throttle', {
+            throttleMs: action.throttle,
+            elapsed,
+            remaining
+          })
+          return {
+            ok: false,
+            payload: undefined,
+            message: `Throttled - ${remaining}ms remaining`,
+            metadata: {
+              throttled: true,
+              remaining
+            }
+          }
+        }
+      }
+    }
+
+    // STEP 5: Debounce check (most complex protection)
+    if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
+      const timerId = `${action.id}-debounce-${Date.now()}`
+
+      if (!action._debounceTimer) {
+        // First time debounce - execute immediately and set up debounce window
+        action._firstDebounceCall = Date.now()
+        action._debounceTimer = timerId
+
+        // Store the payload for debounced calls
+        payloadState.set(action.id, originalPayload, 'call')
+
+        // Update action state
+        io.set({
+          ...action,
+          _debounceTimer: timerId,
+          _firstDebounceCall: action._firstDebounceCall
+        })
+
+        sensor.log(action.id, 'info', 'debounce-first-execution', {
+          debounceMs: action.debounce,
+          timerId: timerId.slice(-8)
+        })
+
+        // Execute immediately for first call
+        const result = await processCall(action, originalPayload)
+
+        sensor.log(action.id, 'success', 'debounce-first-execution-complete', {
+          success: result.ok,
+          finalMessage: result.message
+        })
+
+        return result
+      } else {
+        // Subsequent calls within debounce window
+
+        // Clear existing debounce timer
+        TimeKeeper.forget(action._debounceTimer)
+
+        // Check maxWait constraint
+        const firstCallTime = action._firstDebounceCall || Date.now()
+        if (action.maxWait && Date.now() - firstCallTime >= action.maxWait) {
+          // MaxWait exceeded - execute immediately and reset debounce
+          action._firstDebounceCall = undefined
+          action._debounceTimer = undefined
+
+          // Update action state
+          io.set({
+            ...action,
+            _debounceTimer: undefined,
+            _firstDebounceCall: undefined
+          })
+
+          sensor.log(action.id, 'info', 'debounce-maxwait-exceeded', {
+            maxWait: action.maxWait,
+            firstCallTime: firstCallTime,
+            elapsed: Date.now() - firstCallTime
+          })
+
+          // Execute immediately due to maxWait
+          const result = await processCall(action, originalPayload)
+
+          sensor.log(
+            action.id,
+            'success',
+            'debounce-maxwait-execution-complete',
+            {
+              success: result.ok,
+              finalMessage: result.message
+            }
+          )
+
+          return result
+        } else {
+          // Set up new debounce delay with latest payload
+          action._debounceTimer = timerId
+
+          // Update stored payload with latest data
+          payloadState.set(action.id, originalPayload, 'call')
+
+          // Update action state
+          io.set({
+            ...action,
+            _debounceTimer: timerId,
+            _firstDebounceCall: firstCallTime
+          })
+
+          // Schedule delayed execution using TimeKeeper
+          const timerResult = TimeKeeper.keep(
+            action.debounce,
+            async () => {
+              try {
+                // Get the latest payload that was stored
+                const latestPayload =
+                  payloadState.get(action.id) || originalPayload
+
+                // Clear timer reference since we're executing now
+                action._debounceTimer = undefined
+                action._firstDebounceCall = undefined
+
+                // Update action state
+                io.set({
+                  ...action,
+                  _debounceTimer: undefined,
+                  _firstDebounceCall: undefined
+                })
+
+                sensor.log(action.id, 'info', 'debounce-delayed-execution', {
+                  executedAfterDelay: true,
+                  timestamp: Date.now(),
+                  timerId: timerId.slice(-8)
+                })
+
+                // Execute with the latest payload
+                const result = await processCall(action, latestPayload)
+
+                sensor.log(
+                  action.id,
+                  'success',
+                  'debounce-delayed-execution-complete',
+                  {
+                    success: result.ok,
+                    finalMessage: result.message
+                  }
+                )
+
+                return result
+              } catch (error) {
+                const errorMessage =
+                  error instanceof Error ? error.message : String(error)
+
+                // Clean up on error
+                action._debounceTimer = undefined
+                action._firstDebounceCall = undefined
+
+                io.set({
+                  ...action,
+                  _debounceTimer: undefined,
+                  _firstDebounceCall: undefined
+                })
+
+                sensor.error(
+                  action.id,
+                  errorMessage,
+                  'debounce-execution-error'
+                )
+                log.error(
+                  `Debounce execution failed for ${action.id}: ${errorMessage}`
+                )
+
+                return {
+                  ok: false,
+                  payload: undefined,
+                  message: `Debounce execution failed: ${errorMessage}`
+                }
+              }
+            },
+            1, // Execute once
+            timerId
+          )
+
+          if (timerResult.kind === 'error') {
+            // Clean up on timer creation error
+            action._debounceTimer = undefined
+            action._firstDebounceCall = undefined
+
+            io.set({
+              ...action,
+              _debounceTimer: undefined,
+              _firstDebounceCall: undefined
+            })
+
+            sensor.error(
+              action.id,
+              timerResult.error.message,
+              'debounce-timer-creation'
+            )
+            return {
+              ok: false,
+              payload: undefined,
+              message: `Debounce timer creation failed: ${timerResult.error.message}`
+            }
+          }
+
+          sensor.log(action.id, 'debounce', 'talent-debounce', {
+            debounceMs: action.debounce,
+            maxWait: action.maxWait,
+            firstCallTime: firstCallTime,
+            timerId: timerId.slice(-8),
+            subsequentCall: true
+          })
+
+          return {
+            ok: false,
+            payload: undefined,
+            message: `Debounced - will execute in ${action.debounce}ms`,
+            metadata: {
+              debounced: true,
+              delay: action.debounce,
+              isSubsequentCall: true
+            }
+          }
+        }
+      }
+    }
+
+    // ALL PRE-PIPELINE PROTECTIONS PASSED - Continue to pipeline
+
+    sensor.log(action.id, 'info', 'pre-pipeline-passed', {
+      protections: {
+        block: !!action.block,
+        throttle: !!(action.throttle && action.throttle > 0),
+        debounce: !!(action.debounce && action.debounce > 0),
+        recuperation: breathing.isRecuperating
+      }
     })
 
-    // Execute optimized pipeline
-    const result = await processCall(action, payload)
+    // Execute the processing pipeline
+    const result = await processCall(action, originalPayload)
 
     const totalCallTime = Date.now() - callStartTime
 
@@ -357,7 +629,7 @@ export const call = async (
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    const totalCallTime = performance.now() - callStartTime
+    const totalCallTime = Date.now() - callStartTime
 
     sensor.error(id, errorMessage, 'call-execution')
 
@@ -487,9 +759,24 @@ export const cyre = {
   action,
   on,
   call,
-  get: (id: string): IO | undefined => io.get(id),
   forget,
   clear,
+
+  // ALIGNED ORCHESTRATION INTEGRATION
+  orchestration,
+  schema,
+  createBranch,
+
+  intelligence,
+  // SEAMLESS QUERY INTEGRATION
+  query,
+  path: pathPlugin,
+  // DEVELOPER EXPERIENCE HELPERS
+  dev,
+
+  schedule,
+
+  get: (id: string): IO | undefined => io.get(id),
   // Add this to the main cyre object, right before the closing brace
 
   // State methods
@@ -693,29 +980,6 @@ export const cyre = {
     }
   },
 
-  getPerformanceInsights: (actionId?: string): string[] => {
-    const insights: string[] = []
-    const systemStats = metricsReport.getSystemStats()
-    const breathingState = metricsState.get().breathing
-
-    if (breathingState.stress > 0.8) {
-      insights.push('System stress is high - consider reducing load')
-    }
-
-    if (systemStats.callRate > 100) {
-      insights.push('High call rate detected - throttling may be beneficial')
-    }
-
-    if (actionId) {
-      const actionStats = metricsReport.getActionStats(actionId)
-      if (actionStats && actionStats.errors > 0) {
-        insights.push(`Action ${actionId} has ${actionStats.errors} errors`)
-      }
-    }
-
-    return insights
-  },
-
   // Timer utilities
   setTimer: (
     duration: number,
@@ -743,8 +1007,6 @@ export const cyre = {
     }
   },
 
-  schema,
-
   // Group system methods
   group: (groupId: string, config: GroupConfig) => {
     return groupOperations.create(groupId, config)
@@ -768,148 +1030,9 @@ export const cyre = {
 
   getChannelGroups: (channelId: string) => {
     return groupOperations.getChannelGroups(channelId)
-  },
-
-  // ALIGNED ORCHESTRATION INTEGRATION
-  orchestration,
-
-  // SEAMLESS QUERY INTEGRATION
-  query,
-
-  // DEVELOPER EXPERIENCE HELPERS
-  dev: {
-    // Quick orchestration examples
-    createSimpleWorkflow: (id: string, steps: string[]) => {
-      const workflow = steps.map((step, index) => ({
-        name: `step-${index + 1}`,
-        type: 'action' as const,
-        targets: step
-      }))
-
-      return orchestration.createAndStart({
-        id,
-        triggers: [
-          {name: 'manual', type: 'external' as const} // Manual trigger
-        ],
-        workflow
-      })
-    },
-
-    // Trigger manual orchestration execution
-    trigger: async (orchestrationId: string, payload?: any) => {
-      // This would manually trigger an orchestration
-      // Implementation would need to be added to orchestration system
-      log.debug(`Manual trigger for orchestration '${orchestrationId}'`)
-      // Call the actual orchestration trigger if it exists and is external
-      // Note: A more robust implementation would verify the trigger type
-      return await cyre.orchestration.trigger(
-        orchestrationId,
-        'manual',
-        payload
-      )
-    },
-
-    // Debug channel state
-    inspect: (channelId: string) => {
-      const config = cyre.get(channelId)
-      const payload = payloadState.get(channelId)
-      const subscriber = subscribers.get(channelId)
-      const metrics = io.getMetrics(channelId)
-      const groups = cyre.getChannelGroups(channelId)
-
-      return {
-        id: channelId,
-        config,
-        payload,
-        hasSubscriber: !!subscriber,
-        metrics,
-        groups: groups.map(g => g.id),
-        queryTime: performance.now()
-      }
-    },
-
-    // Performance snapshot
-    snapshot: () => {
-      const systemStats = metricsReport.getSystemStats()
-      const queryStats = query.stats()
-      const orchestrations = cyre.orchestration.list()
-
-      return {
-        system: {
-          totalCalls: systemStats.totalCalls,
-          callRate: systemStats.callRate,
-          uptime: Math.floor((Date.now() - systemStats.startTime) / 1000)
-        },
-        channels: {
-          total: io.getAll().length,
-          withSubscribers: subscribers.getAll().length,
-          withPayload: query.channels({hasPayload: true}).total
-        },
-        orchestrations: {
-          total: orchestrations.length,
-          running: orchestrations.filter(o => o.status === 'running').length
-          // system: orchestrations.filter(o => o.id.startsWith('system-')).length // Removed as per type definition
-        },
-        query: queryStats,
-        timestamp: Date.now()
-      }
-    },
-
-    // Add getSystemMetrics method
-    getSystemMetrics: () => {
-      const systemStats = metricsReport.getSystemStats()
-      return {
-        performance: {
-          totalCalls: systemStats.totalCalls,
-          callRate: systemStats.callRate,
-          totalErrors: systemStats.totalErrors,
-          uptime: Math.floor((Date.now() - systemStats.startTime) / 1000)
-        }
-      }
-    },
-
-    // Add triggerHealthCheck method
-    triggerHealthCheck: async () => {
-      return await cyre.orchestration.trigger('system-health-monitor', 'manual')
-    }, // Add these methods directly to the main cyre object:
-    getSystemHealth: () => {
-      const breathing = metricsState.get().breathing
-      const systemStats = metricsReport.getSystemStats()
-
-      return {
-        overall: breathing.stress < 0.8 && systemStats.totalErrors < 10,
-        breathing: {
-          stress: breathing.stress,
-          rate: breathing.currentRate,
-          healthy: breathing.stress < 0.8
-        }
-      }
-    },
-
-    adaptSystemLoad: (loadLevel: number) => {
-      // Simple adaptation - just update breathing rate
-      const newRate =
-        loadLevel > 0.8 ? BREATHING.RATES.RECOVERY : BREATHING.RATES.BASE
-      const breathing = metricsState.get().breathing
-      breathing.currentRate = newRate
-      breathing.stress = loadLevel
-
-      return {adapted: true, loadLevel}
-    }, // In the cyre.dev object, add:
-    triggerMemoryCleanup: async () => {
-      try {
-        // Direct memory cleanup since orchestration isn't working
-        query.cache.clear()
-
-        // Force garbage collection if available
-        if (typeof global !== 'undefined' && global.gc) {
-          global.gc()
-        }
-
-        return {ok: true, message: 'Memory cleanup completed'}
-      } catch (error) {
-        return {ok: false, message: String(error)}
-      }
-    } // In the cyre.orchestration object, add:
   }
 }
+
+cyre.initialize()
+// Also export cyre as the default export for maximum compatibility
+export default cyre

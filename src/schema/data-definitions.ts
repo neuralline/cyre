@@ -1,19 +1,22 @@
 // src/schema/data-definitions.ts
-// Data validation with talent discovery and flag setting
+// Data validation with path support and talent discovery
 
 import {schema} from '../schema/cyre-schema'
-import type {IO, ActionPayload} from '../types/core'
+import type {IO} from '../types/core'
 import {hasTalent, type TalentName} from './talent-definitions'
+import {pathEngine} from './path-engine'
+import {fusionDataDefinition, patternDataDefinition} from './fusion-plugin'
+import {compileIntelligenceConfig} from '../intelligence/intelligence-compiler'
 
 /*
 
       C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S
       
-      Data validation with talent integration:
-      - Validates all user inputs
+      Data validation with talent integration and path support:
+      - Validates all user inputs including path field
       - Sets flags for call processor optimization  
       - Discovers talents by field name matching
-      - No pipeline creation for protection talents
+      - Path validation and indexing integration
 
 */
 
@@ -38,7 +41,9 @@ const PROCESSING_TALENTS = [
   'selector',
   'transform',
   'detectChanges',
-  'required'
+  'required',
+  'fusion',
+  'patterns'
 ] as const
 const SCHEDULING_TALENTS = ['interval'] as const
 
@@ -56,13 +61,61 @@ const discoverTalent = (fieldName: string): TalentName | null => {
   return null
 }
 
-// Main data definitions with talent discovery
-export const dataDefinitions = {
+// Main data definitions with talent discovery and path support
+export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   // Core required - can block
   id: (value: any): DataDefResult => {
     if (typeof value !== 'string' || value.length === 0) {
       return {ok: false, error: 'ID must be non-empty string', blocking: true}
     }
+    return {ok: true, data: value}
+  },
+  pattern: patternDataDefinition,
+  fusion: fusionDataDefinition,
+
+  // Path validation and indexing
+  path: (value: any): DataDefResult => {
+    if (value === undefined) {
+      return {ok: true, data: undefined}
+    }
+
+    if (typeof value !== 'string') {
+      return {ok: false, error: 'Path must be a string'}
+    }
+
+    if (value.length === 0) {
+      return {ok: true, data: undefined} // Empty string treated as no path
+    }
+
+    // Validate path format
+    if (!pathEngine.isValidPath(value)) {
+      return {
+        ok: false,
+        error:
+          'Path must be a valid hierarchical path (e.g., "app/users/profile")'
+      }
+    }
+
+    // Check for path conflicts (multiple channels with same path)
+    const segments = pathEngine.parse(value)
+    if (segments.length === 0) {
+      return {ok: false, error: 'Path cannot be empty segments'}
+    }
+
+    // Validate segment names (no special characters except allowed ones)
+    const invalidSegments = segments.filter(
+      segment => !/^[a-zA-Z0-9\-_]+$/.test(segment)
+    )
+
+    if (invalidSegments.length > 0) {
+      return {
+        ok: false,
+        error: `Path segments can only contain letters, numbers, hyphens, and underscores. Invalid: ${invalidSegments.join(
+          ', '
+        )}`
+      }
+    }
+
     return {ok: true, data: value}
   },
 
@@ -227,6 +280,7 @@ export const dataDefinitions = {
   _hasProcessing: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasScheduling: (value: any): DataDefResult => ({ok: true, data: value}),
   _processingTalents: (value: any): DataDefResult => ({ok: true, data: value}),
+  _processingPipeline: (value: any): DataDefResult => ({ok: true, data: value}),
   _debounceTimer: (value: any): DataDefResult => ({ok: true, data: value}),
   _bypassDebounce: (value: any): DataDefResult => ({ok: true, data: value}),
   _firstDebounceCall: (value: any): DataDefResult => ({ok: true, data: value}),
@@ -234,10 +288,10 @@ export const dataDefinitions = {
   _blockReason: (value: any): DataDefResult => ({ok: true, data: value}),
   timestamp: (value: any): DataDefResult => ({ok: true, data: value}),
   timeOfCreation: (value: any): DataDefResult => ({ok: true, data: value})
-} as const
+}
 
 /**
- * Compile action with talent discovery and pipeline building
+ * Compile action with talent discovery, pipeline building, and path indexing
  */
 export const compileAction = (
   action: Partial<IO>
@@ -253,6 +307,7 @@ export const compileAction = (
   // Track talent categories
   let hasProtections = false
   let hasScheduling = false
+  let hasIntelligence = false // NEW
 
   // Process fields in order to preserve user-defined execution sequence
   const actionKeys = Object.keys(action)
@@ -290,6 +345,8 @@ export const compileAction = (
             processingPipeline.push(result.talentName)
           } else if (SCHEDULING_TALENTS.includes(result.talentName as any)) {
             hasScheduling = true
+          } else if (['fusion', 'patterns'].includes(result.talentName)) {
+            hasIntelligence = true // NEW
           }
         }
       }
@@ -299,9 +356,24 @@ export const compileAction = (
     }
   }
 
+  // Cross-attribute validation
+  const crossValidationErrors = validateCrossAttributes(compiledAction as IO)
+  errors.push(...crossValidationErrors)
+
+  // NEW: Compile intelligence configuration for performance
+  let intelligenceConfig = null
+  if (hasIntelligence) {
+    try {
+      intelligenceConfig = compileIntelligenceConfig(compiledAction as IO)
+    } catch (error) {
+      errors.push(`Intelligence compilation failed: ${error}`)
+    }
+  }
+
   // Set optimization flags
   const hasProcessing = processingPipeline.length > 0
-  const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
+  const hasFastPath =
+    !hasProtections && !hasProcessing && !hasScheduling && !hasIntelligence
 
   // Build final compiled action
   const finalAction: IO = {
@@ -310,7 +382,9 @@ export const compileAction = (
     _hasProtections: hasProtections,
     _hasProcessing: hasProcessing,
     _hasScheduling: hasScheduling,
-    _processingPipeline: processingPipeline, // Save compiled pipeline
+    _hasIntelligence: hasIntelligence, // NEW
+    _intelligenceConfig: intelligenceConfig, // NEW
+    _processingTalents: processingPipeline,
     _isBlocked: false
   } as IO
 
@@ -321,5 +395,57 @@ export const compileAction = (
   }
 }
 
-// Remove redundant function - pipeline is now built during compilation
-// export const getProcessingTalentsInOrder = (action: IO): TalentName[] => {
+/**
+ * Cross-attribute validation
+ */
+const validateCrossAttributes = (action: IO): string[] => {
+  const errors: string[] = []
+
+  // Interval requires repeat
+  if (action.interval !== undefined && action.repeat === undefined) {
+    errors.push('interval requires repeat to be specified')
+  }
+
+  // Throttle and debounce conflict
+  if (
+    action.throttle &&
+    action.debounce &&
+    action.throttle > 0 &&
+    action.debounce > 0
+  ) {
+    errors.push('throttle and debounce cannot both be active')
+  }
+
+  // MaxWait requires debounce
+  if (action.maxWait !== undefined && action.debounce === undefined) {
+    errors.push('maxWait requires debounce to be specified')
+  }
+
+  if (action.maxWait && action.debounce && action.maxWait <= action.debounce) {
+    errors.push('maxWait must be greater than debounce')
+  }
+
+  // Path validation (additional cross-checks)
+  if (action.path) {
+    const segments = pathEngine.parse(action.path)
+
+    // Check for reasonable path depth
+    if (segments.length > 10) {
+      errors.push('path depth should not exceed 10 levels for performance')
+    }
+
+    // Check for reserved path segments
+    const reservedSegments = ['system', 'internal', '_', '__']
+    const conflictingSegments = segments.filter(segment =>
+      reservedSegments.includes(segment.toLowerCase())
+    )
+
+    if (conflictingSegments.length > 0) {
+      errors.push(
+        `path contains reserved segments: ${conflictingSegments.join(', ')}`
+      )
+    }
+  }
+
+  return errors
+}

@@ -4,11 +4,9 @@
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
 import {sensor} from '../context/metrics-report'
-import {TimeKeeper} from './cyre-timekeeper'
 import {io} from '../context/state'
 import payloadState from '../context/payload-state'
-import {log} from './cyre-log'
-import {debounce, scheduleExecution} from '../schema/talent-definitions'
+import {scheduleExecution} from '../schema/talent-definitions'
 
 /*
 
@@ -108,7 +106,7 @@ export async function processCall(
 
   // STEP 5: Update payload state for change detection
   if (action._hasChangeDetection) {
-    payloadState.set(action.id, originalPayload, 'call')
+    payloadState.set(action.id, currentPayload, 'call')
   }
 
   // STEP 6: Final execution with transformed payload

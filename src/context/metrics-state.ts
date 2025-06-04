@@ -90,11 +90,11 @@ export type Result<T, E = Error> =
 export const metricsState = {
   // Add these properties at the top level to match QuantumState interface
   inRecuperation: false,
-  hibernating: false,
+  _hibernating: false,
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
   _isLocked: false,
-  initialize: false,
+  _init: false,
   _shutdown: false,
 
   isLocked: (): boolean => {
@@ -106,7 +106,7 @@ export const metricsState = {
     return Object.freeze({
       ...state,
       inRecuperation: metricsState.inRecuperation,
-      hibernating: metricsState.hibernating,
+      hibernating: metricsState._hibernating,
       activeFormations: metricsState.activeFormations
     })
   },
@@ -118,7 +118,7 @@ export const metricsState = {
       ...update,
       lastUpdate: Date.now(),
       inRecuperation: update.inRecuperation ?? metricsState.inRecuperation,
-      hibernating: update.hibernating ?? metricsState.hibernating,
+      hibernating: update.hibernating ?? metricsState._hibernating,
       activeFormations: update.activeFormations ?? metricsState.activeFormations
     }
 
@@ -192,29 +192,6 @@ export const metricsState = {
       throw error // Re-throw to prevent unsafe operation
     }
   },
-  // Performance tracking
-  // recordCall: (priority: Priority = 'medium'): MetricsState => {
-  //   const current = metricsStore.get('quantum')!
-  //   const now = Date.now()
-  //   const timeDiff = now - current.performance.lastCallTimestamp
-
-  //   const callsPerSecond =
-  //     timeDiff >= 1000 ? 1 : current.performance.callsPerSecond + 1
-
-  //   const performance: PerformanceMetrics = {
-  //     ...current.performance,
-  //     callsTotal: current.performance.callsTotal + 1,
-  //     callsPerSecond,
-  //     lastCallTimestamp: now,
-  //     activeQueues: {
-  //       ...current.performance.activeQueues,
-  //       [priority]: current.performance.activeQueues[priority] + 1
-  //     },
-  //     queueDepth: current.performance.queueDepth + 1
-  //   }
-
-  //   return metricsState.update({performance})
-  // },
 
   // System health checks
   isHealthy: (): boolean => {
@@ -241,10 +218,11 @@ export const metricsState = {
 
   reset: (): void => {
     metricsState.inRecuperation = false
-    metricsState.hibernating = false
+    metricsState._hibernating = false
     metricsState.activeFormations = 0
     metricsState._isLocked = false
     metricsState._shutdown = false
+    metricsState._init = false
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
       metricsState.recuperationInterval = undefined

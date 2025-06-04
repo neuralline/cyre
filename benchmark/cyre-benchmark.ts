@@ -1,4 +1,4 @@
-// tests/performance/advanced-cyre-benchmarks.ts
+// benchmark/cyre-benchmark.ts
 // Advanced performance testing scenarios for Cyre
 
 import {cyre} from '../src'

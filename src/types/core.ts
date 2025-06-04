@@ -1,5 +1,5 @@
 // src/types/core.ts
-// Core types and interfaces for CYRE system
+// Enhanced IO interface with additional channel fields
 
 import type {Schema} from '../schema/cyre-schema'
 export type * from './timer'
@@ -83,13 +83,33 @@ export type ProtectionFn = (ctx: {
   | {pass: false; reason: string; delayed?: boolean; duration?: number}
 
 /**
- * IO interface - action configuration without payload data
+ * IO interface - Enhanced action configuration with channel organization fields
  */
 export interface IO {
   /** Unique identifier for this action */
   id: string
-  /** Optional grouping category (defaults to id if not specified) */
+
+  /** Human-readable name for the channel */
+  name?: string
+
+  /** Channel category/classification (defaults to id if not specified) */
   type?: string
+
+  /** Hierarchical path for organization (e.g., "sensors/temperature/room1") */
+  path?: string
+
+  /** Group membership for bulk operations */
+  group?: string
+
+  /** Tags for filtering and organization */
+  tags?: string[]
+
+  /** Description of what this channel does */
+  description?: string
+
+  /** Version for channel evolution tracking */
+  version?: string
+
   /** Require payload to be provided - boolean for basic requirement, 'non-empty' for non-empty requirement */
   required?: boolean | 'non-empty'
   /** Milliseconds between executions for repeated actions */
@@ -117,6 +137,14 @@ export interface IO {
   /** Block this action from execution */
   block?: boolean
 
+  //authentication
+  auth?: {
+    mode: 'token' | 'context' | 'group' | 'disabled'
+    token?: string
+    allowedCallers?: string[]
+    groupPolicy?: string
+    sessionTimeout?: number
+  }
   // State reactivity options
   /** Only execute when this condition returns true */
   condition?: ConditionFunction
@@ -124,6 +152,64 @@ export interface IO {
   selector?: SelectorFunction
   /** Transform payload before execution */
   transform?: TransformFunction
+
+  // Multi-sensor fusion
+  fusion?: {
+    spatial?: {
+      sensors: Array<{
+        id: string
+        location: {x: number; y: number; z?: number}
+        weight?: number
+        maxDistance?: number
+      }>
+      method: 'weighted' | 'kalman' | 'consensus'
+      distanceThreshold: number
+    }
+    temporal?: {
+      sensors: string[]
+      windowSize: number
+      method: 'average' | 'median' | 'weighted' | 'kalman'
+      weights?: number[]
+    }
+    crossDomain?: {
+      sensors: Array<{
+        id: string
+        domain: string
+        transform?: (value: any) => number
+        weight: number
+      }>
+      correlationModel: 'linear' | 'neural' | 'custom'
+    }
+  }
+
+  // Pattern recognition
+  patterns?: {
+    sequences?: Array<{
+      name: string
+      conditions: Array<{
+        channelPattern: string
+        condition: (payload: any) => boolean
+        timeout?: number
+      }>
+      timeout: number
+      allowOverlap: boolean
+    }>
+    anomalies?: Array<{
+      name: string
+      channelPattern: string
+      method: 'zscore' | 'iqr' | 'isolation' | 'custom'
+      threshold: number
+      windowSize: number
+      customDetector?: (values: number[]) => boolean
+    }>
+    frequency?: Array<{
+      name: string
+      channelPattern: string
+      expectedInterval: number
+      tolerance: number
+      minOccurrences: number
+    }>
+  }
 
   // Internal optimization fields
   /** Pre-computed blocking state for instant rejection */
@@ -140,34 +226,23 @@ export interface IO {
   _bypassDebounce?: boolean
   /** Flag to indicate if action is scheduled for execution */
   _isScheduled?: boolean
-
-  // Metadata fields
-  timestamp?: number
-  timeOfCreation?: number
-
-  // Group configuration
-  group?: string
-
-  // Multi-sensor fusion
-  fusion?: {
-    spatial?: Array<{
-      id: string
-      location: {x: number; y: number}
-      weight?: number
-    }>
-    temporal?: string[]
-    method?: 'weighted' | 'kalman'
-  }
-
-  // Pattern recognition
-  patterns?: {
-    sequences?: Array<{name: string; conditions: string[]; timeout?: number}>
-    anomalies?: Array<{method: 'zscore' | 'iqr'; threshold: number}>
-  }
+  /** First debounce call timestamp for maxWait calculation */
+  _firstDebounceCall?: number
+  /** Branch ID if this channel belongs to a branch */
+  _branchId?: string
 
   // Compiled pipelines (internal)
   _fusionPipeline?: FusionFn[]
   _patternPipeline?: PatternFn[]
+  _hasProtections?: boolean
+  _hasProcessing?: boolean
+  _hasScheduling?: boolean
+  _processingTalents?: string[]
+  _hasChangeDetection?: boolean
+
+  // Metadata fields
+  timestamp?: number
+  timeOfCreation?: number
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
@@ -476,87 +551,4 @@ export interface PayloadSubscriptionOptions {
   filter?: (payload: ActionPayload) => boolean
   immediate?: boolean
   once?: boolean
-}
-
-export interface Cyre {
-  systemOrchestrations: {
-    register: () => {registered: string[]; failed: string[]}
-    start: (orchestrationId?: string) => {started: string[]; failed: string[]}
-    stop: (orchestrationId?: string) => {stopped: string[]; failed: string[]}
-    status: () => {
-      total: number
-      running: number
-      paused: number
-      orchestrations: Array<{
-        id: string
-        status: string
-        lastExecution: number
-        executionCount: number
-      }>
-    }
-    healthCheck: () => {
-      orchestrations: {
-        total: number
-        running: number
-        paused: number
-      }
-      breathing: {
-        stress: number
-        currentRate: number
-        isRecuperating: boolean
-      }
-      memory: {
-        actionCount: number
-        timelineCount: number
-      }
-    }
-  }
-  orchestration: {
-    create: (config: any) => any
-    start: (orchestrationId: string) => any
-    stop: (orchestrationId: string) => any
-    get: (orchestrationId: string) => any
-    list: () => any[]
-    remove: (orchestrationId: string) => boolean
-    trigger: (
-      orchestrationId: string,
-      triggerName: string,
-      payload?: any
-    ) => Promise<any>
-    createAndStart: (config: any) => any
-    getSystemOrchestrations: () => Array<{
-      id: string
-      status: string
-      metrics: any
-      lastExecution: number | undefined
-    }>
-  }
-  query: {
-    channels: (filter?: any) => any
-    payloads: (queryConfig?: any) => any
-    metrics: (queryConfig?: any) => any
-    subscribe: (
-      queryId: string,
-      queryConfig: any,
-      callback: (result: any) => void
-    ) => () => boolean
-    stats: () => any
-    clearCache: () => void
-    patterns: any
-  }
-  dev: {
-    createSimpleWorkflow: (id: string, steps: string[]) => any
-    trigger: (orchestrationId: string, payload?: any) => void
-    inspect: (channelId: string) => any
-    snapshot: () => any
-    getSystemMetrics: () => {
-      performance: {
-        totalCalls: number
-        callRate: number
-        totalErrors: number
-        uptime: number
-      }
-    }
-    triggerHealthCheck: () => Promise<any>
-  }
 }

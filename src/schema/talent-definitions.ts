@@ -1,26 +1,24 @@
 // src/schema/talent-definitions.ts
-// One true source for all talents with consistent structure
+// Talent definitions using plugin approach
 
-import type {ActionPayload, IO} from '../types/core'
+import type {CyreResponse, IO} from '../types/core'
 import {metricsState} from '../context/metrics-state'
 import {sensor} from '../context/metrics-report'
-import payloadState from '../context/payload-state'
 import {TimeKeeper} from '../components/cyre-timekeeper'
 import {io} from '../context/state'
-import {log} from '../components/cyre-log'
-import {processCall} from '../components/cyre-call'
-import {useDispatch} from '../components/cyre-dispatch'
+import {pathTalents} from './path-plugin'
+import {fusion, patterns} from './fusion-pattern-talents'
+import {stateTalents} from './state-talents-plugin'
 
 /*
 
       C.Y.R.E - T.A.L.E.N.T - D.E.F.I.N.I.T.I.O.N.S
       
-      One true source for all talents:
-      - Consistent (action: IO, payload: any) => TalentResult signature
-      - Standard return format
-      - Testable outside processCall
-      - Easy to add new talents
-      - User controls execution order
+      Plugin-based talent system:
+      - Protection talents (pre-pipeline)
+      - State processing talents (pipeline)
+      - Scheduling talents (post-pipeline)
+      - Clean plugin architecture
 
 */
 
@@ -38,7 +36,7 @@ export interface TalentResult {
 }
 
 // ===========================================
-// PROTECTION TALENTS (Pre-pipeline)
+// PROTECTION TALENTS (Pre-pipeline - handled in app.call)
 // ===========================================
 
 export const block = (action: IO, payload: any): TalentResult => {
@@ -105,64 +103,11 @@ export const debounce = (action: IO, payload: any): TalentResult => {
   action._debounceTimer = timerId
   action._firstDebounceCall = firstCallTime
 
-  // Schedule delayed execution using TimeKeeper
-  const timerResult = TimeKeeper.keep(
-    action.debounce,
-    async () => {
-      try {
-        // Clear timer reference since we're executing now
-        action._debounceTimer = undefined
-
-        sensor.log(action.id, 'info', 'debounce-execution', {
-          executedAfterDelay: true,
-          timestamp: Date.now(),
-          originalTimerId: timerId.slice(-8)
-        })
-
-        // Set bypass flag to prevent re-debouncing on callback
-        const originalBypass = action._bypassDebounce
-        action._bypassDebounce = true
-
-        try {
-          // CALLBACK TO PROCESSCALL - This restarts the call flow without debounce
-          const result = await processCall(action, payload)
-
-          sensor.log(action.id, 'success', 'debounce-execution-complete', {
-            success: result.ok,
-            finalMessage: result.message
-          })
-
-          return result
-        } finally {
-          // Restore original bypass flag
-          action._bypassDebounce = originalBypass
-        }
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-
-        sensor.error(action.id, errorMessage, 'debounce-execution-error')
-
-        // Clear timer reference on error
-        action._debounceTimer = undefined
-
-        log.error(`Debounce execution failed for ${action.id}: ${errorMessage}`)
-
-        return {
-          ok: false,
-          payload: undefined,
-          message: `Debounce execution failed: ${errorMessage}`
-        }
-      }
-    },
-    1, // Execute once
-    timerId
-  )
-
   sensor.log(action.id, 'debounce', 'talent-debounce', {
     debounceMs: action.debounce,
     maxWait: action.maxWait,
-    firstCallTime
+    firstCallTime,
+    timerId: timerId.slice(-8)
   })
 
   return {
@@ -190,236 +135,85 @@ export const recuperation = (action: IO, payload: any): TalentResult => {
 }
 
 // ===========================================
-// PROCESSING TALENTS (Pipeline)
-// ===========================================
-
-export const schema = (action: IO, payload: any): TalentResult => {
-  if (!action.schema) {
-    return {ok: true, payload}
-  }
-
-  try {
-    const result = action.schema(payload)
-    if (!result.ok) {
-      sensor.log(action.id, 'error', 'talent-schema', {
-        errors: result.errors
-      })
-      return {
-        ok: false,
-        error: true,
-        message: `Schema validation failed: ${result.errors.join(', ')}`,
-        payload
-      }
-    }
-    return {
-      ok: true,
-      payload: result.data,
-      message: 'Schema validation passed'
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return {
-      ok: false,
-      error: true,
-      message: `Schema error: ${errorMessage}`,
-      payload
-    }
-  }
-}
-
-export const condition = (action: IO, payload: any): TalentResult => {
-  if (!action.condition) {
-    return {ok: true, payload}
-  }
-
-  try {
-    const conditionMet = action.condition(payload)
-    if (!conditionMet) {
-      sensor.log(action.id, 'skip', 'talent-condition', {
-        reason: 'Condition not met'
-      })
-      return {
-        ok: false,
-        message: 'Condition not met - execution skipped',
-        payload
-      }
-    }
-    return {
-      ok: true,
-      payload,
-      message: 'Condition met'
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return {
-      ok: false,
-      error: true,
-      message: `Condition error: ${errorMessage}`,
-      payload
-    }
-  }
-}
-
-export const selector = (action: IO, payload: any): TalentResult => {
-  if (!action.selector) {
-    return {ok: true, payload}
-  }
-
-  try {
-    const selectedData = action.selector(payload)
-    return {
-      ok: true,
-      payload: selectedData,
-      message: 'Payload selected'
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return {
-      ok: false,
-      error: true,
-      message: `Selector error: ${errorMessage}`,
-      payload
-    }
-  }
-}
-
-export const transform = (action: IO, payload: any): TalentResult => {
-  if (!action.transform) {
-    return {ok: true, payload}
-  }
-
-  try {
-    const transformedPayload = action.transform(payload)
-    return {
-      ok: true,
-      payload: transformedPayload,
-      message: 'Payload transformed'
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return {
-      ok: false,
-      error: true,
-      message: `Transform error: ${errorMessage}`,
-      payload
-    }
-  }
-}
-
-export const detectChanges = (action: IO, payload: any): TalentResult => {
-  if (action.detectChanges !== true) {
-    return {ok: true, payload}
-  }
-
-  const hasChanged = payloadState.hasChanged(action.id, payload)
-  if (!hasChanged) {
-    sensor.log(action.id, 'skip', 'talent-detect-changes', {
-      reason: 'Payload unchanged'
-    })
-    return {
-      ok: false,
-      message: 'Payload unchanged - execution skipped',
-      payload
-    }
-  }
-
-  return {
-    ok: true,
-    payload,
-    message: 'Payload changed'
-  }
-}
-
-export const required = (action: IO, payload: any): TalentResult => {
-  if (action.required === undefined) {
-    return {ok: true, payload}
-  }
-
-  if (action.required === true && payload === undefined) {
-    return {
-      ok: false,
-      message: 'Required payload not provided',
-      payload
-    }
-  }
-
-  if (action.required === 'non-empty') {
-    if (
-      payload === undefined ||
-      payload === null ||
-      payload === '' ||
-      (Array.isArray(payload) && payload.length === 0) ||
-      (typeof payload === 'object' && Object.keys(payload).length === 0)
-    ) {
-      return {
-        ok: false,
-        message: 'Non-empty payload required',
-        payload
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    payload,
-    message: 'Payload requirement met'
-  }
-}
-
-// ===========================================
 // SCHEDULING TALENTS (Post-pipeline)
 // ===========================================
 
-export const scheduleExecution = (action: IO, payload: any): TalentResult => {
-  const config = action._scheduleConfig!
-  const interval = config.interval || config.delay || 0
-  const repeat = config.repeat ?? 1
-  const delay = config.delay
+export const scheduleExecution = (action: IO, payload: any): CyreResponse => {
+  const interval = action.interval
+  const delay = action.delay
+  const repeat = action.repeat
 
-  const result = TimeKeeper.keep(
-    interval,
-    async () => await useDispatch(action, payload),
-    repeat,
-    action.id,
-    delay
-  )
+  // If no scheduling needed, return success
+  if (!interval && !delay && !repeat) {
+    return {ok: true, payload, message: 'No scheduling needed'}
+  }
 
-  if (result.kind === 'error') {
+  // Use interval for duration, default to delay if no interval
+  const duration = interval || delay || 1000
+  const actualRepeat = repeat ?? 1
+
+  try {
+    const result = TimeKeeper.keep(
+      duration,
+      async () => {
+        // Import here to avoid circular dependency
+        const {useDispatch} = await import('../components/cyre-dispatch')
+        return await useDispatch(action, payload)
+      },
+      actualRepeat,
+      `${action.id}-scheduled`,
+      delay
+    )
+
+    if (result.kind === 'error') {
+      return {
+        ok: false,
+        payload: undefined,
+        message: `Scheduling failed: ${result.error.message}`
+      }
+    }
+
+    sensor.log(action.id, 'info', 'talent-schedule', {
+      interval,
+      delay,
+      repeat: actualRepeat,
+      timerId: `${action.id}-scheduled`
+    })
+
+    return {
+      ok: true,
+      payload: undefined,
+      message: 'Scheduled execution'
+      //schedule: {interval, delay, repeat: actualRepeat}
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
     return {
       ok: false,
       payload: undefined,
-      message: `Scheduling failed: ${result.error.message}`
+      message: `Scheduling error: ${errorMessage}`
     }
-  }
-
-  return {
-    ok: true,
-    payload: undefined,
-    message: 'Scheduled execution',
-    metadata: {scheduled: true, interval, delay, repeat}
   }
 }
 
 // ===========================================
-// TALENT REGISTRY
+// TALENT REGISTRY WITH PLUGIN APPROACH
 // ===========================================
 
 export const talents = {
-  // Protection talents
+  // Protection talents (handled in app.call pre-pipeline)
   block,
   throttle,
   debounce,
   recuperation,
+  path: pathTalents,
+  pattern: patterns,
+  fusion: fusion,
 
-  // Processing talents
-  schema,
-  condition,
-  selector,
-  transform,
-  detectChanges,
-  required,
+  // Processing talents (handled in processCall pipeline) - FROM PLUGIN
+  ...stateTalents,
 
-  // Scheduling talents
+  // Scheduling talents (handled post-pipeline)
   scheduleExecution
 } as const
 
@@ -502,4 +296,14 @@ export const executeTalentSequence = (
     payload: currentPayload,
     message: `${talentNames.length} talents executed successfully`
   }
+}
+
+/**
+ * Main processing pipeline execution - delegates to state talents plugin
+ */
+export const executeProcessingPipeline = (
+  action: IO,
+  payload: any
+): TalentResult => {
+  return stateTalents.executeStatePipeline(action, payload)
 }
