@@ -7,6 +7,7 @@ import {hasTalent, type TalentName} from './talent-definitions'
 import {pathEngine} from './path-engine'
 import {fusionDataDefinition, patternDataDefinition} from './fusion-plugin'
 import {compileIntelligenceConfig} from '../intelligence/intelligence-compiler'
+import {log} from '@/components/cyre-log'
 
 /*
 
@@ -332,6 +333,9 @@ export const compileAction = (
             hasFastPath: false
           }
         }
+        log.error(
+          `data-definitions verification failed ${key}: ${result.error}`
+        )
         errors.push(`${key}: ${result.error}`)
       } else {
         compiledAction[key as keyof IO] = result.data
@@ -353,6 +357,7 @@ export const compileAction = (
     } else {
       // Pass through unknown fields
       compiledAction[key as keyof IO] = value
+      log.error(`data-definitions unknown definition: ${key}: `)
     }
   }
 

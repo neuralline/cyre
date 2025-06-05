@@ -34,7 +34,7 @@ export const useDispatch = async (
   const currentPayload = payload !== undefined ? payload : action.payload
 
   try {
-    sensor.callToDispatch(action.id, {
+    sensor.log(action.id, {
       timestamp: Date.now(),
       payloadType: typeof currentPayload,
       hasSchema: !!action.schema,
@@ -68,7 +68,7 @@ export const useDispatch = async (
     const totalTime = performance.now() - startTime
 
     // Record execution metrics
-    sensor.dispatchToExecute(action.id, totalTime, {
+    sensor.log(action.id, totalTime, {
       success: result.ok,
       executionPath: 'direct-dispatch',
       payloadPreserved: true,

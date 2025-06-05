@@ -1,19 +1,25 @@
+import {metricsCore} from './../metrics/core'
 // src/schema/fusion-plugin.ts
-// Multi-Sensor Fusion plugin for data-definitions
+// Multi-Sensor Fusion and Pattern Recognition plugin with correct exports
 
-import {metricsReport, sensor} from '../context/metrics-report'
+import {sensor} from '../context/metrics-report'
 import {io} from '../context/state'
-import {cyre} from '../app'
-import {getFusionResult, getPatternState} from '../intelligence/fusion-cache'
+import {
+  getFusionResult,
+  getPatternState,
+  setFusionResult,
+  setPatternState
+} from '../intelligence/fusion-cache'
+import {log} from '@/components/cyre-log'
 
 /*
 
-      C.Y.R.E - F.U.S.I.O.N
-                P.L.U.G.I.N
+      C.Y.R.E - F.U.S.I.O.N - P.L.U.G.I.N
       
-      Data definition plugin for multi-sensor fusion:
+      Data definition plugin for multi-sensor fusion and pattern recognition:
       - Validates fusion configuration
-      - Registers fusion data types
+      - Validates pattern configuration  
+      - Registers fusion and pattern data types
       - Integrates with talent compilation system
 
 */
@@ -46,12 +52,41 @@ export interface FusionConfig {
   }
 }
 
+export interface PatternConfig {
+  sequences?: Array<{
+    name: string
+    conditions: Array<{
+      channelPattern: string
+      condition: (payload: any) => boolean
+      timeout?: number
+    }>
+    timeout: number
+    allowOverlap: boolean
+  }>
+  anomalies?: Array<{
+    name: string
+    channelPattern: string
+    method: 'zscore' | 'iqr' | 'isolation' | 'custom'
+    threshold: number
+    windowSize: number
+    customDetector?: (values: number[]) => boolean
+  }>
+  frequency?: Array<{
+    name: string
+    channelPattern: string
+    expectedInterval: number
+    tolerance: number
+    minOccurrences: number
+  }>
+}
+
 /**
- * Fusion data definition validator
+ * Fusion data definition validator - CORRECTLY NAMED EXPORT
  */
 export const fusionDataDefinition = (
   value: any
 ): {ok: boolean; data?: FusionConfig; error?: string; talentName?: string} => {
+  log.critical('fusion definitions')
   if (value === undefined) {
     return {ok: true, data: undefined}
   }
@@ -185,43 +220,13 @@ export const fusionDataDefinition = (
   }
 }
 
-// src/schema/pattern-plugin.ts
-// Event Pattern Recognition plugin for data-definitions
-
-export interface PatternConfig {
-  sequences?: Array<{
-    name: string
-    conditions: Array<{
-      channelPattern: string
-      condition: (payload: any) => boolean
-      timeout?: number
-    }>
-    timeout: number
-    allowOverlap: boolean
-  }>
-  anomalies?: Array<{
-    name: string
-    channelPattern: string
-    method: 'zscore' | 'iqr' | 'isolation' | 'custom'
-    threshold: number
-    windowSize: number
-    customDetector?: (values: number[]) => boolean
-  }>
-  frequency?: Array<{
-    name: string
-    channelPattern: string
-    expectedInterval: number
-    tolerance: number
-    minOccurrences: number
-  }>
-}
-
 /**
- * Pattern data definition validator
+ * Pattern data definition validator - CORRECTLY NAMED EXPORT
  */
 export const patternDataDefinition = (
   value: any
 ): {ok: boolean; data?: PatternConfig; error?: string; talentName?: string} => {
+  log.critical('pattern definitions')
   if (value === undefined) {
     return {ok: true, data: undefined}
   }
@@ -366,12 +371,16 @@ export const patternDataDefinition = (
     }
   }
 }
+
+/**
+ * Intelligence interface for accessing fusion and pattern results
+ */
 export const intelligence = {
   /**
    * Get fusion results for a channel
    */
   getFusionResult: (channelId: string) => {
-    return getFusionResult(channelId) // Now properly imported
+    return getFusionResult(channelId)
   },
 
   /**
@@ -381,7 +390,7 @@ export const intelligence = {
     channelId: string,
     patternType?: 'sequence' | 'anomaly' | 'frequency'
   ) => {
-    const events = metricsReport.exportEvents({
+    const events = metricsCore.getEvents({
       actionIds: [channelId],
       eventTypes: ['patterns-detected']
     })
@@ -401,7 +410,7 @@ export const intelligence = {
    * Get current pattern state
    */
   getPatternState: (channelId: string) => {
-    return getPatternState(channelId) // Now properly imported
+    return getPatternState(channelId)
   },
 
   /**
@@ -484,7 +493,7 @@ export const intelligence = {
   },
 
   /**
-   * Create intelligent sensor network (simplified for demo)
+   * Create intelligent sensor network
    */
   createSensorNetwork: (networkConfig: {
     id: string
@@ -502,8 +511,8 @@ export const intelligence = {
     }
   }) => {
     try {
-      // Create branch for the sensor network
-      const networkBranch = cyre.createBranch({pathSegment: networkConfig.id})
+      // Import cyre here to avoid circular dependency
+      const {cyre} = require('../app')
 
       // Create individual sensor channels
       networkConfig.sensors.forEach(sensor => {
@@ -584,7 +593,7 @@ export const intelligence = {
           }
         }
 
-        networkBranch.action(sensorConfig)
+        cyre.action(sensorConfig)
       })
 
       sensor.log(networkConfig.id, 'success', 'sensor-network-created', {
@@ -598,7 +607,6 @@ export const intelligence = {
         message: `Sensor network '${networkConfig.id}' created with ${networkConfig.sensors.length} sensors`,
         network: {
           id: networkConfig.id,
-          branch: networkBranch,
           sensors: networkConfig.sensors.map(s => s.id)
         }
       }
@@ -612,65 +620,5 @@ export const intelligence = {
         network: null
       }
     }
-  }
-}
-
-// Helper function implementations
-const calculateDistance = (
-  a: {x: number; y: number; z?: number},
-  b: {x: number; y: number; z?: number}
-): number => {
-  const dx = a.x - b.x
-  const dy = a.y - b.y
-  const dz = (a.z || 0) - (b.z || 0)
-  return Math.sqrt(dx * dx + dy * dy + dz * dz)
-}
-
-const calculateSpatialCoverage = (
-  sensors: Array<{id: string; location: any; active: boolean}>
-) => {
-  // Simplified coverage calculation
-  const activeLocations = sensors.filter(s => s.active).map(s => s.location)
-
-  if (activeLocations.length === 0) {
-    return {area: 0, gaps: [], redundancy: 0}
-  }
-
-  // Calculate bounding box
-  const minX = Math.min(...activeLocations.map(l => l.x))
-  const maxX = Math.max(...activeLocations.map(l => l.x))
-  const minY = Math.min(...activeLocations.map(l => l.y))
-  const maxY = Math.max(...activeLocations.map(l => l.y))
-
-  const area = (maxX - minX) * (maxY - minY)
-
-  // Simple gap detection (areas without sensors)
-  const gaps = []
-  for (let x = minX; x <= maxX; x += 10) {
-    for (let y = minY; y <= maxY; y += 10) {
-      const nearestSensor = Math.min(
-        ...activeLocations.map(loc => calculateDistance({x, y}, loc))
-      )
-
-      if (nearestSensor > 20) {
-        // Gap if no sensor within 20 units
-        gaps.push({x, y, distance: nearestSensor})
-      }
-    }
-  }
-
-  // Calculate redundancy (overlapping coverage)
-  let redundancy = 0
-  activeLocations.forEach(loc => {
-    const nearby = activeLocations.filter(
-      other => other !== loc && calculateDistance(loc, other) < 15
-    )
-    redundancy += nearby.length
-  })
-
-  return {
-    area,
-    gaps: gaps.slice(0, 10), // Limit to 10 largest gaps
-    redundancy: redundancy / activeLocations.length
   }
 }

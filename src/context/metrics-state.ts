@@ -1,4 +1,5 @@
 // src/context/metrics-state.ts
+// Metrics state with breathing system integration
 
 import {BREATHING, defaultMetrics, MSG} from '../config/cyre-config'
 import type {
@@ -13,16 +14,26 @@ import {memoize} from '../libs/utils'
 import {createStore} from './create-store'
 import {log} from '../components/cyre-log'
 
-// Core Types
+/*
+
+      C.Y.R.E - M.E.T.R.I.C.S - S.T.A.T.E
+      
+      Metrics state management with breathing system integration:
+      - Unified stress calculation
+      - Breathing rate adaptation
+      - System health monitoring
+      - Performance tracking
+
+*/
 
 // Create quantum state store
 const metricsStore = createStore<MetricsState>()
 metricsStore.set('quantum', defaultMetrics)
 
-// Memoized selectors
+// Memoized selectors for performance
 const getStressLevel = memoize(
   (metrics: SystemMetrics, performance: PerformanceMetrics): SystemStress => {
-    // Increase stress sensitivity by lowering the divisors
+    // Calculate stress from system metrics with improved sensitivity
     const cpuStress = Math.min(
       1,
       (metrics.cpu || 0) / (BREATHING.LIMITS.MAX_CPU * 0.7)
@@ -40,7 +51,7 @@ const getStressLevel = memoize(
       (performance.callsPerSecond || 0) / (BREATHING.LIMITS.MAX_CALL_RATE * 0.7)
     )
 
-    // Increase weight of maximum stress component
+    // Weight the maximum stress component more heavily
     const maxStress = Math.max(
       cpuStress,
       memoryStress,
@@ -53,7 +64,7 @@ const getStressLevel = memoize(
       memory: memoryStress,
       eventLoop: eventLoopStress,
       callRate: callRateStress,
-      // Use weighted average with more emphasis on max component
+      // Combined stress with emphasis on max component
       combined: Math.min(
         1,
         (cpuStress +
@@ -67,7 +78,7 @@ const getStressLevel = memoize(
   }
 )
 
-// Add breathing rate calculation
+// Calculate breathing rate based on stress level
 const calculateBreathingRate = (stress: number): number => {
   if (stress >= BREATHING.STRESS.CRITICAL) {
     return BREATHING.RATES.RECOVERY
@@ -81,36 +92,47 @@ const calculateBreathingRate = (stress: number): number => {
   )
 }
 
-// Add Result type if not already defined
+// Result type for state operations
 export type Result<T, E = Error> =
   | {kind: 'ok'; value: T}
   | {kind: 'error'; error: E}
 
-// Export unified state management
+/**
+ * Unified metrics state management with breathing integration
+ */
 export const metricsState = {
-  // Add these properties at the top level to match QuantumState interface
+  // State tracking properties
   inRecuperation: false,
-  _hibernating: false,
+  hibernating: false,
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
   _isLocked: false,
-  _init: false,
+  initialize: false,
   _shutdown: false,
 
+  /**
+   * Check if system is locked
+   */
   isLocked: (): boolean => {
     return metricsState._isLocked
   },
 
+  /**
+   * Get current metrics state (read-only)
+   */
   get: (): Readonly<MetricsState> => {
     const state = metricsStore.get('quantum')!
     return Object.freeze({
       ...state,
       inRecuperation: metricsState.inRecuperation,
-      hibernating: metricsState._hibernating,
+      hibernating: metricsState.hibernating,
       activeFormations: metricsState.activeFormations
     })
   },
 
+  /**
+   * Update metrics state
+   */
   update: (update: Partial<MetricsState>): MetricsState => {
     const current = metricsStore.get('quantum')!
     const next = {
@@ -118,7 +140,7 @@ export const metricsState = {
       ...update,
       lastUpdate: Date.now(),
       inRecuperation: update.inRecuperation ?? metricsState.inRecuperation,
-      hibernating: update.hibernating ?? metricsState._hibernating,
+      hibernating: update.hibernating ?? metricsState.hibernating,
       activeFormations: update.activeFormations ?? metricsState.activeFormations
     }
 
@@ -131,69 +153,156 @@ export const metricsState = {
     return next
   },
 
-  // Breathing operations
+  /**
+   * Update breathing state with system metrics
+   */
   updateBreath: (metrics: SystemMetrics): MetricsState => {
     try {
       const current = metricsStore.get('quantum')!
       const stress = getStressLevel(metrics, current.performance)
       const now = Date.now()
 
+      // Calculate new breathing rate based on stress
+      const newRate = calculateBreathingRate(stress.combined)
+
       const breathing: BreathingState = {
         ...current.breathing,
         breathCount: current.breathing.breathCount + 1,
         lastBreath: now,
         stress: stress.combined,
-        currentRate: calculateBreathingRate(stress.combined),
-        nextBreathDue: now + calculateBreathingRate(stress.combined),
+        currentRate: newRate,
+        nextBreathDue: now + newRate,
         isRecuperating: stress.combined > BREATHING.STRESS.HIGH,
         recuperationDepth: Math.min(1, stress.combined),
         pattern: stress.combined > BREATHING.STRESS.HIGH ? 'RECOVERY' : 'NORMAL'
       }
 
-      return metricsState.update({
+      // Update recovery state tracking
+      metricsState.inRecuperation = breathing.isRecuperating
+
+      const updatedState = metricsState.update({
         system: metrics,
         breathing,
         stress,
         inRecuperation: breathing.isRecuperating
       })
+
+      // Log significant breathing state changes
+      if (breathing.isRecuperating && !current.breathing.isRecuperating) {
+        log.warn('System entering recuperation mode due to high stress')
+      } else if (
+        !breathing.isRecuperating &&
+        current.breathing.isRecuperating
+      ) {
+        log.success('System exiting recuperation mode - stress normalized')
+      }
+
+      return updatedState
     } catch (error) {
-      // CRITICAL: Breathing system corruption affects entire system health
+      // Critical: Breathing system corruption affects entire system health
       log.critical(`Breathing system update failed: ${error}`)
       // Return current state to prevent total failure
       return metricsStore.get('quantum')!
     }
   },
 
-  lock: (): void => {
+  /**
+   * Update breathing state with external stress calculation
+   */
+  updateBreathingWithStress: (
+    stress: number,
+    callRate?: number
+  ): MetricsState => {
     try {
-      metricsState.update({isLocked: true})
+      const current = metricsStore.get('quantum')!
+      const now = Date.now()
+
+      // Calculate new breathing rate
+      const newRate = calculateBreathingRate(stress)
+
+      const breathing: BreathingState = {
+        ...current.breathing,
+        breathCount: current.breathing.breathCount + 1,
+        lastBreath: now,
+        stress: stress,
+        currentRate: newRate,
+        nextBreathDue: now + newRate,
+        isRecuperating: stress > BREATHING.STRESS.HIGH,
+        recuperationDepth: Math.min(1, stress),
+        pattern: stress > BREATHING.STRESS.HIGH ? 'RECOVERY' : 'NORMAL'
+      }
+
+      // Update performance metrics if call rate provided
+      const performance = callRate
+        ? {
+            ...current.performance,
+            callsPerSecond: callRate,
+            lastCallTimestamp: now
+          }
+        : current.performance
+
+      // Update recovery state tracking
+      metricsState.inRecuperation = breathing.isRecuperating
+
+      return metricsState.update({
+        breathing,
+        performance,
+        stress: {
+          ...current.stress,
+          combined: stress,
+          callRate: callRate || current.stress.callRate
+        },
+        inRecuperation: breathing.isRecuperating
+      })
     } catch (error) {
-      // CRITICAL: Lock failure compromises system security
-      log.critical(`System lock failed: ${error}`)
-      throw error // Re-throw to prevent unsafe operation
-    }
-  },
-  init: (): void => {
-    try {
-      metricsState.update({initialize: true})
-      log.sys(MSG.QUANTUM_HEADER)
-    } catch (error) {
-      // CRITICAL: Lock failure compromises system security
-      log.critical(`System init failed: ${error}`)
-      throw error // Re-throw to prevent unsafe operation
-    }
-  },
-  shutdown: (): void => {
-    try {
-      metricsState.update({isShutdown: true})
-    } catch (error) {
-      // CRITICAL: Lock failure compromises system security
-      log.critical(`System init failed: ${error}`)
-      throw error // Re-throw to prevent unsafe operation
+      log.critical(`Breathing update with stress failed: ${error}`)
+      return metricsStore.get('quantum')!
     }
   },
 
-  // System health checks
+  /**
+   * Lock the system
+   */
+  lock: (): void => {
+    try {
+      metricsState._isLocked = true
+      metricsState.update({isLocked: true})
+    } catch (error) {
+      log.critical(`System lock failed: ${error}`)
+      throw error
+    }
+  },
+
+  /**
+   * Initialize the system
+   */
+  init: (): void => {
+    try {
+      metricsState.initialize = true
+      metricsState.update({initialize: true})
+      log.sys(MSG.QUANTUM_HEADER)
+    } catch (error) {
+      log.critical(`System init failed: ${error}`)
+      throw error
+    }
+  },
+
+  /**
+   * Shutdown the system
+   */
+  shutdown: (): void => {
+    try {
+      metricsState._shutdown = true
+      metricsState.update({isShutdown: true})
+    } catch (error) {
+      log.critical(`System shutdown failed: ${error}`)
+      throw error
+    }
+  },
+
+  /**
+   * Check if system is healthy
+   */
   isHealthy: (): boolean => {
     const state = metricsStore.get('quantum')!
     return (
@@ -202,6 +311,9 @@ export const metricsState = {
     )
   },
 
+  /**
+   * Check if call should be allowed based on priority and system state
+   */
   shouldAllowCall: (priority: Priority): boolean => {
     const state = metricsStore.get('quantum')!
 
@@ -216,23 +328,63 @@ export const metricsState = {
     )
   },
 
+  /**
+   * Reset all metrics state
+   */
   reset: (): void => {
     metricsState.inRecuperation = false
-    metricsState._hibernating = false
+    metricsState.hibernating = false
     metricsState.activeFormations = 0
     metricsState._isLocked = false
     metricsState._shutdown = false
-    metricsState._init = false
+    metricsState.initialize = false
+
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
       metricsState.recuperationInterval = undefined
     }
+
     metricsStore.set('quantum', defaultMetrics)
   },
-  forget: (key: StateKey) => {
-    metricsStore.forget(key)
+
+  /**
+   * Forget specific state key
+   */
+  forget: (key: StateKey): boolean => {
+    return metricsStore.forget(key)
+  },
+
+  /**
+   * Get breathing statistics for monitoring
+   */
+  getBreathingStats: () => {
+    const state = metricsStore.get('quantum')!
+    const breathing = state.breathing
+
+    return {
+      currentStress: breathing.stress,
+      currentRate: breathing.currentRate,
+      isRecuperating: breathing.isRecuperating,
+      pattern: breathing.pattern,
+      breathCount: breathing.breathCount,
+      lastBreath: breathing.lastBreath,
+      nextBreathDue: breathing.nextBreathDue,
+      recuperationDepth: breathing.recuperationDepth,
+      stressThresholds: {
+        low: BREATHING.STRESS.LOW,
+        medium: BREATHING.STRESS.MEDIUM,
+        high: BREATHING.STRESS.HIGH,
+        critical: BREATHING.STRESS.CRITICAL
+      },
+      rateRange: {
+        min: BREATHING.RATES.MIN,
+        base: BREATHING.RATES.BASE,
+        max: BREATHING.RATES.MAX,
+        recovery: BREATHING.RATES.RECOVERY
+      }
+    }
   }
 }
 
 // Export type for external use
-export type {MetricsState as MetricsState, StateKey}
+export type {MetricsState, StateKey}

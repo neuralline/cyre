@@ -144,8 +144,8 @@ const transform = (action: IO, payload: any): TalentResult => {
 /**
  * Change detection talent - checks if payload has changed from previous
  */
-const detectChanges = (action: IO, payload: any): TalentResult => {
-  if (action.detectChanges !== true) {
+export const detectChanges = (action: IO, payload: any): TalentResult => {
+  if (!action.detectChanges || action.detectChanges !== true) {
     return {ok: true, payload}
   }
 
@@ -153,21 +153,24 @@ const detectChanges = (action: IO, payload: any): TalentResult => {
     const hasChanged = payloadState.hasChanged(action.id, payload)
 
     if (!hasChanged) {
-      sensor.log(action.id, 'skip', 'talent-detect-changes', {
+      // This is SUCCESSFUL protection, not an error
+      sensor.log(action.id, 'skip', 'change-detection', {
         reason: 'Payload unchanged',
-        payloadType: typeof payload
+        payloadType: typeof payload,
+        protectionActive: true
       })
 
       return {
-        ok: false,
+        ok: false, // Don't execute, but this is successful protection
         message: 'Payload unchanged - execution skipped',
         payload
       }
     }
 
-    sensor.log(action.id, 'info', 'talent-detect-changes', {
+    sensor.log(action.id, 'info', 'change-detection', {
       hasChanged: true,
-      payloadType: typeof payload
+      payloadType: typeof payload,
+      protectionPassed: true
     })
 
     return {
@@ -178,7 +181,7 @@ const detectChanges = (action: IO, payload: any): TalentResult => {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
 
-    sensor.error(action.id, errorMessage, 'detect-changes-talent')
+    sensor.error(action.id, errorMessage, 'change-detection')
 
     return {
       ok: false,

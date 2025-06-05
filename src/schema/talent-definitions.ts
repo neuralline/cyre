@@ -305,5 +305,45 @@ export const executeProcessingPipeline = (
   action: IO,
   payload: any
 ): TalentResult => {
-  return stateTalents.executeStatePipeline(action, payload)
+  let currentPayload = payload
+
+  // 1. Schema validation first
+  if (action.schema) {
+    const result = stateTalents.executeStatePipeline(action, currentPayload)
+    if (!result.ok) return result
+    currentPayload = result.payload
+  } else {
+    // Run state pipeline without schema
+    const result = stateTalents.executeStatePipeline(action, currentPayload)
+    if (!result.ok) return result
+    currentPayload = result.payload
+  }
+
+  // 2. NEW: Execute fusion talent if configured
+  if (action.fusion) {
+    const fusionResult = fusion(action, currentPayload)
+    if (fusionResult.ok) {
+      currentPayload = fusionResult.payload
+    } else {
+      // Log fusion failure but continue
+      console.warn(`Fusion failed for ${action.id}: ${fusionResult.message}`)
+    }
+  }
+
+  // 3. NEW: Execute pattern recognition if configured
+  if (action.patterns) {
+    const patternResult = patterns(action, currentPayload)
+    if (!patternResult.ok) {
+      // Log pattern failure but continue
+      console.warn(
+        `Pattern detection failed for ${action.id}: ${patternResult.message}`
+      )
+    }
+  }
+
+  return {
+    ok: true,
+    payload: currentPayload,
+    message: 'Processing pipeline executed successfully'
+  }
 }

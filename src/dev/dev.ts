@@ -130,9 +130,10 @@ export const dev = {
         1
       )}%`
     )
-    console.log(
-      `  Avg Latency: ${analysis.health.factors.latency.toFixed(2)}ms`
-    )
+    console
+      .log
+      //  `  Avg Latency: ${analysis?.health?.factors?.latency.toFixed(2)}ms`
+      ()
 
     if (analysis.alerts.length > 0) {
       console.log(`\n⚠️  ${analysis.alerts.length} alerts require attention`)

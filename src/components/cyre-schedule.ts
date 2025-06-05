@@ -9,10 +9,9 @@ import type {
   TaskResult,
   TaskExecutionContext,
   TaskExecutionResult,
-  TaskConflict,
   TimelineLoad,
   TaskFilter
-} from '../types/timeline-task'
+} from '../types/timeline'
 import type {ActionPayload, Priority} from '../types/core'
 import {timeline} from '../context/state'
 import {metricsState} from '../context/metrics-state'

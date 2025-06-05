@@ -63,6 +63,11 @@ export async function processCall(
         payload: pipelineResult.payload,
         message: pipelineResult.message || 'Processing pipeline failed'
       }
+    } else {
+      sensor.error(action.id, 'pipeline-stage', 'talent-execution', {
+        stage: 'schema-validation',
+        talentName: 'schema'
+      })
     }
 
     // Update payload with processed result

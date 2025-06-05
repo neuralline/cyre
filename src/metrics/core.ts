@@ -1,107 +1,32 @@
 // src/metrics/core.ts
-// Core metrics collection with separated event types and log levels
+// Core metrics collection with raw data dumping capability
 
-import type {ActionId, Priority, StateKey} from '../types/core'
+import type {ActionId} from '../types/core'
 import {createStore} from '../context/create-store'
-import {SensorEvent} from './sensor'
-import {log, LogLevel, Colors} from '../components/cyre-log'
+import type {
+  RawEvent,
+  SensorEvent,
+  SystemMetrics,
+  ChannelMetrics,
+  MetricEvent
+} from '../types/system'
+import {log, LogLevel} from '../components/cyre-log'
 
 /*
 
       C.Y.R.E - M.E.T.R.I.C.S - C.O.R.E
       
-      Clean separation of concerns:
-      - MetricEvent: What happened (call, execution, error)
-      - LogLevel: How important it is (error, warn, info, debug)
-      - Unified event structure
-      - Efficient memory management
+      Core metrics collection with raw data dumping:
+      - Single responsibility: collect and store events
+      - Fast event recording with minimal processing
+      - Raw data dump during cleanup for analysis
+      - Configurable dump format (terminal or JSON)
 
 */
 
-// Core metric event types - what happened
-export type MetricEvent =
-  | 'call' // Action was called
-  | 'dispatch' // Dispatch to handler started
-  | 'execution' // Handler execution completed
-  | 'error' // Error occurred
-  | 'throttle' // Throttle protection activated
-  | 'debounce' // Debounce protection activated
-  | 'skip' // Execution skipped
-  | 'blocked' // Execution blocked
-  | 'success' // Operation successful
-  | 'info' // Information event
-  | 'warning' // Warning event
-  | 'critical' // Critical system event
-
-// Enhanced event structure with log level separation
-export interface RawEvent {
-  id: string
-
-  timestamp: number
-
-  actionId: ActionId
-
-  eventType: MetricEvent
-
-  message?: string
-  /** Send to terminal via cyre-log */
-  log?: boolean
-  /** Log level for terminal output */
-  logLevel?: LogLevel
-  /** Additional metadata */
-  metadata?: Record<string, unknown>
-  /** Location/context information */
-  location?: string
-  /** Priority level */
-  priority?: Priority
-}
-
-// System statistics
-export interface SystemMetrics {
-  totalCalls: number
-  totalExecutions: number
-  totalErrors: number
-  callRate: number
-  lastCallTime: number
-  startTime: number
-  uptime: number
-}
-
-// Channel statistics
-export interface ChannelMetrics {
-  id: ActionId
-  calls: number
-  executions: number
-  errors: number
-  lastExecution: number
-  averageLatency: number
-  successRate: number
-  errorRate: number
-  protectionEvents: {
-    throttled: number
-    debounced: number
-    blocked: number
-    skipped: number
-  }
-}
-
-// Analysis configuration
-interface AnalysisConfig {
-  maxEvents: number
-  retentionTime: number
-  cleanupInterval: number
-}
-
-// Default configuration
-const DEFAULT_CONFIG: AnalysisConfig = {
-  maxEvents: 1000,
-  retentionTime: 3600000, // 1 hour
-  cleanupInterval: 300000 // 5 minutes
-}
-
 // Event storage
 const eventStore = createStore<RawEvent>()
-const channelMetricsStore = createStore<ChannelMetrics>()
+const channelStore = createStore<ChannelMetrics>()
 
 // System state
 let systemMetrics: SystemMetrics = {
@@ -117,73 +42,71 @@ let systemMetrics: SystemMetrics = {
 let eventSequence = 0
 let cleanupTimer: NodeJS.Timeout | undefined
 
+// Dump configuration
+interface DumpConfig {
+  enabled: boolean
+  format: 'terminal' | 'json' | 'both'
+  includeMetadata: boolean
+  maxEventsPerDump: number
+  outputDirectory: string
+  filenamePattern: string
+}
+
+let dumpConfig: DumpConfig = {
+  enabled: false,
+  format: 'json',
+  includeMetadata: true,
+  maxEventsPerDump: 1001,
+  outputDirectory: 'src/log',
+  filenamePattern: 'cyre-metrics-{timestamp}.json'
+}
+
 /**
- * Core metrics collection interface
+ * Core metrics interface
  */
 export const metricsCore = {
   /**
-   * Record a metric event with optional log level
+   * Record event - primary interface
    */
-  record: ({...action}: SensorEvent): void => {
-    const event: RawEvent = {
-      ...action,
+  record: (event: SensorEvent): void => {
+    const rawEvent: RawEvent = {
+      ...event,
       id: `evt-${eventSequence++}`,
       timestamp: Date.now()
     }
 
     // Store event
-    eventStore.set(event.id, event)
+    eventStore.set(rawEvent.id, rawEvent)
 
-    // Update system metrics
-    updateSystemMetrics(event)
+    // Update metrics efficiently
+    updateMetrics(rawEvent)
 
-    // Update channel metrics
-    updateChannelMetrics(event)
-
-    // Trigger cleanup if needed
-    if (eventSequence % 200 === 0) {
-      cleanupEvents()
+    // Terminal output if requested
+    if (event.log && event.logLevel) {
+      sendToLog(event.logLevel, formatMessage(event))
     }
 
-    // Optional terminal output
-    if (action.log) {
-      const message = formatMessage(action)
-      sendToLog(action.logLevel || LogLevel.DEBUG, message)
+    // Periodic cleanup with raw data dump
+    if (eventSequence % 100 === 0) {
+      scheduleCleanup()
     }
   },
 
-  /**
-   * Get system metrics
-   */
-  getSystemMetrics: (): SystemMetrics => {
-    return {
-      ...systemMetrics,
-      uptime: Date.now() - systemMetrics.startTime,
-      callRate: calculateCallRate()
-    }
-  },
+  // Query interfaces
+  getSystemMetrics: (): SystemMetrics => ({
+    ...systemMetrics,
+    uptime: Date.now() - systemMetrics.startTime,
+    callRate: calculateCallRate()
+  }),
 
-  /**
-   * Get channel metrics with protection events
-   */
-  getChannelMetrics: (actionId: ActionId): ChannelMetrics | undefined => {
-    return channelMetricsStore.get(actionId)
-  },
+  getChannelMetrics: (actionId: ActionId): ChannelMetrics | undefined =>
+    channelStore.get(actionId),
 
-  /**
-   * Get all channel metrics
-   */
-  getAllChannelMetrics: (): ChannelMetrics[] => {
-    return channelMetricsStore.getAll()
-  },
+  getAllChannelMetrics: (): ChannelMetrics[] => channelStore.getAll(),
 
-  /**
-   * Get recent events with optional filtering
-   */
   getEvents: (filter?: {
     actionId?: ActionId
     eventType?: MetricEvent
-    logLevel?: LogLevel
     since?: number
     limit?: number
   }): RawEvent[] => {
@@ -196,78 +119,40 @@ export const metricsCore = {
       if (filter.eventType) {
         events = events.filter(e => e.eventType === filter.eventType)
       }
-      if (filter.logLevel) {
-        events = events.filter(e => e.logLevel === filter.logLevel)
-      }
       if (filter.since) {
         events = events.filter(e => e.timestamp >= filter.since!)
       }
     }
 
-    // Sort by timestamp (newest first)
+    // Sort newest first
     events.sort((a, b) => b.timestamp - a.timestamp)
 
-    if (filter?.limit) {
-      events = events.slice(0, filter.limit)
+    return filter?.limit ? events.slice(0, filter.limit) : events
+  },
+
+  // Configuration methods
+  configureDump: (config: Partial<DumpConfig>): void => {
+    dumpConfig = {...dumpConfig, ...config}
+  },
+
+  getDumpConfig: (): DumpConfig => ({...dumpConfig}),
+
+  // Manual dump trigger
+  dumpRawData: (): void => {
+    if (!dumpConfig.enabled) {
+      log.warn('Raw data dump is disabled')
+      return
     }
 
-    return events
+    const allEvents = eventStore.getAll()
+    log.debug(`Manual dump triggered - ${allEvents.length} events available`)
+    performRawDataDump(allEvents, 'manual')
   },
 
-  /**
-   * Calculate success rate for a channel
-   */
-  getSuccessRate: (actionId: ActionId, timeWindow?: number): number => {
-    const since = timeWindow ? Date.now() - timeWindow : undefined
-    const events = metricsCore.getEvents({actionId, since})
-
-    const calls = events.filter(e => e.eventType === 'call').length
-    const errors = events.filter(e => e.eventType === 'error').length
-
-    return calls > 0 ? (calls - errors) / calls : 1
-  },
-
-  /**
-   * Calculate average latency for a channel
-   */
-  getAverageLatency: (actionId: ActionId, timeWindow?: number): number => {
-    const since = timeWindow ? Date.now() - timeWindow : undefined
-    const events = metricsCore.getEvents({
-      actionId,
-      eventType: 'execution',
-      since
-    })
-
-    const latencies = events
-      .map(e => e.metadata?.duration as number)
-      .filter(d => typeof d === 'number' && d > 0)
-
-    return latencies.length > 0
-      ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
-      : 0
-  },
-
-  /**
-   * Get protection event counts for a channel
-   */
-  getProtectionEvents: (actionId: ActionId, timeWindow?: number) => {
-    const since = timeWindow ? Date.now() - timeWindow : undefined
-    const events = metricsCore.getEvents({actionId, since})
-
-    return {
-      throttled: events.filter(e => e.eventType === 'throttle').length,
-      debounced: events.filter(e => e.eventType === 'debounce').length,
-      blocked: events.filter(e => e.eventType === 'blocked').length,
-      skipped: events.filter(e => e.eventType === 'skip').length
-    }
-  },
-
-  /**
-   * Reset all metrics
-   */
+  // Utility methods
   reset: (): void => {
     eventStore.clear()
-    channelMetricsStore.clear()
+    channelStore.clear()
     systemMetrics = {
       totalCalls: 0,
       totalExecutions: 0,
@@ -280,33 +165,48 @@ export const metricsCore = {
     eventSequence = 0
   },
 
-  /**
-   * Initialize metrics system
-   */
-  initialize: (config: Partial<AnalysisConfig> = {}): void => {
-    const finalConfig = {...DEFAULT_CONFIG, ...config}
+  initialize: (config?: {
+    retentionTime?: number
+    cleanupInterval?: number
+    dump?: Partial<DumpConfig>
+  }): void => {
+    const {
+      retentionTime = 3600000,
+      cleanupInterval = 300000,
+      dump
+    } = config || {}
 
-    // Start cleanup timer
+    if (dump) {
+      dumpConfig = {...dumpConfig, ...dump}
+    }
+
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer)
+    }
+
     cleanupTimer = setInterval(() => {
-      cleanupEvents(finalConfig.retentionTime)
-    }, finalConfig.cleanupInterval)
+      cleanupOldEvents(retentionTime)
+    }, cleanupInterval)
   },
 
-  /**
-   * Shutdown metrics system
-   */
   shutdown: (): void => {
     if (cleanupTimer) {
       clearInterval(cleanupTimer)
       cleanupTimer = undefined
     }
+
+    // Final dump before shutdown
+    if (dumpConfig.enabled) {
+      performRawDataDump(eventStore.getAll(), 'shutdown')
+    }
   }
 }
 
 /**
- * Update system-level metrics
+ * Update metrics efficiently
  */
-const updateSystemMetrics = (event: RawEvent): void => {
+const updateMetrics = (event: RawEvent): void => {
+  // Update system metrics
   switch (event.eventType) {
     case 'call':
       systemMetrics.totalCalls++
@@ -319,13 +219,16 @@ const updateSystemMetrics = (event: RawEvent): void => {
       systemMetrics.totalErrors++
       break
   }
+
+  // Update channel metrics
+  updateChannelMetrics(event)
 }
 
 /**
- * Update channel-level metrics with protection events
+ * Update channel metrics with proper initialization
  */
 const updateChannelMetrics = (event: RawEvent): void => {
-  let metrics = channelMetricsStore.get(event.actionId)
+  let metrics = channelStore.get(event.actionId)
 
   if (!metrics) {
     metrics = {
@@ -333,6 +236,7 @@ const updateChannelMetrics = (event: RawEvent): void => {
       calls: 0,
       executions: 0,
       errors: 0,
+      actualErrors: 0,
       lastExecution: 0,
       averageLatency: 0,
       successRate: 1,
@@ -346,6 +250,17 @@ const updateChannelMetrics = (event: RawEvent): void => {
     }
   }
 
+  // Ensure protectionEvents is always properly initialized
+  if (!metrics.protectionEvents) {
+    metrics.protectionEvents = {
+      throttled: 0,
+      debounced: 0,
+      blocked: 0,
+      skipped: 0
+    }
+  }
+
+  // Update counters
   switch (event.eventType) {
     case 'call':
       metrics.calls++
@@ -354,16 +269,30 @@ const updateChannelMetrics = (event: RawEvent): void => {
       metrics.executions++
       metrics.lastExecution = event.timestamp
 
-      // Update average latency
+      // Update latency with safe calculation
       const duration = event.metadata?.duration as number
-      if (typeof duration === 'number' && duration > 0) {
-        metrics.averageLatency =
-          (metrics.averageLatency * (metrics.executions - 1) + duration) /
-          metrics.executions
+      if (typeof duration === 'number' && duration > 0 && !isNaN(duration)) {
+        if (metrics.executions === 1) {
+          metrics.averageLatency = duration
+        } else {
+          metrics.averageLatency =
+            (metrics.averageLatency * (metrics.executions - 1) + duration) /
+            metrics.executions
+        }
       }
       break
     case 'error':
-      metrics.errors++
+      // Check if this is an actual error or a protection event
+      const isActualError =
+        event.location !== 'protection' && !event.metadata?.successfulProtection
+
+      if (isActualError) {
+        metrics.errors++
+        metrics.actualErrors = (metrics.actualErrors || 0) + 1
+      } else {
+        // This is a protection skip being logged as error - count as skip
+        metrics.protectionEvents.skipped++
+      }
       break
     case 'throttle':
       metrics.protectionEvents.throttled++
@@ -379,70 +308,361 @@ const updateChannelMetrics = (event: RawEvent): void => {
       break
   }
 
-  // Recalculate rates
-  metrics.successRate =
-    metrics.calls > 0 ? (metrics.calls - metrics.errors) / metrics.calls : 1
-  metrics.errorRate = metrics.calls > 0 ? metrics.errors / metrics.calls : 0
+  // Recalculate rates using actual errors only with safe division
+  if (metrics.calls > 0) {
+    const actualErrors = metrics.actualErrors || metrics.errors
+    metrics.successRate = Math.max(
+      0,
+      (metrics.calls - actualErrors) / metrics.calls
+    )
+    metrics.errorRate = actualErrors / metrics.calls
+  } else {
+    metrics.successRate = 1
+    metrics.errorRate = 0
+  }
 
-  channelMetricsStore.set(event.actionId, metrics)
+  // Ensure averageLatency is a valid number
+  if (isNaN(metrics.averageLatency) || !isFinite(metrics.averageLatency)) {
+    metrics.averageLatency = 0
+  }
+
+  channelStore.set(event.actionId, metrics)
 }
 
 /**
  * Calculate current call rate
  */
 const calculateCallRate = (): number => {
-  const now = Date.now()
-  const oneSecondAgo = now - 1000
-
   const recentCalls = eventStore
     .getAll()
-    .filter(e => e.eventType === 'call' && e.timestamp > oneSecondAgo)
-
+    .filter(e => e.eventType === 'call' && e.timestamp > Date.now() - 1000)
   return recentCalls.length
+}
+
+/**
+ * Schedule cleanup with raw data dump
+ */
+const scheduleCleanup = (): void => {
+  process.nextTick(() => {
+    if (dumpConfig.enabled) {
+      const allEvents = eventStore.getAll()
+      log.debug(
+        `Scheduled cleanup triggered - ${allEvents.length} events to process`
+      )
+      performRawDataDump(allEvents, 'scheduled_cleanup')
+    }
+    // Comment out cleanupOldEvents as requested
+    cleanupOldEvents()
+  })
+}
+
+/**
+ * Perform raw data dump in specified format
+ */
+const performRawDataDump = (events: RawEvent[], trigger = 'manual'): void => {
+  if (!events.length) {
+    log.debug(`No events to dump (trigger: ${trigger})`)
+    return
+  }
+
+  log.debug(
+    `Performing raw data dump - ${events.length} events (trigger: ${trigger}, format: ${dumpConfig.format})`
+  )
+
+  const dumpData = prepareDumpData(events, trigger)
+
+  switch (dumpConfig.format) {
+    case 'terminal':
+      dumpToTerminal(dumpData)
+      break
+    case 'json':
+      dumpToJson(dumpData)
+      break
+    case 'both':
+      dumpToTerminal(dumpData)
+      dumpToJson(dumpData)
+      break
+    default:
+      log.error(`Unknown dump format: ${dumpConfig.format}`)
+  }
+}
+
+/**
+ * Prepare data for dumping
+ */
+const prepareDumpData = (events: RawEvent[], trigger: string) => {
+  const limitedEvents = events
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, dumpConfig.maxEventsPerDump)
+
+  const summary = {
+    dumpInfo: {
+      trigger,
+      timestamp: new Date().toISOString(),
+      totalEvents: events.length,
+      dumpedEvents: limitedEvents.length,
+      timespan:
+        events.length > 0
+          ? {
+              oldest: new Date(
+                Math.min(...events.map(e => e.timestamp))
+              ).toISOString(),
+              newest: new Date(
+                Math.max(...events.map(e => e.timestamp))
+              ).toISOString()
+            }
+          : null
+    },
+    systemMetrics: {
+      ...systemMetrics,
+      uptime: Date.now() - systemMetrics.startTime,
+      callRate: calculateCallRate()
+    },
+    eventBreakdown: getEventBreakdown(events),
+    channelSummary: getChannelSummary(),
+    rawEvents: limitedEvents.map(event =>
+      dumpConfig.includeMetadata
+        ? event
+        : {
+            id: event.id,
+            actionId: event.actionId,
+            eventType: event.eventType,
+            timestamp: event.timestamp,
+            location: event.location,
+            message: event.message
+          }
+    )
+  }
+
+  return summary
+}
+
+/**
+ * Get event breakdown statistics
+ */
+const getEventBreakdown = (events: RawEvent[]) => {
+  const breakdown = events.reduce((acc, event) => {
+    acc[event.eventType] = (acc[event.eventType] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
+  const locationBreakdown = events.reduce((acc, event) => {
+    if (event.location) {
+      acc[event.location] = (acc[event.location] || 0) + 1
+    }
+    return acc
+  }, {} as Record<string, number>)
+
+  return {
+    byEventType: breakdown,
+    byLocation: locationBreakdown,
+    totalEvents: events.length
+  }
+}
+
+/**
+ * Get channel summary
+ */
+const getChannelSummary = () => {
+  const channels = channelStore.getAll()
+  return {
+    totalChannels: channels.length,
+    channelMetrics: channels.map(channel => ({
+      id: channel.id,
+      calls: channel.calls,
+      executions: channel.executions,
+      errors: channel.errors,
+      successRate: channel.successRate,
+      averageLatency: channel.averageLatency,
+      protectionEvents: channel.protectionEvents
+    }))
+  }
+}
+
+/**
+ * Dump to terminal with formatted output
+ */
+const dumpToTerminal = (data: any): void => {
+  console.log('\n' + '='.repeat(60))
+  console.log('📊 CYRE METRICS RAW DATA DUMP')
+  console.log('='.repeat(60))
+
+  console.log(`Trigger: ${data.dumpInfo.trigger}`)
+  console.log(`Timestamp: ${data.dumpInfo.timestamp}`)
+  console.log(
+    `Events: ${data.dumpInfo.dumpedEvents}/${data.dumpInfo.totalEvents}`
+  )
+
+  if (data.dumpInfo.timespan) {
+    console.log(
+      `Timespan: ${data.dumpInfo.timespan.oldest} → ${data.dumpInfo.timespan.newest}`
+    )
+  }
+
+  console.log('\n📈 SYSTEM METRICS:')
+  console.log(`  Calls: ${data.systemMetrics.totalCalls}`)
+  console.log(`  Executions: ${data.systemMetrics.totalExecutions}`)
+  console.log(`  Errors: ${data.systemMetrics.totalErrors}`)
+  console.log(`  Call Rate: ${data.systemMetrics.callRate}/sec`)
+  console.log(`  Uptime: ${(data.systemMetrics.uptime / 1000).toFixed(1)}s`)
+
+  console.log('\n📊 EVENT BREAKDOWN:')
+  Object.entries(data.eventBreakdown.byEventType).forEach(([type, count]) => {
+    console.log(`  ${type}: ${count}`)
+  })
+
+  if (Object.keys(data.eventBreakdown.byLocation).length > 0) {
+    console.log('\n📍 LOCATION BREAKDOWN:')
+    Object.entries(data.eventBreakdown.byLocation).forEach(
+      ([location, count]) => {
+        console.log(`  ${location}: ${count}`)
+      }
+    )
+  }
+
+  console.log('\n🏢 CHANNEL SUMMARY:')
+  console.log(`  Total Channels: ${data.channelSummary.totalChannels}`)
+
+  if (data.channelSummary.channelMetrics.length > 0) {
+    console.log('  Top Channels by Activity:')
+    data.channelSummary.channelMetrics
+      .sort((a: any, b: any) => b.calls - a.calls)
+      .slice(0, 5)
+      .forEach((channel: any) => {
+        console.log(
+          `    ${channel.id}: ${channel.calls} calls, ${(
+            channel.successRate * 100
+          ).toFixed(1)}% success`
+        )
+      })
+  }
+
+  console.log('\n📝 RECENT EVENTS:')
+  data.rawEvents.slice(0, 10).forEach((event: RawEvent) => {
+    const time = new Date(event.timestamp).toLocaleTimeString()
+    const location = event.location ? `@${event.location}` : ''
+    const message = event.message ? ` - ${event.message}` : ''
+    console.log(
+      `  ${time} | ${event.actionId} | ${event.eventType} ${location}${message}`
+    )
+  })
+
+  console.log('='.repeat(60) + '\n')
+}
+
+/**
+ * Dump to JSON format with file output to specified directory
+ */
+const dumpToJson = (data: any): void => {
+  const jsonOutput = JSON.stringify(data, null, 2)
+
+  // Always attempt file output for JSON dumps
+  if (typeof process !== 'undefined') {
+    try {
+      const fs = require('fs')
+      const path = require('path')
+
+      log.debug(
+        `Attempting to create JSON dump in directory: ${dumpConfig.outputDirectory}`
+      )
+
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(dumpConfig.outputDirectory)) {
+        log.debug(`Creating directory: ${dumpConfig.outputDirectory}`)
+        fs.mkdirSync(dumpConfig.outputDirectory, {recursive: true})
+      }
+
+      // Generate filename with timestamp
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .split('.')[0] // Remove milliseconds
+
+      const filename = dumpConfig.filenamePattern.replace(
+        '{timestamp}',
+        timestamp
+      )
+      const fullPath = path.join(dumpConfig.outputDirectory, filename)
+
+      log.debug(`Writing JSON dump to: ${fullPath}`)
+
+      // Write JSON file
+      fs.writeFileSync(fullPath, jsonOutput, 'utf8')
+
+      // Verify file was created
+      if (fs.existsSync(fullPath)) {
+        const stats = fs.statSync(fullPath)
+        log.success(
+          `📄 Raw metrics data exported to: ${fullPath} (${stats.size} bytes)`
+        )
+      } else {
+        log.error(
+          `File creation failed - file does not exist after write: ${fullPath}`
+        )
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      log.error(`Failed to write metrics dump file: ${errorMessage}`)
+      log.error(`Output directory: ${dumpConfig.outputDirectory}`)
+      log.error(`Filename pattern: ${dumpConfig.filenamePattern}`)
+      log.warn('📄 JSON RAW DATA DUMP (console fallback):')
+      console.log(jsonOutput)
+    }
+  } else {
+    // Browser environment - console output only
+    log.debug('Browser environment detected - using console output')
+    console.log('📄 JSON RAW DATA DUMP:')
+    console.log(jsonOutput)
+  }
 }
 
 /**
  * Clean up old events
  */
-const cleanupEvents = (
-  retentionTime: number = DEFAULT_CONFIG.retentionTime
-): void => {
+const cleanupOldEvents = (retentionTime = 3600000): void => {
   const cutoff = Date.now() - retentionTime
-  const allEvents = eventStore.getAll()
+  const events = eventStore.getAll()
 
-  // Remove old events
-  allEvents.forEach(event => {
+  let removedCount = 0
+  for (const event of events) {
     if (event.timestamp < cutoff) {
       eventStore.forget(event.id)
+      removedCount++
     }
-  })
+  }
+
+  if (removedCount > 0) {
+    console.debug(`Cleaned up ${removedCount} old events`)
+  }
 }
 
 /**
- * Fast message formatting
+ * Format message for terminal output
  */
-const formatMessage = (action: SensorEvent): string => {
-  let msg = `[${action.actionId}] ${action.eventType}`
+const formatMessage = (event: SensorEvent): string => {
+  let msg = `[${event.actionId}] ${event.eventType}`
 
-  if (location) msg += ` @${location}`
+  if (event.location) msg += ` @${event.location}`
+  if (event.message) msg += ` - ${event.message}`
 
-  if (action.metadata) {
-    const metadata = action.metadata
+  if (event.metadata) {
     const parts: string[] = []
-    if (metadata.error) parts.push(`error: ${metadata.error}`)
-    if (metadata.duration) parts.push(`${metadata.duration}ms`)
-    if (metadata.remaining) parts.push(`${metadata.remaining}ms left`)
-    if (metadata.reason) parts.push(`${metadata.reason}`)
-    if (metadata.message) parts.push(`${metadata.message}`)
+    const meta = event.metadata
 
-    if (parts.length > 0) msg += ` - ${parts.join(', ')}`
+    if (meta.duration) parts.push(`${meta.duration}ms`)
+    if (meta.remaining) parts.push(`${meta.remaining}ms left`)
+    if (meta.reason) parts.push(String(meta.reason))
+
+    if (parts.length > 0) msg += ` (${parts.join(', ')})`
   }
 
   return msg
 }
 
 /**
- * Direct log output
+ * Send to appropriate log level
  */
 const sendToLog = (logLevel: LogLevel, message: string): void => {
   switch (logLevel) {

@@ -3,7 +3,7 @@
 import {io} from '../context/state'
 import {IO, ActionPayload} from '../types/core'
 import {log} from './cyre-log'
-import {metricsReport} from '../context/metrics-report'
+import {sensor} from '../context/metrics-report'
 import {MSG} from '../config/cyre-config'
 
 /*
@@ -53,7 +53,7 @@ export const cyreExecute = async (
       executionCount: (currentMetrics?.executionCount || 0) + 1
     })
 
-    metricsReport.sensor.execution(action.id, executionTime)
+    sensor.execution(action.id, executionTime)
 
     // Check for IntraLink (chain reaction)
     let intraLink: {id: string; payload?: ActionPayload} | undefined
@@ -63,7 +63,7 @@ export const cyreExecute = async (
         payload: result.payload
       }
 
-      metricsReport.sensor.intralink(action.id, result.id, 'dispatch')
+      sensor.log(action.id, result.id, 'intralink')
     }
 
     return {
@@ -78,8 +78,12 @@ export const cyreExecute = async (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    metricsReport.sensor.error(action.id, errorMessage)
+    sensor.error(action.id, errorMessage, 'handler-error')
     log.error(`Execution error: ${errorMessage}`)
+    io.updateMetrics(action.id, {
+      lastExecutionTime: Date.now(),
+      errors: [{timestamp: Date.now(), message: errorMessage}]
+    })
     return {
       ok: false,
       payload: null,

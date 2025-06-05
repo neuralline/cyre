@@ -142,7 +142,7 @@ export const metrics = {
 
     const protections = channelAnalysis.protectionUsage
     if (
-      protections.throttled + protections.debounced + protections.blocked >
+      protections?.throttled + protections?.debounced + protections?.blocked >
       0
     ) {
       console.log('   Protections:')

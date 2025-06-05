@@ -3,7 +3,7 @@
 
 import type {ActionPayload, IO} from '../types/core'
 import {io, subscribers} from '../context/state'
-import {metricsReport} from '../context/metrics-report'
+import {} from '../context/metrics-report'
 import payloadState from '../context/payload-state'
 import {groupOperations} from '../components/cyre-group'
 
