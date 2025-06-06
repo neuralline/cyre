@@ -7,7 +7,7 @@ import {hasTalent, type TalentName} from './talent-definitions'
 import {pathEngine} from './path-engine'
 import {fusionDataDefinition, patternDataDefinition} from './fusion-plugin'
 import {compileIntelligenceConfig} from '../intelligence/intelligence-compiler'
-import {log} from '@/components/cyre-log'
+import {log} from '../components/cyre-log'
 
 /*
 

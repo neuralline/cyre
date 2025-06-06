@@ -277,7 +277,9 @@ export const defaultMetrics: QuantumState = {
   inRecuperation: false,
   hibernating: false,
   activeFormations: 0,
-  isLocked: false
+  _Locked: false,
+  _init: false,
+  _shutdown: false
 }
 
 export const systemMetrics = {

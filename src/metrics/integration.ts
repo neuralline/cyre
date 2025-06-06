@@ -1,352 +1,280 @@
 // src/metrics/integration.ts
-// Integration layer for unified metrics system
+// Single metrics API export - uses orchestration for scheduling
 
-import {metricsCore, type MetricEvent} from './core'
-import {analyzer, type SystemAnalysis} from './analyzer'
+import {analyzer} from './analyzer'
+import {metricsCore} from './core'
 import type {ActionId} from '../types/core'
 
 /*
 
       C.Y.R.E - M.E.T.R.I.C.S - I.N.T.E.G.R.A.T.I.O.N
       
-      Integration layer:
-      - Simple API for recording metrics
-      - Analysis and reporting interface
-      - Development and monitoring tools
-      - Performance optimizations
+      Single metrics API that:
+      - Uses existing sensor (no duplication)
+      - Delegates scheduling to orchestration/schedule
+      - Exports complete API for app.ts
+      - On-demand analysis only
 
 */
 
-// Live monitoring state
-let liveMonitoringInterval: NodeJS.Timeout | undefined
-let watcherIntervals: Map<string, NodeJS.Timeout> = new Map()
-
 /**
- * Unified metrics interface
+ * Complete metrics API - exported to app.ts
  */
 export const metrics = {
-  /**
-   * Record an event
-   */
-  record: (
-    actionId: ActionId,
-    eventType: MetricEvent,
-    location?: string,
-    metadata?: Record<string, unknown>
-  ): void => {
-    metricsCore.record(actionId, eventType, location, metadata)
-  },
-
-  /**
-   * Get system overview
-   */
-  getSystemMetrics: () => {
-    return metricsCore.getSystemMetrics()
-  },
-
-  /**
-   * Get channel metrics
-   */
-  getChannelMetrics: (actionId: ActionId) => {
-    return metricsCore.getChannelMetrics(actionId)
-  },
-
-  /**
-   * Analyze performance
-   */
-  analyze: (timeWindow?: number): SystemAnalysis => {
-    return analyzer.analyze(timeWindow)
-  },
-
-  /**
-   * Quick health check
-   */
-  healthCheck: () => {
-    const health = analyzer.healthCheck()
+  // Quick analysis methods
+  health: () => {
+    const analysis = analyzer.analyzeSystem(60000) // Last minute
+    const health = analysis.health
 
     const statusIcon =
-      health.status === 'healthy'
+      health.overall === 'healthy'
         ? '✅'
-        : health.status === 'degraded'
+        : health.overall === 'degraded'
         ? '⚠️'
         : '🔴'
 
     console.log(
-      `${statusIcon} System Health: ${health.status.toUpperCase()} (Score: ${
+      `${statusIcon} System: ${health.overall.toUpperCase()} (${
         health.score
       }/100)`
     )
 
     if (health.issues.length > 0) {
-      console.log('Issues:')
-      health.issues.slice(0, 5).forEach(issue => console.log(`  • ${issue}`))
+      console.log('Issues:', health.issues.slice(0, 3).join(', '))
     }
 
     return health
   },
 
-  /**
-   * Generate report
-   */
-  report: (options?: {
-    timeWindow?: number
-    logToConsole?: boolean
-    returnData?: boolean
-  }) => {
-    const {timeWindow, logToConsole = true, returnData = false} = options || {}
+  performance: () => {
+    const analysis = analyzer.analyzeSystem(60000)
+    const perf = analysis.performance
 
-    try {
-      const analysis = analyzer.analyze(timeWindow)
-      const report = analyzer.generateReport(analysis)
+    console.log('⚡ Performance:')
+    console.log(`  Latency: ${perf.avgLatency.toFixed(2)}ms avg`)
+    console.log(`  Success: ${(perf.successRate * 100).toFixed(1)}%`)
+    console.log(`  Throughput: ${perf.throughput.toFixed(1)}/sec`)
 
-      if (logToConsole) {
-        console.log('\n' + report)
-      }
-
-      if (returnData) {
-        return {analysis, report}
-      }
-
-      return report
-    } catch (error) {
-      console.error(`Metrics report generation failed: ${error}`)
-      return null
+    if (perf.degradations.length > 0) {
+      console.log(`  Issues: ${perf.degradations.length} degradations`)
     }
+
+    return perf
   },
 
-  /**
-   * Analyze specific channel
-   */
-  analyzeChannel: (channelId: string, timeWindow?: number) => {
-    const channelAnalysis = analyzer.analyzeChannel(channelId, timeWindow)
+  pipeline: () => {
+    const analysis = analyzer.analyzeSystem(60000)
+    const pipeline = analysis.pipeline
 
-    if (!channelAnalysis) {
+    console.log('🔄 Pipeline:')
+    console.log(`  Health: ${pipeline.flowHealth.toUpperCase()}`)
+    console.log(`  Efficiency: ${(pipeline.efficiency * 100).toFixed(1)}%`)
+    console.log(
+      `  Completed: ${pipeline.completedCalls}/${pipeline.totalCalls}`
+    )
+
+    if (pipeline.stuckCalls > 0) {
+      console.log(`  ⚠️ Stuck calls: ${pipeline.stuckCalls}`)
+    }
+
+    return pipeline
+  },
+
+  // Full analysis methods
+  analyze: (timeWindow?: number) => analyzer.analyzeSystem(timeWindow),
+
+  analyzeChannel: (channelId: string, timeWindow?: number) => {
+    const result = analyzer.analyzeChannel(channelId, timeWindow)
+    if (!result) {
       console.log(`❌ Channel '${channelId}' not found`)
       return null
     }
-
-    console.log(`\n📊 Channel Analysis: ${channelId}`)
-    console.log(`   Status: ${channelAnalysis.status.toUpperCase()}`)
-    console.log(`   Calls: ${channelAnalysis.metrics.calls}`)
-    console.log(
-      `   Success Rate: ${(channelAnalysis.metrics.successRate * 100).toFixed(
-        1
-      )}%`
-    )
-    console.log(
-      `   Average Latency: ${channelAnalysis.metrics.averageLatency.toFixed(
-        2
-      )}ms`
-    )
-    console.log(`   Errors: ${channelAnalysis.metrics.errors}`)
-
-    const protections = channelAnalysis.protectionUsage
-    if (
-      protections?.throttled + protections?.debounced + protections?.blocked >
-      0
-    ) {
-      console.log('   Protections:')
-      if (protections.throttled > 0)
-        console.log(`     Throttled: ${protections.throttled}`)
-      if (protections.debounced > 0)
-        console.log(`     Debounced: ${protections.debounced}`)
-      if (protections.blocked > 0)
-        console.log(`     Blocked: ${protections.blocked}`)
-      if (protections.skipped > 0)
-        console.log(`     Skipped: ${protections.skipped}`)
-    }
-
-    if (channelAnalysis.issues.length > 0) {
-      console.log('   Issues:')
-      channelAnalysis.issues.forEach(issue => console.log(`     • ${issue}`))
-    }
-
-    return channelAnalysis
+    return result
   },
 
-  /**
-   * Start live monitoring
-   */
-  startLiveMonitoring: (intervalMs = 30000) => {
-    console.log(
-      `🔍 Starting live metrics monitoring (${intervalMs}ms intervals)`
-    )
+  // Specialized reports
+  performanceReport: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.performance
+  },
 
-    liveMonitoringInterval = setInterval(() => {
-      try {
-        const analysis = analyzer.analyze()
+  pipelineReport: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.pipeline
+  },
 
-        // Only show report if there's activity or alerts
-        if (analysis.system.totalCalls > 0 || analysis.alerts.length > 0) {
-          const report = analyzer.generateReport(analysis)
-          console.log('\n' + report)
-        }
-      } catch (error) {
-        console.error(`Live monitoring error: ${error}`)
-      }
-    }, intervalMs)
+  protectionReport: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.protections
+  },
 
-    return () => {
-      if (liveMonitoringInterval) {
-        clearInterval(liveMonitoringInterval)
-        liveMonitoringInterval = undefined
-        console.log('✋ Live monitoring stopped')
-      }
+  // Anomaly detection
+  detectAnomalies: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.anomalies
+  },
+
+  // Insights
+  getInsights: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.insights
+  },
+
+  getRecommendations: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
+    return analysis.recommendations
+  },
+
+  // Health check
+  healthCheck: () => {
+    const analysis = analyzer.analyzeSystem(60000)
+    return {
+      status: analysis.health.overall,
+      score: analysis.health.score,
+      issues: analysis.health.issues,
+      criticalAlerts: analysis.health.criticalAlerts
     }
   },
 
-  /**
-   * Watch specific metric
-   */
-  watchMetric: (
-    metric: 'latency' | 'successRate' | 'errorRate' | 'callRate',
-    threshold?: number
-  ) => {
-    const watcherId = `watch-${metric}-${Date.now()}`
-    let lastValue: number | null = null
+  // Comprehensive reporting
+  report: (timeWindow?: number) => {
+    const analysis = analyzer.analyzeSystem(timeWindow)
 
-    const check = () => {
-      const analysis = analyzer.analyze()
-      let currentValue: number
+    const lines: string[] = []
+    const add = (text = '') => lines.push(text)
 
-      switch (metric) {
-        case 'latency':
-          currentValue = analysis.health.factors.latency
-          break
-        case 'successRate':
-          currentValue = analysis.health.factors.successRate
-          break
-        case 'errorRate':
-          currentValue = analysis.health.factors.errorRate
-          break
-        case 'callRate':
-          currentValue = analysis.system.callRate
-          break
-        default:
-          return
-      }
+    add('CYRE METRICS ANALYSIS REPORT')
+    add('='.repeat(50))
+    add(`Generated: ${new Date(analysis.timestamp).toISOString()}`)
+    add(`Analysis Window: ${(analysis.timeWindow / 1000).toFixed(0)}s`)
+    add()
 
-      const change = lastValue !== null ? currentValue - lastValue : 0
-      const changeDirection = change > 0 ? '↗️' : change < 0 ? '↘️' : '→'
-
-      console.log(
-        `${changeDirection} ${metric}: ${formatMetricValue(
-          metric,
-          currentValue
-        )} ${
-          change !== 0
-            ? `(${formatMetricValue(metric, Math.abs(change))} ${
-                change > 0 ? 'increase' : 'decrease'
-              })`
-            : ''
-        }`
-      )
-
-      if (threshold !== undefined) {
-        const exceedsThreshold =
-          metric === 'latency' ||
-          metric === 'errorRate' ||
-          metric === 'callRate'
-            ? currentValue > threshold
-            : currentValue < threshold
-
-        if (exceedsThreshold) {
-          const comparison = metric === 'successRate' ? 'below' : 'exceeded'
-          console.log(
-            `⚠️  ${metric} ${comparison} threshold of ${formatMetricValue(
-              metric,
-              threshold
-            )}`
-          )
-        }
-      }
-
-      lastValue = currentValue
-    }
-
-    console.log(
-      `👀 Watching ${metric}${
-        threshold ? ` (threshold: ${formatMetricValue(metric, threshold)})` : ''
-      }`
+    // Health summary
+    const healthIcon =
+      analysis.health.overall === 'healthy'
+        ? '✅'
+        : analysis.health.overall === 'degraded'
+        ? '⚠️'
+        : '🔴'
+    add(
+      `${healthIcon} System Health: ${analysis.health.overall.toUpperCase()} (${
+        analysis.health.score
+      }/100)`
     )
+    add()
 
-    const intervalId = setInterval(check, 5000)
-    watcherIntervals.set(watcherId, intervalId)
+    // System metrics
+    add('📊 SYSTEM METRICS')
+    add(`  Total Calls: ${analysis.system.totalCalls}`)
+    add(`  Total Executions: ${analysis.system.totalExecutions}`)
+    add(`  Total Errors: ${analysis.system.totalErrors}`)
+    add(`  Call Rate: ${analysis.system.callRate}/sec`)
+    add(`  Uptime: ${(analysis.system.uptime / 1000).toFixed(1)}s`)
+    add()
 
-    return () => {
-      const interval = watcherIntervals.get(watcherId)
-      if (interval) {
-        clearInterval(interval)
-        watcherIntervals.delete(watcherId)
-        console.log(`✋ Stopped watching ${metric}`)
-      }
+    // Pipeline health
+    add('🔄 PIPELINE ANALYSIS')
+    add(`  Flow Health: ${analysis.pipeline.flowHealth.toUpperCase()}`)
+    add(`  Efficiency: ${(analysis.pipeline.efficiency * 100).toFixed(1)}%`)
+    add(
+      `  Completed: ${analysis.pipeline.completedCalls}/${analysis.pipeline.totalCalls}`
+    )
+    add(`  Failed: ${analysis.pipeline.failedCalls}`)
+    add(`  Stuck: ${analysis.pipeline.stuckCalls}`)
+    add()
+
+    // Performance metrics
+    add('⚡ PERFORMANCE ANALYSIS')
+    add(`  Avg Latency: ${analysis.performance.avgLatency.toFixed(2)}ms`)
+    add(
+      `  Success Rate: ${(analysis.performance.successRate * 100).toFixed(1)}%`
+    )
+    add(`  Error Rate: ${(analysis.performance.errorRate * 100).toFixed(2)}%`)
+    add()
+
+    // Protection analysis
+    add('🛡️ PROTECTION ANALYSIS')
+    add(
+      `  Overall Health: ${analysis.protections.overall.health.toUpperCase()}`
+    )
+    add(
+      `  Effectiveness: ${(
+        analysis.protections.overall.effectiveness * 100
+      ).toFixed(1)}%`
+    )
+    add()
+
+    // Recommendations
+    if (analysis.recommendations.length > 0) {
+      add('📝 RECOMMENDATIONS')
+      analysis.recommendations.forEach((rec, i) => {
+        add(`  ${i + 1}. ${rec}`)
+      })
+      add()
     }
+
+    const report = lines.join('\n')
+    console.log('\n' + report)
+    return report
   },
 
-  /**
-   * Performance snapshot
-   */
+  // Snapshot
   snapshot: () => {
-    const analysis = analyzer.analyze()
+    const analysis = analyzer.analyzeSystem(60000)
 
     const snapshot = {
       timestamp: new Date().toISOString(),
-      system: {
-        health: analysis.health.overall,
-        stress: (analysis.health.factors.systemStress * 100).toFixed(1) + '%',
-        successRate:
-          (analysis.health.factors.successRate * 100).toFixed(1) + '%',
-        avgLatency: analysis.health.factors.latency.toFixed(2) + 'ms',
-        callRate: analysis.system.callRate.toFixed(1) + '/sec',
-        totalChannels: analysis.channels.length,
-        totalCalls: analysis.system.totalCalls,
-        totalErrors: analysis.system.totalErrors
+      health: {
+        status: analysis.health.overall,
+        score: analysis.health.score
       },
-      alerts: analysis.alerts.length,
-      criticalChannels: analysis.channels.filter(ch => ch.status === 'critical')
-        .length,
-      topAlerts: analysis.alerts.slice(0, 3).map(a => ({
-        severity: a.severity,
-        message: a.message,
-        channel: a.channel
-      }))
+      performance: {
+        avgLatency: `${analysis.performance.avgLatency.toFixed(2)}ms`,
+        successRate: `${(analysis.performance.successRate * 100).toFixed(1)}%`,
+        throughput: `${analysis.performance.throughput.toFixed(1)}/sec`
+      },
+      pipeline: {
+        health: analysis.pipeline.flowHealth,
+        efficiency: `${(analysis.pipeline.efficiency * 100).toFixed(1)}%`,
+        stuckCalls: analysis.pipeline.stuckCalls
+      },
+      system: {
+        totalCalls: analysis.system.totalCalls,
+        totalExecutions: analysis.system.totalExecutions,
+        totalErrors: analysis.system.totalErrors,
+        uptime: `${(analysis.system.uptime / 1000).toFixed(1)}s`
+      }
     }
 
-    console.log('📸 Performance Snapshot:')
+    console.log('📸 System Snapshot:')
     console.log(JSON.stringify(snapshot, null, 2))
 
     return snapshot
   },
 
-  /**
-   * Export raw data
-   */
-  exportData: (timeWindow?: number) => {
-    return analyzer.analyze(timeWindow)
+  // Raw data access for advanced users
+  getSystemMetrics: () => metricsCore.getSystemMetrics(),
+
+  getChannelMetrics: (actionId?: ActionId) => {
+    if (actionId) {
+      return metricsCore.getChannelMetrics(actionId)
+    }
+    return metricsCore.getAllChannelMetrics()
   },
 
-  /**
-   * Reset all metrics
-   */
+  getEvents: (filter?: {
+    actionId?: ActionId
+    eventType?: string
+    since?: number
+    limit?: number
+  }) => metricsCore.getEvents(filter),
+
+  // System control
   reset: () => {
-    // Stop all monitoring
-    if (liveMonitoringInterval) {
-      clearInterval(liveMonitoringInterval)
-      liveMonitoringInterval = undefined
-    }
-
-    watcherIntervals.forEach(interval => clearInterval(interval))
-    watcherIntervals.clear()
-
-    // Reset core metrics
     metricsCore.reset()
-
     console.log('📊 Metrics system reset')
   },
 
-  /**
-   * Initialize metrics system
-   */
   initialize: (config?: {
     maxEvents?: number
     retentionTime?: number
@@ -356,40 +284,10 @@ export const metrics = {
     console.log('📊 Metrics system initialized')
   },
 
-  /**
-   * Shutdown metrics system
-   */
   shutdown: () => {
-    // Stop all monitoring
-    if (liveMonitoringInterval) {
-      clearInterval(liveMonitoringInterval)
-      liveMonitoringInterval = undefined
-    }
-
-    watcherIntervals.forEach(interval => clearInterval(interval))
-    watcherIntervals.clear()
-
-    // Shutdown core system
     metricsCore.shutdown()
-
     console.log('📊 Metrics system shutdown')
   }
 }
 
-/**
- * Format metric values for display
- */
-const formatMetricValue = (metric: string, value: number): string => {
-  switch (metric) {
-    case 'latency':
-      return `${value.toFixed(2)}ms`
-    case 'successRate':
-      return `${(value * 100).toFixed(1)}%`
-    case 'errorRate':
-      return `${(value * 100).toFixed(2)}%`
-    case 'callRate':
-      return `${value.toFixed(1)}/sec`
-    default:
-      return value.toString()
-  }
-}
+export default metrics

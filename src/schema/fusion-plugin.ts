@@ -10,7 +10,7 @@ import {
   setFusionResult,
   setPatternState
 } from '../intelligence/fusion-cache'
-import {log} from '@/components/cyre-log'
+import {log} from '../components/cyre-log'
 
 /*
 

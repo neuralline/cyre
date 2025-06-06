@@ -1,7 +1,7 @@
 // src/schema/talent-definitions.ts
-// Talent definitions using plugin approach
+// Talent definitions with proper error reporting and logging
 
-import type {CyreResponse, IO} from '../types/core'
+import type {IO} from '../types/core'
 import {metricsState} from '../context/metrics-state'
 import {sensor} from '../context/metrics-report'
 import {TimeKeeper} from '../components/cyre-timekeeper'
@@ -9,16 +9,17 @@ import {io} from '../context/state'
 import {pathTalents} from './path-plugin'
 import {fusion, patterns} from './fusion-pattern-talents'
 import {stateTalents} from './state-talents-plugin'
+import {log} from '../components/cyre-log'
 
 /*
 
       C.Y.R.E - T.A.L.E.N.T - D.E.F.I.N.I.T.I.O.N.S
       
-      Plugin-based talent system:
+      Plugin-based talent system with proper error reporting:
       - Protection talents (pre-pipeline)
       - State processing talents (pipeline)
       - Scheduling talents (post-pipeline)
-      - Clean plugin architecture
+      - Comprehensive error logging and reporting
 
 */
 
@@ -41,7 +42,10 @@ export interface TalentResult {
 
 export const block = (action: IO, payload: any): TalentResult => {
   if (action.block === true) {
-    sensor.log(action.id, 'blocked', 'talent-block')
+    sensor.log(action.id, 'blocked', 'talent-block', {
+      reason: 'Action is blocked',
+      talent: 'block'
+    })
     return {
       ok: false,
       message: 'Action is blocked'
@@ -68,7 +72,8 @@ export const throttle = (action: IO, payload: any): TalentResult => {
     sensor.log(action.id, 'throttle', 'talent-throttle', {
       throttleMs: action.throttle,
       elapsed,
-      remaining
+      remaining,
+      talent: 'throttle'
     })
     return {
       ok: false,
@@ -107,7 +112,8 @@ export const debounce = (action: IO, payload: any): TalentResult => {
     debounceMs: action.debounce,
     maxWait: action.maxWait,
     firstCallTime,
-    timerId: timerId.slice(-8)
+    timerId: timerId.slice(-8),
+    talent: 'debounce'
   })
 
   return {
@@ -123,7 +129,8 @@ export const recuperation = (action: IO, payload: any): TalentResult => {
   if (breathing.isRecuperating && action.priority?.level !== 'critical') {
     sensor.log(action.id, 'blocked', 'talent-recuperation', {
       stress: breathing.stress,
-      priority: action.priority?.level || 'medium'
+      priority: action.priority?.level || 'medium',
+      talent: 'recuperation'
     })
     return {
       ok: false,
@@ -138,14 +145,14 @@ export const recuperation = (action: IO, payload: any): TalentResult => {
 // SCHEDULING TALENTS (Post-pipeline)
 // ===========================================
 
-export const scheduleExecution = (action: IO, payload: any): CyreResponse => {
+export const scheduleExecution = (action: IO, payload: any): TalentResult => {
   const interval = action.interval
   const delay = action.delay
   const repeat = action.repeat
 
   // If no scheduling needed, return success
   if (!interval && !delay && !repeat) {
-    return {ok: true, payload, message: 'No scheduling needed'}
+    return {ok: true, payload}
   }
 
   // Use interval for duration, default to delay if no interval
@@ -166,6 +173,13 @@ export const scheduleExecution = (action: IO, payload: any): CyreResponse => {
     )
 
     if (result.kind === 'error') {
+      sensor.error(action.id, result.error.message, 'talent-schedule-error', {
+        interval,
+        delay,
+        repeat: actualRepeat,
+        talent: 'scheduleExecution'
+      })
+
       return {
         ok: false,
         payload: undefined,
@@ -173,21 +187,32 @@ export const scheduleExecution = (action: IO, payload: any): CyreResponse => {
       }
     }
 
-    sensor.log(action.id, 'info', 'talent-schedule', {
+    sensor.log(action.id, 'info', 'talent-schedule-success', {
       interval,
       delay,
       repeat: actualRepeat,
-      timerId: `${action.id}-scheduled`
+      timerId: `${action.id}-scheduled`,
+      talent: 'scheduleExecution'
     })
 
     return {
       ok: true,
       payload: undefined,
-      message: 'Scheduled execution'
-      //schedule: {interval, delay, repeat: actualRepeat}
+      message: 'Scheduled execution',
+      schedule: {interval, delay, repeat: actualRepeat}
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+
+    sensor.error(action.id, errorMessage, 'talent-schedule-exception', {
+      interval,
+      delay,
+      repeat: actualRepeat,
+      talent: 'scheduleExecution'
+    })
+
+    log.error(`Scheduling talent failed for ${action.id}: ${errorMessage}`)
+
     return {
       ok: false,
       payload: undefined,
@@ -220,11 +245,11 @@ export const talents = {
 export type TalentName = keyof typeof talents
 
 // ===========================================
-// TALENT UTILITIES
+// TALENT UTILITIES WITH BETTER ERROR HANDLING
 // ===========================================
 
 /**
- * Execute talent by name
+ * Execute talent by name with comprehensive error logging
  */
 export const executeTalent = (
   talentName: TalentName,
@@ -233,18 +258,58 @@ export const executeTalent = (
 ): TalentResult => {
   const talent = talents[talentName]
   if (!talent) {
+    const errorMsg = `Unknown talent: ${talentName}`
+    sensor.error(action.id, errorMsg, 'talent-not-found', {
+      talentName,
+      availableTalents: Object.keys(talents)
+    })
+    log.error(`${errorMsg} for action ${action.id}`)
+
     return {
       ok: false,
       error: true,
-      message: `Unknown talent: ${talentName}`,
+      message: errorMsg,
       payload
     }
   }
 
   try {
-    return talent(action, payload)
+    const startTime = performance.now()
+    const result = talent(action, payload)
+    const executionTime = performance.now() - startTime
+
+    // Log talent execution with timing
+    sensor.log(action.id, result.ok ? 'info' : 'skip', 'talent-execution', {
+      talentName,
+      success: result.ok,
+      executionTime,
+      message: result.message,
+      hasError: result.error
+    })
+
+    // Log slow talent execution
+    if (executionTime > 10) {
+      sensor.warning(action.id, `Slow talent execution: ${talentName}`, {
+        executionTime,
+        talentName,
+        threshold: 10
+      })
+    }
+
+    return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+
+    sensor.error(action.id, errorMessage, 'talent-execution-exception', {
+      talentName,
+      errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+      stack: error instanceof Error ? error.stack : undefined
+    })
+
+    log.error(
+      `Talent ${talentName} threw exception for ${action.id}: ${errorMessage}`
+    )
+
     return {
       ok: false,
       error: true,
@@ -269,7 +334,7 @@ export const getTalentNames = (): TalentName[] => {
 }
 
 /**
- * Execute multiple talents in sequence
+ * Execute multiple talents in sequence with detailed error reporting
  */
 export const executeTalentSequence = (
   talentNames: TalentName[],
@@ -277,19 +342,43 @@ export const executeTalentSequence = (
   initialPayload: any
 ): TalentResult => {
   let currentPayload = initialPayload
+  const executedTalents: string[] = []
+  const failedTalents: string[] = []
 
   for (const talentName of talentNames) {
     const result = executeTalent(talentName, action, currentPayload)
 
     if (!result.ok) {
-      return result
+      failedTalents.push(talentName)
+
+      sensor.log(action.id, 'skip', 'talent-sequence-blocked', {
+        failedTalent: talentName,
+        executedTalents,
+        failedTalents,
+        reason: result.message
+      })
+
+      return {
+        ok: false,
+        error: result.error,
+        message: result.message,
+        payload: result.payload
+      }
     }
+
+    executedTalents.push(talentName)
 
     // Update payload for next talent
     if (result.payload !== undefined) {
       currentPayload = result.payload
     }
   }
+
+  sensor.log(action.id, 'success', 'talent-sequence-complete', {
+    executedTalents,
+    totalTalents: talentNames.length,
+    payloadTransformed: currentPayload !== initialPayload
+  })
 
   return {
     ok: true,
@@ -299,51 +388,44 @@ export const executeTalentSequence = (
 }
 
 /**
- * Main processing pipeline execution - delegates to state talents plugin
+ * Main processing pipeline execution with detailed error reporting
  */
 export const executeProcessingPipeline = (
   action: IO,
   payload: any
 ): TalentResult => {
-  let currentPayload = payload
+  try {
+    const result = stateTalents.executeStatePipeline(action, payload)
 
-  // 1. Schema validation first
-  if (action.schema) {
-    const result = stateTalents.executeStatePipeline(action, currentPayload)
-    if (!result.ok) return result
-    currentPayload = result.payload
-  } else {
-    // Run state pipeline without schema
-    const result = stateTalents.executeStatePipeline(action, currentPayload)
-    if (!result.ok) return result
-    currentPayload = result.payload
-  }
+    // Log pipeline result
+    sensor.log(
+      action.id,
+      result.ok ? 'success' : 'skip',
+      'processing-pipeline-result',
+      {
+        success: result.ok,
+        message: result.message,
+        error: result.error,
+        payloadTransformed: result.payload !== payload
+      }
+    )
 
-  // 2. NEW: Execute fusion talent if configured
-  if (action.fusion) {
-    const fusionResult = fusion(action, currentPayload)
-    if (fusionResult.ok) {
-      currentPayload = fusionResult.payload
-    } else {
-      // Log fusion failure but continue
-      console.warn(`Fusion failed for ${action.id}: ${fusionResult.message}`)
+    return result
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+
+    sensor.error(action.id, errorMessage, 'processing-pipeline-exception', {
+      errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+      stack: error instanceof Error ? error.stack : undefined
+    })
+
+    log.error(`Processing pipeline exception for ${action.id}: ${errorMessage}`)
+
+    return {
+      ok: false,
+      error: true,
+      message: `Processing pipeline failed: ${errorMessage}`,
+      payload
     }
-  }
-
-  // 3. NEW: Execute pattern recognition if configured
-  if (action.patterns) {
-    const patternResult = patterns(action, currentPayload)
-    if (!patternResult.ok) {
-      // Log pattern failure but continue
-      console.warn(
-        `Pattern detection failed for ${action.id}: ${patternResult.message}`
-      )
-    }
-  }
-
-  return {
-    ok: true,
-    payload: currentPayload,
-    message: 'Processing pipeline executed successfully'
   }
 }

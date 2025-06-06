@@ -1,6 +1,8 @@
 // src/intelligence/fusion-cache.ts
 // Centralized fusion cache that can be imported anywhere
 
+import payloadState from '../context/payload-state'
+import cyre from '../'
 import {createStore} from '../context/create-store'
 
 /*
@@ -82,9 +84,6 @@ export const performSpatialFusion = (
       weight: number
     }> = []
 
-    // Import payload state here to avoid circular dependency
-    const {payloadState} = require('../context/payload-state')
-
     // Gather data from nearby sensors
     config.sensors.forEach((sensor: any) => {
       const distance = calculateDistance(currentLocation, sensor.location)
@@ -159,7 +158,6 @@ export const performTemporalFusion = (
   channelId: string
 ): {value: any; confidence: number; sources: string[]} => {
   try {
-    const {payloadState} = require('../context/payload-state')
     const windowStart = Date.now() - config.windowSize
     const allValues: number[] = []
 
@@ -326,9 +324,6 @@ export const detectAnomalies = (
 // demo/fusion-pattern-demo.ts
 export const runFusionPatternDemo = async () => {
   console.log('🚀 Starting Fusion & Pattern Recognition Demo')
-
-  // Import the main cyre instance
-  const {cyre} = await import('../src/app')
 
   // Initialize Cyre
   await cyre.initialize()

@@ -2,7 +2,7 @@
 // Fixed sensor with proper data validation and type safety
 
 import {metricsCore} from './core'
-import {LogLevel} from '../components/cyre-log'
+import {log, LogLevel} from '../components/cyre-log'
 import type {ActionId, Priority} from '../types/core'
 import {MetricEvent} from '../types/system'
 
@@ -15,21 +15,22 @@ import {MetricEvent} from '../types/system'
       - Prevents object/number corruption in event fields
       - Maintains backward compatibility
       - Proper error handling for malformed data
+      - log events to terminal depending on environment dev/prod
+      - replace cyre-log. if true it will log to terminal/console though cyre-log
 
 */
-
 export interface SensorEvent {
   actionId: ActionId
   eventType: MetricEvent
   message?: string
-  log?: boolean
-  logLevel?: LogLevel
+  log?: boolean //if true it will log to terminal or console/ also
+  logLevel?: LogLevel // log events to terminal depending on environment dev/prod
   metadata?: Record<string, unknown>
   location?: string
   priority?: Priority
 }
 
-// Valid event types to prevent corruption
+// Valid event types to prevent data corruption
 const VALID_EVENT_TYPES: Set<MetricEvent> = new Set([
   'call',
   'execution',
@@ -49,7 +50,7 @@ const VALID_EVENT_TYPES: Set<MetricEvent> = new Set([
 /**
  * Validate and sanitize sensor event data
  */
-const validateSensorEvent = (event: any): SensorEvent | null => {
+const validateAndSanitize = (event: any): SensorEvent | null => {
   // Validate actionId
   if (!event.actionId || typeof event.actionId !== 'string') {
     console.error('Invalid sensor event: actionId must be a string', event)
@@ -64,26 +65,21 @@ const validateSensorEvent = (event: any): SensorEvent | null => {
   ) {
     eventType = event.eventType as MetricEvent
   } else if (typeof event.eventType === 'number') {
-    // This appears to be execution duration - convert to proper event
+    // Legacy: number was passed as eventType (likely execution duration)
     eventType = 'execution'
-    // Move the duration to metadata
     if (!event.metadata) event.metadata = {}
-    event.metadata.executionTime = event.eventType
+    event.metadata.duration = event.eventType
   } else if (typeof event.eventType === 'object') {
-    // This appears to be dispatch metadata - convert to proper event
-    eventType = 'dispatch'
-    // Merge object into metadata
+    // Legacy: object was passed as eventType (likely metadata)
+    eventType = 'info'
     if (!event.metadata) event.metadata = {}
     event.metadata = {...event.metadata, ...event.eventType}
   } else {
-    console.error(
-      'Invalid sensor event: eventType must be a valid string',
-      event
-    )
+    console.error('Invalid sensor event: eventType must be valid string', event)
     return null
   }
 
-  // Validate location (should be string or undefined)
+  // Sanitize location field
   let location: string | undefined
   if (event.location === undefined || event.location === null) {
     location = undefined
@@ -98,14 +94,19 @@ const validateSensorEvent = (event: any): SensorEvent | null => {
     location = String(event.location)
   }
 
-  // Ensure metadata is an object
+  // Ensure metadata is object or undefined
   const metadata =
-    event.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+    event.metadata && typeof event.metadata === 'object'
+      ? event.metadata
+      : undefined
+
+  // Sanitize message
+  const message = typeof event.message === 'string' ? event.message : undefined
 
   return {
     actionId: event.actionId,
     eventType,
-    message: typeof event.message === 'string' ? event.message : undefined,
+    message,
     log: Boolean(event.log),
     logLevel: event.logLevel || LogLevel.DEBUG,
     metadata,
@@ -115,44 +116,47 @@ const validateSensorEvent = (event: any): SensorEvent | null => {
 }
 
 /**
- * Fixed sensor interface with data validation
+ * Simplified sensor - ONLY logs data
  */
 export const sensor = {
   /**
-   * Core sensor method with validation
+   * Core sensor method - validates and logs data
    */
   record: (event: SensorEvent | any): void => {
-    const validatedEvent = validateSensorEvent(event)
-    if (!validatedEvent) {
-      console.error('Sensor event validation failed, skipping record')
-      return
+    const sanitizedEvent = validateAndSanitize(event)
+    if (!sanitizedEvent) {
+      return // Skip invalid events
     }
 
-    metricsCore.record(validatedEvent)
+    // LOG DATA ONLY - no analysis
+    metricsCore.record(sanitizedEvent)
   },
 
   /**
-   * Legacy log method with validation
+   * Legacy log method for backward compatibility
    */
   log: (
     actionId: ActionId,
-    eventType: any, // Accept any type for backward compatibility
-    location?: any, // Accept any type for backward compatibility
-    metadata?: Record<string, unknown>
+    eventType: any,
+    location?: any,
+    metadata?: Record<string, unknown>,
+    message?: string,
+    log: boolean = false,
+    priority?: Priority
   ): void => {
-    const event = {
+    sensor.record({
       actionId,
       eventType,
       location,
       metadata,
-      logLevel: LogLevel.DEBUG,
-      log: false
-    }
-
-    sensor.record(event)
+      message,
+      log,
+      priority,
+      logLevel: LogLevel.DEBUG
+    })
   },
 
-  // Type-safe structured methods
+  // Structured logging methods for convenience
   success: (
     actionId: ActionId,
     message?: string,
@@ -245,8 +249,7 @@ export const sensor = {
     })
   },
 
-  //depreciated backward compatibility sensors
-  // Execution tracking with proper data handling
+  // Execution tracking
   execution: (
     actionId: ActionId,
     duration: number,
@@ -258,41 +261,30 @@ export const sensor = {
       location: 'handler',
       metadata: {
         duration,
-        executionTime: duration, // For backward compatibility
         ...metadata
       },
       logLevel: LogLevel.DEBUG
     })
   },
 
-  // Dispatch tracking with proper metadata handling
-  dispatchToExecute: (
-    actionId: ActionId,
-    executionTime: number,
-    dispatchMetadata: Record<string, unknown>
-  ): void => {
+  // Dispatch tracking
+  dispatch: (actionId: ActionId, metadata?: Record<string, unknown>): void => {
     sensor.record({
       actionId,
       eventType: 'dispatch',
       location: 'dispatch-to-execute',
-      metadata: {
-        executionTime,
-        ...dispatchMetadata
-      },
+      metadata,
       logLevel: LogLevel.DEBUG
     })
   },
 
   // Call tracking
-  callToDispatch: (
-    actionId: ActionId,
-    callMetadata: Record<string, unknown>
-  ): void => {
+  call: (actionId: ActionId, metadata?: Record<string, unknown>): void => {
     sensor.record({
       actionId,
       eventType: 'call',
-      location: 'call-to-dispatch',
-      metadata: callMetadata,
+      location: 'call-entry',
+      metadata,
       logLevel: LogLevel.DEBUG
     })
   },
@@ -346,5 +338,23 @@ export const sensor = {
       metadata,
       logLevel: LogLevel.DEBUG
     })
+  },
+
+  // Legacy methods for backward compatibility
+  dispatchToExecute: (
+    actionId: ActionId,
+    executionTime: number,
+    metadata: Record<string, unknown>
+  ): void => {
+    sensor.dispatch(actionId, {executionTime, ...metadata})
+  },
+
+  callToDispatch: (
+    actionId: ActionId,
+    metadata: Record<string, unknown>
+  ): void => {
+    sensor.call(actionId, metadata)
   }
 }
+
+export default sensor

@@ -1,5 +1,5 @@
 // examples/analyzer-test-suite.ts
-// Comprehensive test suite to generate various scenarios for analyzer testing
+// Test suite with proper error handling and debug logging
 
 import {cyre} from '../src'
 import {metrics, metricsCore} from '../src/metrics'
@@ -9,7 +9,7 @@ import {analyzer} from '../src/metrics/analyzer'
 
       C.Y.R.E - A.N.A.L.Y.Z.E.R - T.E.S.T - S.U.I.T.E
       
-      Comprehensive test scenarios to validate analyzer capabilities:
+      Test scenarios to validate analyzer capabilities with proper error handling:
       - Performance anomalies (high latency, variable response times)
       - Error patterns (burst errors, sustained failures, intermittent issues)
       - Protection system testing (throttle, debounce, blocking)
@@ -147,31 +147,30 @@ const variableLatencyChannel: TestScenario = {
 }
 
 /**
- * Scenario 3: Error Prone Service
- * Tests error detection and correlation
+ * Scenario 3: Error Prone Service with proper error handling
  */
-export const improvedErrorProneService: TestScenario = {
-  name: 'Error Prone Service - Fixed',
+const errorProneService: TestScenario = {
+  name: 'Error Prone Service',
   description: 'Service with high error rate that properly logs to sensor',
   expectedIssues: ['High error rate', 'Service reliability issues'],
   severity: 'high',
 
   setup: async () => {
     cyre.action({
-      id: 'error-prone-service-fixed',
+      id: 'error-prone-service',
       debounce: 100,
       maxWait: 500,
       required: true
     })
 
-    cyre.on('error-prone-service-fixed', async payload => {
+    cyre.on('error-prone-service', async payload => {
       await new Promise(resolve => setTimeout(resolve, Math.random() * 50 + 25))
 
       // Simulate various error conditions with proper error objects
       const errorType = Math.random()
 
       if (errorType < 0.15) {
-        // 15% error rate
+        // 15% error rate - throw proper Error objects
         const errors = [
           new Error('Service temporarily unavailable'),
           new Error('Database connection timeout'),
@@ -180,7 +179,6 @@ export const improvedErrorProneService: TestScenario = {
           new Error('Authentication failed')
         ]
 
-        // Throw proper Error objects that will be caught by cyreExecute
         throw errors[Math.floor(Math.random() * errors.length)]
       }
 
@@ -193,202 +191,25 @@ export const improvedErrorProneService: TestScenario = {
   },
 
   execute: async () => {
-    console.log('📊 Running error prone service test (fixed)...')
+    console.log('📊 Running error prone service test...')
 
     for (let i = 0; i < 30; i++) {
       try {
-        await cyre.call('error-prone-service-fixed', {
+        await cyre.call('error-prone-service', {
           request: i,
           retryAttempt: Math.floor(i / 5) + 1
         })
       } catch (error) {
-        // These errors should now be properly logged by sensor
-        console.log(`Expected error caught: ${error}`)
+        // Expected errors - they should be logged by cyreExecute
+        console.log(`Expected error in test: ${error}`)
       }
       await new Promise(resolve => setTimeout(resolve, 50))
     }
   }
 }
 
-// 2. Alternative: Add global error handler to ensure all errors are captured
-export function setupGlobalErrorCapture() {
-  // Capture unhandled promise rejections
-  if (typeof process !== 'undefined') {
-    process.on('unhandledRejection', (reason, promise) => {
-      console.error('Unhandled Rejection at:', promise, 'reason:', reason)
-      // Log to sensor if it's a cyre-related error
-      if (reason instanceof Error && reason.message.includes('cyre')) {
-        cyre.metrics.record('system', 'error', 'unhandled-rejection', {
-          error: reason.message,
-          stack: reason.stack
-        })
-      }
-    })
-  }
-
-  // Capture uncaught exceptions
-  if (typeof process !== 'undefined') {
-    process.on('uncaughtException', error => {
-      console.error('Uncaught Exception:', error)
-      // Log to sensor
-      cyre.metrics.record('system', 'critical', 'uncaught-exception', {
-        error: error.message,
-        stack: error.stack
-      })
-    })
-  }
-}
-
-// 3. Enhanced test execution function with better error tracking
-export async function runImprovedAnalyzerTestSuite(): Promise<void> {
-  try {
-    // Setup global error capture
-    setupGlobalErrorCapture()
-
-    await initializeTest()
-
-    console.log('🔧 Running IMPROVED test suite with better error logging')
-
-    // Add a manual error tracking service
-    cyre.action({
-      id: 'error-tracker',
-      log: true
-    })
-
-    let errorCount = 0
-    cyre.on('error-tracker', error => {
-      errorCount++
-      console.log(`🔴 Error ${errorCount} logged:`, error)
-      return {logged: true, count: errorCount}
-    })
-
-    // Run original scenarios but with explicit error tracking
-    const scenarios = [
-      highPerformanceBaseline,
-      variableLatencyChannel,
-      improvedErrorProneService, // Use the fixed version
-      protectionStressTest,
-      pipelineComplexityTest,
-      systemOverloadSimulation,
-      executionMismatchCreator
-    ]
-
-    // Setup phase
-    for (const scenario of scenarios) {
-      console.log(`\n⚙️  Setting up: ${scenario.name}`)
-      await scenario.setup()
-    }
-
-    // Execution phase with error tracking
-    for (let i = 0; i < scenarios.length; i++) {
-      const scenario = scenarios[i]
-
-      console.log(`\n[${i + 1}/${scenarios.length}] ${scenario.name}`)
-
-      const startTime = Date.now()
-
-      try {
-        await scenario.execute()
-      } catch (error) {
-        // Track any scenario-level errors
-        console.error(`Scenario ${scenario.name} had errors:`, error)
-        await cyre.call('error-tracker', {
-          scenario: scenario.name,
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: Date.now()
-        })
-      }
-
-      const duration = Date.now() - startTime
-      console.log(`✓ Completed in ${duration}ms`)
-
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
-
-    console.log(`\n📊 Total tracked errors: ${errorCount}`)
-
-    // Wait for metrics to settle
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    // Generate analysis
-    await generateEnhancedAnalysis()
-  } catch (error) {
-    console.error('❌ Improved test suite failed:', error)
-    throw error
-  }
-}
-
-async function generateEnhancedAnalysis(): Promise<void> {
-  console.log('\n📊 ENHANCED ANALYZER REPORT')
-  console.log('=' + '='.repeat(50))
-
-  // Get the metrics data directly from the store to debug the issue
-  const systemMetrics = metrics.getSystemMetrics()
-  const allChannels = metrics.getChannelMetrics() || []
-
-  console.log('\n🔍 RAW METRICS DEBUG:')
-  console.log('System Metrics:', JSON.stringify(systemMetrics, null, 2))
-
-  console.log('\nChannel Metrics:')
-  allChannels.forEach(channel => {
-    console.log(`${channel.id}:`, JSON.stringify(channel, null, 2))
-  })
-
-  // Export raw events to see what's actually being recorded
-  const rawEvents = metricsCore.getEvents({
-    since: Date.now() - 120000, // Last 2 minutes
-    limit: 100
-  })
-
-  console.log('\n📝 RECENT ERROR EVENTS:')
-  const errorEvents = rawEvents.filter(event => event.eventType === 'error')
-  console.log(`Found ${errorEvents.length} error events:`)
-  errorEvents.forEach((event, i) => {
-    console.log(
-      `${i + 1}. [${event.actionId}] ${event.eventType}: ${
-        event.message || 'No message'
-      }`
-    )
-    if (event.metadata) {
-      console.log(`   Metadata:`, event.metadata)
-    }
-  })
-
-  // Now run the standard analysis
-  const analysis = analyzer.analyze(120000)
-  console.log('\n📋 STANDARD ANALYSIS:')
-  const report = analyzer.generateReport(analysis)
-  console.log(report)
-
-  // Compare expected vs actual
-  console.log('\n🔍 ERROR DETECTION ANALYSIS:')
-  console.log(`Expected: High error rates from test scenarios`)
-  console.log(`Detected: ${errorEvents.length} error events in metrics`)
-  console.log(
-    `System error rate: ${(
-      (systemMetrics.totalErrors / Math.max(systemMetrics.totalCalls, 1)) *
-      100
-    ).toFixed(1)}%`
-  )
-
-  if (errorEvents.length === 0) {
-    console.log(
-      '\n⚠️  ISSUE IDENTIFIED: No error events found in metrics store'
-    )
-    console.log(
-      'This means errors are being logged to console but not recorded by sensor'
-    )
-    console.log('Possible causes:')
-    console.log(
-      '1. Errors thrown in handlers are not being caught by cyreExecute'
-    )
-    console.log('2. Sensor.error() is not being called in error handling paths')
-    console.log('3. MetricsCore is not recording error events properly')
-  }
-}
 /**
  * Scenario 4: Protection System Stress Test
- * Tests throttle, debounce, and blocking mechanisms
  */
 const protectionStressTest: TestScenario = {
   name: 'Protection System Stress Test',
@@ -421,30 +242,26 @@ const protectionStressTest: TestScenario = {
   execute: async () => {
     console.log('📊 Running protection system stress test...')
 
-    // Generate rapid burst calls
-    const promises = []
+    // Generate rapid burst calls sequentially to avoid channel ID confusion
     for (let i = 0; i < 40; i++) {
-      promises.push(
-        cyre
-          .call('protected-service', {
-            burst: i,
-            // Repeat some payloads to trigger change detection
-            data: i % 3 === 0 ? 'repeated-data' : `unique-${i}`
-          })
-          .catch(() => {}) // Ignore throttle/debounce failures
-      )
+      try {
+        await cyre.call('protected-service', {
+          burst: i,
+          // Repeat some payloads to trigger change detection
+          data: i % 3 === 0 ? 'repeated-data' : `unique-${i}`
+        })
+      } catch (error) {
+        // Expected throttle/debounce failures - ignore
+      }
 
-      // Very rapid calls
+      // Very rapid calls to trigger protections
       await new Promise(resolve => setTimeout(resolve, TEST_CONFIG.burstFreq))
     }
-
-    await Promise.allSettled(promises)
   }
 }
 
 /**
  * Scenario 5: Pipeline Complexity Test
- * Tests channels with different pipeline complexities
  */
 const pipelineComplexityTest: TestScenario = {
   name: 'Pipeline Complexity Test',
@@ -512,7 +329,6 @@ const pipelineComplexityTest: TestScenario = {
 
 /**
  * Scenario 6: System Overload Simulation
- * Tests system behavior under high load
  */
 const systemOverloadSimulation: TestScenario = {
   name: 'System Overload Simulation',
@@ -543,30 +359,26 @@ const systemOverloadSimulation: TestScenario = {
   execute: async () => {
     console.log('📊 Running system overload simulation...')
 
-    // Generate high-frequency concurrent calls
-    const promises = []
+    // Generate high-frequency calls sequentially to avoid Promise.all issues
     for (let i = 0; i < 60; i++) {
-      promises.push(
-        cyre
-          .call('overload-target', {
-            load: i,
-            concurrent: true,
-            timestamp: Date.now()
-          })
-          .catch(() => {}) // Handle expected failures
-      )
+      try {
+        await cyre.call('overload-target', {
+          load: i,
+          concurrent: false, // Changed to false to avoid confusion
+          timestamp: Date.now()
+        })
+      } catch (error) {
+        // Expected failures due to throttling and errors - ignore
+      }
 
-      // Minimal delay for maximum stress
+      // Minimal delay for stress
       await new Promise(resolve => setTimeout(resolve, 15))
     }
-
-    await Promise.allSettled(promises)
   }
 }
 
 /**
  * Scenario 7: Execution Mismatch Creator
- * Creates scenarios where calls don't complete execution
  */
 const executionMismatchCreator: TestScenario = {
   name: 'Execution Mismatch Creator',
@@ -612,10 +424,195 @@ const executionMismatchCreator: TestScenario = {
 }
 
 /**
- * Main test execution function
+ * Main test execution function with debug logging
  */
+export async function runAnalyzerTestSuite(): Promise<void> {
+  try {
+    await initializeTest()
+
+    console.log('🔧 Running test suite with debug logging')
+
+    const scenarios = [
+      highPerformanceBaseline,
+      variableLatencyChannel,
+      errorProneService,
+      protectionStressTest,
+      pipelineComplexityTest,
+      systemOverloadSimulation,
+      executionMismatchCreator
+    ]
+
+    // Setup phase
+    for (const scenario of scenarios) {
+      console.log(`\n⚙️  Setting up: ${scenario.name}`)
+      await scenario.setup()
+    }
+
+    // Debug: Check channel metrics are being created
+    console.log('\n🔍 DEBUG: Channel metrics after setup:')
+    const channelsAfterSetup = metrics.getChannelMetrics()
+    console.log(`Found ${channelsAfterSetup.length} channels:`)
+    channelsAfterSetup.forEach(ch => {
+      console.log(
+        `  - ${ch.id}: ${ch.calls} calls, ${ch.executions} executions`
+      )
+    })
+
+    // Execution phase
+    for (let i = 0; i < scenarios.length; i++) {
+      const scenario = scenarios[i]
+
+      console.log(`\n[${i + 1}/${scenarios.length}] ${scenario.name}`)
+
+      const startTime = Date.now()
+      const startMetrics = metrics.getSystemMetrics()
+
+      try {
+        await scenario.execute()
+      } catch (error) {
+        console.error(`Scenario ${scenario.name} had errors:`, error)
+      }
+
+      const duration = Date.now() - startTime
+      const endMetrics = metrics.getSystemMetrics()
+
+      console.log(`✓ Completed in ${duration}ms`)
+      console.log(
+        `  Calls: ${startMetrics.totalCalls} → ${endMetrics.totalCalls}`
+      )
+      console.log(
+        `  Executions: ${startMetrics.totalExecutions} → ${endMetrics.totalExecutions}`
+      )
+      console.log(
+        `  Errors: ${startMetrics.totalErrors} → ${endMetrics.totalErrors}`
+      )
+
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+
+    // Wait for metrics to settle
+    await new Promise(resolve => setTimeout(resolve, 2000))
+
+    // Generate analysis with debug info
+    await generateAnalysisWithDebug()
+  } catch (error) {
+    console.error('❌ Test suite failed:', error)
+    throw error
+  }
+}
+
+async function generateAnalysisWithDebug(): Promise<void> {
+  console.log('\n📊 ANALYZER REPORT WITH DEBUG INFO')
+  console.log('=' + '='.repeat(50))
+
+  // Debug raw metrics
+  const systemMetrics = metrics.getSystemMetrics()
+  const allChannels = metrics.getChannelMetrics()
+
+  console.log('\n🔍 RAW METRICS DEBUG:')
+  console.log('System Metrics:')
+  console.log(`  Total Calls: ${systemMetrics.totalCalls}`)
+  console.log(`  Total Executions: ${systemMetrics.totalExecutions}`)
+  console.log(`  Total Errors: ${systemMetrics.totalErrors}`)
+  console.log(
+    `  Execution Ratio: ${(
+      (systemMetrics.totalExecutions / Math.max(systemMetrics.totalCalls, 1)) *
+      100
+    ).toFixed(1)}%`
+  )
+  console.log(
+    `  Error Rate: ${(
+      (systemMetrics.totalErrors / Math.max(systemMetrics.totalCalls, 1)) *
+      100
+    ).toFixed(1)}%`
+  )
+
+  console.log(`\nChannel Metrics (${allChannels.length} channels):`)
+  allChannels.forEach(channel => {
+    console.log(`  ${channel.id}:`)
+    console.log(
+      `    Calls: ${channel.calls}, Executions: ${channel.executions}, Errors: ${channel.errors}`
+    )
+    console.log(`    Success Rate: ${(channel.successRate * 100).toFixed(1)}%`)
+    console.log(`    Avg Latency: ${channel.averageLatency.toFixed(2)}ms`)
+    if (channel.protectionEvents) {
+      const total = Object.values(channel.protectionEvents).reduce(
+        (sum, val) => sum + val,
+        0
+      )
+      if (total > 0) {
+        console.log(
+          `    Protections: ${JSON.stringify(channel.protectionEvents)}`
+        )
+      }
+    }
+  })
+
+  // Debug recent events by type and location
+  const rawEvents = metricsCore.getEvents({
+    since: Date.now() - 120000, // Last 2 minutes
+    limit: 50
+  })
+
+  console.log(`\n📝 RECENT EVENTS (${rawEvents.length} total):`)
+
+  // Group by event type and location
+  const eventGroups = new Map()
+  const errorEvents = []
+
+  rawEvents.forEach(event => {
+    const key = `${event.eventType}@${event.location || 'no-location'}`
+    eventGroups.set(key, (eventGroups.get(key) || 0) + 1)
+
+    if (event.eventType === 'error') {
+      errorEvents.push(event)
+    }
+  })
+
+  eventGroups.forEach((count, type) => {
+    console.log(`  ${type}: ${count}`)
+  })
+
+  console.log(`\n🔴 ERROR EVENTS BREAKDOWN (${errorEvents.length} total):`)
+  const errorByLocation = new Map()
+  const errorByChannel = new Map()
+
+  errorEvents.forEach(event => {
+    const location = event.location || 'no-location'
+    const channel = event.actionId
+
+    errorByLocation.set(location, (errorByLocation.get(location) || 0) + 1)
+    errorByChannel.set(channel, (errorByChannel.get(channel) || 0) + 1)
+  })
+
+  console.log('  By Location:')
+  errorByLocation.forEach((count, location) => {
+    console.log(`    ${location}: ${count}`)
+  })
+
+  console.log('  By Channel:')
+  errorByChannel.forEach((count, channel) => {
+    console.log(`    ${channel}: ${count}`)
+  })
+
+  // Standard analysis
+  console.log('\n📋 STANDARD ANALYSIS:')
+  const analysis = analyzer.analyze(120000)
+  const report = analyzer.generateReport(analysis)
+  console.log(report)
+
+  // Validation
+  console.log('\n✅ VALIDATION:')
+  console.log(`Expected errors in scenarios: YES`)
+  console.log(`Errors recorded in metrics: ${systemMetrics.totalErrors}`)
+  console.log(
+    `Channel metrics populated: ${allChannels.length > 0 ? 'YES' : 'NO'}`
+  )
+  console.log(`Analysis health status: ${analysis.health.overall}`)
+}
 
 // Export for use in other test files
 export {TEST_CONFIG, initializeTest}
 
-runImprovedAnalyzerTestSuite().catch(console.error)
+// Run the test suite
+runAnalyzerTestSuite().catch(console.error)

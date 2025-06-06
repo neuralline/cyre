@@ -53,9 +53,9 @@ export async function processCall(
     const pipelineResult = executeProcessingPipeline(action, currentPayload)
 
     if (!pipelineResult.ok) {
-      sensor.log(action.id, 'error', 'processing-pipeline-blocked', {
+      sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
         reason: pipelineResult.message,
-        error: pipelineResult.error
+        blocked: true
       })
 
       return {
@@ -63,11 +63,6 @@ export async function processCall(
         payload: pipelineResult.payload,
         message: pipelineResult.message || 'Processing pipeline failed'
       }
-    } else {
-      sensor.error(action.id, 'pipeline-stage', 'talent-execution', {
-        stage: 'schema-validation',
-        talentName: 'schema'
-      })
     }
 
     // Update payload with processed result

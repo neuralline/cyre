@@ -8,8 +8,6 @@ export {sensor} from './sensor'
 export {metricsCore} from './core'
 export {analyzer} from './analyzer'
 
-export type {MetricEvent, RawEvent, SystemMetrics, ChannelMetrics} from './core'
-
 export type {
   SystemAnalysis,
   ChannelAnalysis,

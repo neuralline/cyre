@@ -1,8 +1,6 @@
 // src/types/system.ts
 // System performance and monitoring types
 
-import type {Priority} from './core'
-
 export type SystemMetrics = {
   cpu: number
   memory: number
@@ -58,9 +56,9 @@ export interface QuantumState {
   hibernating: boolean
   recuperationInterval?: NodeJS.Timeout
   activeFormations: number
-  isLocked: boolean
-  initialize: boolean
-  isShutdown: boolean
+  _Locked: boolean
+  _shutdown: boolean
+  _init: boolean
 }
 
 export interface ActionMetrics {
@@ -121,7 +119,7 @@ export interface SensorEvent {
 }
 
 // System statistics
-export interface SystemMetrics {
+export interface SystemMetricsStat {
   totalCalls: number
   totalExecutions: number
   totalErrors: number

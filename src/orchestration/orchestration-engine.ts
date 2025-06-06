@@ -1,10 +1,11 @@
 // src/orchestration/orchestration-engine.ts
-// Orchestration system using timeline as the unified source of running tasks
+// Orchestration system with proper TimeKeeper integration
 
 import {timeline} from '../context/state'
 import {sensor} from '../context/metrics-report'
 import {metricsState} from '../context/metrics-state'
 import {call} from '../app'
+import {TimeKeeper} from '../components/cyre-timekeeper'
 import type {Timer} from '../types/timer'
 import type {ActionPayload} from '../types/core'
 import type {
@@ -22,12 +23,13 @@ import type {
 
       C.Y.R.E - O.R.C.H.E.S.T.R.A.T.I.O.N - E.N.G.I.N.E
       
-      Timeline-unified orchestration with proper API alignment:
-      - Matches app.ts expectations (create, start, stop, etc.)
-      - Uses timeline as the single source of truth
-      - Proper type integration with orchestration.ts
+      Timeline-unified orchestration with TimeKeeper integration:
+      - Uses TimeKeeper.keep() to actually schedule timer execution
+      - Proper timer callback execution 
       - Breathing system integration
-      - Security context support
+      - Fixed timer execution flow
+
+      CRITICAL FIX: Now properly calls TimeKeeper.keep() to schedule timers
 
 */
 
@@ -136,50 +138,9 @@ const start = (orchestrationId: string): {ok: boolean; message: string} => {
   }
 
   try {
-    // Register triggers
+    // Register triggers with PROPER TimeKeeper integration
     const triggerIds = registerTriggers(runtime.config)
     runtime.triggerIds = triggerIds
-
-    // Create timeline entry for orchestration management
-    const orchestrationTimer: Timer = {
-      id: orchestrationId,
-      startTime: Date.now(),
-      duration: 1000, // Check every second for pending executions
-      originalDuration: 1000,
-      callback: () => checkPendingExecutions(orchestrationId),
-      repeat: true,
-      executionCount: 0,
-      lastExecutionTime: 0,
-      nextExecutionTime: Date.now() + 1000,
-      isInRecuperation: false,
-      status: 'active',
-      isActive: true,
-
-      metadata: {
-        type: 'orchestration-manager',
-        orchestrationId,
-        config: runtime.config
-      },
-
-      metrics: {
-        totalExecutions: 0,
-        successfulExecutions: 0,
-        failedExecutions: 0,
-        averageExecutionTime: 0,
-        lastExecutionTime: 0,
-        longestExecutionTime: 0,
-        shortestExecutionTime: Infinity,
-        missedExecutions: 0,
-        surgeProtection: {
-          totalDelays: 0,
-          totalDelayTime: 0,
-          averageDelay: 0,
-          lastDelay: 0
-        }
-      }
-    }
-
-    timeline.add(orchestrationTimer)
 
     runtime.status = 'running'
     orchestrationRuntimes.set(orchestrationId, runtime)
@@ -205,8 +166,11 @@ const stop = (orchestrationId: string): {ok: boolean; message: string} => {
   }
 
   try {
-    // Unregister triggers
+    // Stop all triggers using TimeKeeper
     runtime.triggerIds?.forEach(triggerId => {
+      TimeKeeper.forget(triggerId)
+      timeline.forget(triggerId)
+
       const unsubscribe = triggerSubscriptions.get(triggerId)
       if (unsubscribe) {
         unsubscribe()
@@ -309,7 +273,7 @@ const trigger = async (
 }
 
 /**
- * Register triggers for orchestration
+ * Register triggers for orchestration - FIXED with proper TimeKeeper integration
  */
 const registerTriggers = (config: OrchestrationConfig): string[] => {
   const triggerIds: string[] = []
@@ -338,48 +302,54 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
 
       case 'time':
         if (trigger.interval) {
-          const timerResult = timeline.add({
-            id: triggerId,
-            startTime: Date.now(),
-            duration: trigger.interval,
-            originalDuration: trigger.interval,
-            callback: () => {
-              const triggerEvent: TriggerEvent = {
-                name: trigger.name,
-                type: 'time',
-                timestamp: Date.now()
-              }
-              executeWorkflow(config, triggerEvent)
-            },
-            repeat: true,
-            executionCount: 0,
-            lastExecutionTime: 0,
-            nextExecutionTime: Date.now() + trigger.interval,
-            isInRecuperation: false,
-            status: 'active',
-            isActive: true,
-            metadata: {
-              type: 'orchestration-trigger',
-              orchestrationId: config.id,
-              triggerName: trigger.name
-            },
-            metrics: {
-              totalExecutions: 0,
-              successfulExecutions: 0,
-              failedExecutions: 0,
-              averageExecutionTime: 0,
-              lastExecutionTime: 0,
-              longestExecutionTime: 0,
-              shortestExecutionTime: Infinity,
-              missedExecutions: 0,
-              surgeProtection: {
-                totalDelays: 0,
-                totalDelayTime: 0,
-                averageDelay: 0,
-                lastDelay: 0
-              }
+          // CRITICAL FIX: Use TimeKeeper.keep() instead of just timeline.add()
+
+          const executionCallback = async () => {
+            console.log(`🔄 Orchestration trigger fired: ${config.id}`)
+            const triggerEvent: TriggerEvent = {
+              name: trigger.name,
+              type: 'time',
+              timestamp: Date.now()
             }
-          })
+
+            try {
+              const result = await executeWorkflow(config, triggerEvent)
+              if (result.ok) {
+                console.log(
+                  `✅ Orchestration ${config.id} executed successfully`
+                )
+              } else {
+                console.log(
+                  `❌ Orchestration ${config.id} failed: ${result.message}`
+                )
+              }
+            } catch (error) {
+              console.error(`❌ Orchestration ${config.id} error:`, error)
+            }
+          }
+
+          // Use TimeKeeper.keep() to actually schedule execution
+          const timerResult = TimeKeeper.keep(
+            trigger.interval, // duration
+            executionCallback, // callback
+            trigger.repeat !== false ? true : 1, // repeat (default true for time triggers)
+            triggerId, // id
+            trigger.delay // delay (optional)
+          )
+
+          if (timerResult.kind === 'ok') {
+            console.log(
+              `✅ TimeKeeper scheduled: ${triggerId} (${trigger.interval}ms interval)`
+            )
+
+            // Also add to timeline for tracking
+            timeline.add(timerResult.value)
+          } else {
+            console.error(
+              `❌ TimeKeeper failed to schedule: ${triggerId}`,
+              timerResult.error
+            )
+          }
         }
         break
     }
@@ -559,14 +529,6 @@ const executeOrchestrationAction = async (
 }
 
 /**
- * Check for pending executions (called by timeline timer)
- */
-const checkPendingExecutions = (orchestrationId: string): void => {
-  // This could handle queued executions, retries, etc.
-  // For now, it's a placeholder for future enhancements
-}
-
-/**
  * Main orchestration engine interface aligned with app.ts expectations
  */
 export const orchestration = {
@@ -580,45 +542,40 @@ export const orchestration = {
 
   // Additional utility methods
   getStatus: (orchestrationId: string) => {
-    const timer = timeline.get(orchestrationId)
     const runtime = orchestrationRuntimes.get(orchestrationId)
-
     if (!runtime) return null
+
+    // Get TimeKeeper status for this orchestration
+    const timeKeeperStatus = TimeKeeper.status()
+    const orchestrationTimers =
+      timeKeeperStatus.formations?.filter(timer =>
+        timer.id.includes(orchestrationId)
+      ) || []
 
     return {
       id: orchestrationId,
       status: runtime.status,
-      isActive: timer?.isActive || false,
+      isActive: orchestrationTimers.some(timer => timer.isActive),
       executionCount: runtime.executionCount,
       lastExecution: runtime.lastExecution,
       metrics: runtime.metrics,
-      timelineInfo: timer
-        ? {
-            duration: timer.duration,
-            repeat: timer.repeat,
-            isInRecuperation: timer.isInRecuperation
-          }
-        : null
+      timeKeeperInfo: {
+        timerCount: orchestrationTimers.length,
+        activeTimers: orchestrationTimers.filter(timer => timer.isActive).length
+      }
     }
   },
 
   getSystemOverview: () => {
-    const allTimers = timeline.getAll()
-    const orchestrationTimers = allTimers.filter(
-      t => t.metadata?.type === 'orchestration-manager'
-    )
-    const triggerTimers = allTimers.filter(
-      t => t.metadata?.type === 'orchestration-trigger'
-    )
+    const timeKeeperStatus = TimeKeeper.status()
+    const allRuntimes = Array.from(orchestrationRuntimes.values())
 
     return {
       total: {
         orchestrations: orchestrationRuntimes.size,
-        running: Array.from(orchestrationRuntimes.values()).filter(
-          r => r.status === 'running'
-        ).length,
-        timelineEntries: orchestrationTimers.length,
-        activeTriggers: triggerTimers.filter(t => t.isActive).length
+        running: allRuntimes.filter(r => r.status === 'running').length,
+        timelineEntries: timeline.getAll().length,
+        activeTriggers: timeKeeperStatus.activeFormations
       },
       breathing: metricsState.get().breathing,
       systemStress: metricsState.get().stress?.combined || 0

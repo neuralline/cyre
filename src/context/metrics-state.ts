@@ -107,7 +107,7 @@ export const metricsState = {
   activeFormations: 0,
   recuperationInterval: undefined as NodeJS.Timeout | undefined,
   _isLocked: false,
-  initialize: false,
+  _init: false,
   _shutdown: false,
 
   /**
@@ -266,7 +266,7 @@ export const metricsState = {
   lock: (): void => {
     try {
       metricsState._isLocked = true
-      metricsState.update({isLocked: true})
+      metricsState.update({_isLocked: true})
     } catch (error) {
       log.critical(`System lock failed: ${error}`)
       throw error
@@ -278,9 +278,9 @@ export const metricsState = {
    */
   init: (): void => {
     try {
-      metricsState.initialize = true
-      metricsState.update({initialize: true})
-      log.sys(MSG.QUANTUM_HEADER)
+      metricsState._init = true
+      metricsState.update({_init: true})
+      log.success('Cyre Metrics State' + metricsState._init)
     } catch (error) {
       log.critical(`System init failed: ${error}`)
       throw error
@@ -293,7 +293,7 @@ export const metricsState = {
   shutdown: (): void => {
     try {
       metricsState._shutdown = true
-      metricsState.update({isShutdown: true})
+      metricsState.update({_shutdown: true})
     } catch (error) {
       log.critical(`System shutdown failed: ${error}`)
       throw error
@@ -337,7 +337,7 @@ export const metricsState = {
     metricsState.activeFormations = 0
     metricsState._isLocked = false
     metricsState._shutdown = false
-    metricsState.initialize = false
+    metricsState._init = false
 
     if (metricsState.recuperationInterval) {
       clearTimeout(metricsState.recuperationInterval)
@@ -388,3 +388,86 @@ export const metricsState = {
 
 // Export type for external use
 export type {MetricsState, StateKey}
+
+/**
+ * Calculate system stress from current metrics - using proper ES module imports
+ */
+export const calculateSystemStress = async (): Promise<number> => {
+  try {
+    // Use dynamic ES module import to avoid circular dependency
+    const {metrics} = await import('../metrics/integration.js')
+    const systemMetrics = metrics.getSystemMetrics()
+
+    // Simple stress calculation based on available metrics
+    const callRateStress = Math.min(systemMetrics.callRate / 100, 1) // 100 calls/sec = 100% stress
+    const errorRateStress =
+      systemMetrics.totalErrors > 0
+        ? Math.min(
+            (systemMetrics.totalErrors /
+              Math.max(systemMetrics.totalCalls, 1)) *
+              10,
+            1
+          )
+        : 0
+    const uptimeStress = systemMetrics.uptime > 0 ? 0 : 0.2 // No uptime = some stress
+
+    // Combined stress calculation
+    const combinedStress = Math.min(
+      callRateStress * 0.5 + errorRateStress * 0.4 + uptimeStress * 0.1,
+      1
+    )
+
+    return combinedStress
+  } catch (error) {
+    console.error(`Stress calculation failed: ${error}`)
+    return 0.1 // Default low stress on error
+  }
+}
+
+/**
+ * Update breathing system with current system metrics - using proper ES module imports
+ */
+export const updateBreathingFromMetrics = async (): Promise<void> => {
+  try {
+    const stress = await calculateSystemStress()
+
+    // Calculate adaptive breathing rate based on stress
+    let newRate: number = BREATHING.RATES.BASE
+
+    if (stress > BREATHING.STRESS.CRITICAL) {
+      newRate = BREATHING.RATES.RECOVERY // 2000ms
+    } else if (stress > BREATHING.STRESS.HIGH) {
+      newRate = BREATHING.RATES.MAX // 1000ms
+    } else if (stress > BREATHING.STRESS.MEDIUM) {
+      newRate = BREATHING.RATES.BASE * 2 // 400ms
+    } else if (stress < BREATHING.STRESS.LOW) {
+      newRate = BREATHING.RATES.MIN // 50ms
+    }
+
+    // Update breathing state with system metrics
+    metricsState.updateBreathingWithStress(stress)
+
+    // Log significant changes
+    const breathing = metricsState.get().breathing
+    if (stress > BREATHING.STRESS.HIGH) {
+      // Get metrics safely
+      const {metrics} = await import('../metrics/integration.js')
+      const systemMetrics = metrics.getSystemMetrics()
+
+      // Import sensor safely
+      const {sensor} = await import('../context/metrics-report.js')
+      sensor.warning(
+        'system',
+        `High stress detected: ${(stress * 100).toFixed(1)}%`,
+        {
+          callRate: systemMetrics.callRate,
+          totalErrors: systemMetrics.totalErrors,
+          breathingRate: newRate
+        }
+      )
+    }
+  } catch (error) {
+    // Don't log error every second - just use console.error
+    console.error(`Breathing update failed: ${error}`)
+  }
+}

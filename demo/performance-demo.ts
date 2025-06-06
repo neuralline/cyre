@@ -2,6 +2,7 @@
 // Performance-focused demonstration of system orchestration
 
 import {cyre} from '../src'
+import {getPerformanceInsights} from '../src/dev/dev'
 
 const colors = {
   reset: '\x1b[0m',
@@ -70,15 +71,15 @@ const performanceTests: PerformanceTest[] = [
     },
     validate: async () => {
       const health = cyre.getSystemHealth()
-      const metrics = cyre.dev.getSystemMetrics()
+      const systemMetrics = cyre.dev.getSystemMetrics()
 
       return {
         passed: health.breathing.rate > 200, // Should have adapted
         metrics: {
           finalBreathingRate: health.breathing.rate,
           finalStress: health.breathing.stress,
-          totalCalls: metrics.performance.totalCalls,
-          callRate: metrics.performance.callRate
+          totalCalls: systemMetrics.performance.totalCalls,
+          callRate: systemMetrics.performance.callRate
         }
       }
     }
@@ -103,8 +104,14 @@ const performanceTests: PerformanceTest[] = [
         `Memory before: ${(beforeCleanup.heapUsed / 1024 / 1024).toFixed(2)}MB`
       )
 
-      // Trigger memory cleanup
-      await cyre.dev.triggerMemoryCleanup()
+      // Trigger memory cleanup using dev interface
+      const cleanupResult = await cyre.dev.triggerMemoryCleanup()
+
+      if (cleanupResult.ok) {
+        log.success('Memory cleanup triggered successfully')
+      } else {
+        log.alert(`Memory cleanup failed: ${cleanupResult.message}`)
+      }
 
       await new Promise(r => setTimeout(r, 2000)) // Wait for cleanup
 
@@ -166,19 +173,19 @@ const performanceTests: PerformanceTest[] = [
 
       await new Promise(r => setTimeout(r, 3000)) // Wait for analysis
 
-      const insights = cyre.getPerformanceInsights()
+      const insights = getPerformanceInsights()
       log.metric(`Performance insights generated: ${insights.length}`)
       insights.forEach(insight => log.info(insight))
     },
     validate: async () => {
-      const metrics = cyre.dev.getSystemMetrics()
-      const insights = cyre.getPerformanceInsights()
+      const systemMetrics = cyre.dev.getSystemMetrics()
+      const insights = getPerformanceInsights()
 
       return {
-        passed: metrics.performance.totalErrors >= 2, // Should detect errors
+        passed: systemMetrics.performance.totalErrors >= 2, // Should detect errors
         metrics: {
-          totalCalls: metrics.performance.totalCalls,
-          totalErrors: metrics.performance.totalErrors,
+          totalCalls: systemMetrics.performance.totalCalls,
+          totalErrors: systemMetrics.performance.totalErrors,
           insightsGenerated: insights.length
         }
       }
@@ -366,7 +373,7 @@ const runPerformanceDemo = async () => {
       log.info(`${status} ${result.name} (${result.duration}ms)`)
     })
 
-    // Final system state
+    // Final system state - FIXED
     const finalSnapshot = cyre.dev.snapshot()
     const finalHealth = cyre.getSystemHealth()
 

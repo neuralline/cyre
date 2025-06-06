@@ -1,5 +1,5 @@
 // src/metrics/core.ts
-// Core metrics collection with raw data dumping capability
+// Core metrics collection with proper channel metrics retrieval
 
 import type {ActionId} from '../types/core'
 import {createStore} from '../context/create-store'
@@ -16,11 +16,11 @@ import {log, LogLevel} from '../components/cyre-log'
 
       C.Y.R.E - M.E.T.R.I.C.S - C.O.R.E
       
-      Core metrics collection with raw data dumping:
+      Core metrics collection with proper channel metrics:
       - Single responsibility: collect and store events
       - Fast event recording with minimal processing
-      - Raw data dump during cleanup for analysis
-      - Configurable dump format (terminal or JSON)
+      - Proper channel metrics tracking and retrieval
+      - Clean separation from analysis
 
 */
 
@@ -29,7 +29,7 @@ const eventStore = createStore<RawEvent>()
 const channelStore = createStore<ChannelMetrics>()
 
 // System state
-let systemMetrics: SystemMetrics = {
+let systemMetrics = {
   totalCalls: 0,
   totalExecutions: 0,
   totalErrors: 0,
@@ -41,25 +41,6 @@ let systemMetrics: SystemMetrics = {
 
 let eventSequence = 0
 let cleanupTimer: NodeJS.Timeout | undefined
-
-// Dump configuration
-interface DumpConfig {
-  enabled: boolean
-  format: 'terminal' | 'json' | 'both'
-  includeMetadata: boolean
-  maxEventsPerDump: number
-  outputDirectory: string
-  filenamePattern: string
-}
-
-let dumpConfig: DumpConfig = {
-  enabled: false,
-  format: 'json',
-  includeMetadata: true,
-  maxEventsPerDump: 1001,
-  outputDirectory: 'src/log',
-  filenamePattern: 'cyre-metrics-{timestamp}.json'
-}
 
 /**
  * Core metrics interface
@@ -82,11 +63,11 @@ export const metricsCore = {
     updateMetrics(rawEvent)
 
     // Terminal output if requested
-    if (event.log && event.logLevel) {
-      sendToLog(event.logLevel, formatMessage(event))
+    if (event.log) {
+      sendToLog(event.logLevel || 'DEBUG', formatMessage(event))
     }
 
-    // Periodic cleanup with raw data dump
+    // Periodic cleanup
     if (eventSequence % 100 === 0) {
       scheduleCleanup()
     }
@@ -130,25 +111,6 @@ export const metricsCore = {
     return filter?.limit ? events.slice(0, filter.limit) : events
   },
 
-  // Configuration methods
-  configureDump: (config: Partial<DumpConfig>): void => {
-    dumpConfig = {...dumpConfig, ...config}
-  },
-
-  getDumpConfig: (): DumpConfig => ({...dumpConfig}),
-
-  // Manual dump trigger
-  dumpRawData: (): void => {
-    if (!dumpConfig.enabled) {
-      log.warn('Raw data dump is disabled')
-      return
-    }
-
-    const allEvents = eventStore.getAll()
-    log.debug(`Manual dump triggered - ${allEvents.length} events available`)
-    performRawDataDump(allEvents, 'manual')
-  },
-
   // Utility methods
   reset: (): void => {
     eventStore.clear()
@@ -168,17 +130,8 @@ export const metricsCore = {
   initialize: (config?: {
     retentionTime?: number
     cleanupInterval?: number
-    dump?: Partial<DumpConfig>
   }): void => {
-    const {
-      retentionTime = 3600000,
-      cleanupInterval = 300000,
-      dump
-    } = config || {}
-
-    if (dump) {
-      dumpConfig = {...dumpConfig, ...dump}
-    }
+    const {retentionTime = 3600000, cleanupInterval = 300000} = config || {}
 
     if (cleanupTimer) {
       clearInterval(cleanupTimer)
@@ -193,11 +146,6 @@ export const metricsCore = {
     if (cleanupTimer) {
       clearInterval(cleanupTimer)
       cleanupTimer = undefined
-    }
-
-    // Final dump before shutdown
-    if (dumpConfig.enabled) {
-      performRawDataDump(eventStore.getAll(), 'shutdown')
     }
   }
 }
@@ -260,7 +208,7 @@ const updateChannelMetrics = (event: RawEvent): void => {
     }
   }
 
-  // Update counters
+  // Update counters based on event type and location
   switch (event.eventType) {
     case 'call':
       metrics.calls++
@@ -282,16 +230,17 @@ const updateChannelMetrics = (event: RawEvent): void => {
       }
       break
     case 'error':
-      // Check if this is an actual error or a protection event
+      // Only count actual execution errors, not pipeline skips
       const isActualError =
-        event.location !== 'protection' && !event.metadata?.successfulProtection
+        event.location === 'handler-error' ||
+        (event.location !== 'protection' &&
+          event.location !== 'processing-pipeline-blocked' &&
+          !event.metadata?.blocked &&
+          !event.metadata?.successfulProtection)
 
       if (isActualError) {
         metrics.errors++
         metrics.actualErrors = (metrics.actualErrors || 0) + 1
-      } else {
-        // This is a protection skip being logged as error - count as skip
-        metrics.protectionEvents.skipped++
       }
       break
     case 'throttle':
@@ -310,7 +259,7 @@ const updateChannelMetrics = (event: RawEvent): void => {
 
   // Recalculate rates using actual errors only with safe division
   if (metrics.calls > 0) {
-    const actualErrors = metrics.actualErrors || metrics.errors
+    const actualErrors = metrics.actualErrors || 0
     metrics.successRate = Math.max(
       0,
       (metrics.calls - actualErrors) / metrics.calls
@@ -340,282 +289,10 @@ const calculateCallRate = (): number => {
 }
 
 /**
- * Schedule cleanup with raw data dump
+ * Schedule cleanup to avoid blocking
  */
 const scheduleCleanup = (): void => {
-  process.nextTick(() => {
-    if (dumpConfig.enabled) {
-      const allEvents = eventStore.getAll()
-      log.debug(
-        `Scheduled cleanup triggered - ${allEvents.length} events to process`
-      )
-      performRawDataDump(allEvents, 'scheduled_cleanup')
-    }
-    // Comment out cleanupOldEvents as requested
-    cleanupOldEvents()
-  })
-}
-
-/**
- * Perform raw data dump in specified format
- */
-const performRawDataDump = (events: RawEvent[], trigger = 'manual'): void => {
-  if (!events.length) {
-    log.debug(`No events to dump (trigger: ${trigger})`)
-    return
-  }
-
-  log.debug(
-    `Performing raw data dump - ${events.length} events (trigger: ${trigger}, format: ${dumpConfig.format})`
-  )
-
-  const dumpData = prepareDumpData(events, trigger)
-
-  switch (dumpConfig.format) {
-    case 'terminal':
-      dumpToTerminal(dumpData)
-      break
-    case 'json':
-      dumpToJson(dumpData)
-      break
-    case 'both':
-      dumpToTerminal(dumpData)
-      dumpToJson(dumpData)
-      break
-    default:
-      log.error(`Unknown dump format: ${dumpConfig.format}`)
-  }
-}
-
-/**
- * Prepare data for dumping
- */
-const prepareDumpData = (events: RawEvent[], trigger: string) => {
-  const limitedEvents = events
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, dumpConfig.maxEventsPerDump)
-
-  const summary = {
-    dumpInfo: {
-      trigger,
-      timestamp: new Date().toISOString(),
-      totalEvents: events.length,
-      dumpedEvents: limitedEvents.length,
-      timespan:
-        events.length > 0
-          ? {
-              oldest: new Date(
-                Math.min(...events.map(e => e.timestamp))
-              ).toISOString(),
-              newest: new Date(
-                Math.max(...events.map(e => e.timestamp))
-              ).toISOString()
-            }
-          : null
-    },
-    systemMetrics: {
-      ...systemMetrics,
-      uptime: Date.now() - systemMetrics.startTime,
-      callRate: calculateCallRate()
-    },
-    eventBreakdown: getEventBreakdown(events),
-    channelSummary: getChannelSummary(),
-    rawEvents: limitedEvents.map(event =>
-      dumpConfig.includeMetadata
-        ? event
-        : {
-            id: event.id,
-            actionId: event.actionId,
-            eventType: event.eventType,
-            timestamp: event.timestamp,
-            location: event.location,
-            message: event.message
-          }
-    )
-  }
-
-  return summary
-}
-
-/**
- * Get event breakdown statistics
- */
-const getEventBreakdown = (events: RawEvent[]) => {
-  const breakdown = events.reduce((acc, event) => {
-    acc[event.eventType] = (acc[event.eventType] || 0) + 1
-    return acc
-  }, {} as Record<string, number>)
-
-  const locationBreakdown = events.reduce((acc, event) => {
-    if (event.location) {
-      acc[event.location] = (acc[event.location] || 0) + 1
-    }
-    return acc
-  }, {} as Record<string, number>)
-
-  return {
-    byEventType: breakdown,
-    byLocation: locationBreakdown,
-    totalEvents: events.length
-  }
-}
-
-/**
- * Get channel summary
- */
-const getChannelSummary = () => {
-  const channels = channelStore.getAll()
-  return {
-    totalChannels: channels.length,
-    channelMetrics: channels.map(channel => ({
-      id: channel.id,
-      calls: channel.calls,
-      executions: channel.executions,
-      errors: channel.errors,
-      successRate: channel.successRate,
-      averageLatency: channel.averageLatency,
-      protectionEvents: channel.protectionEvents
-    }))
-  }
-}
-
-/**
- * Dump to terminal with formatted output
- */
-const dumpToTerminal = (data: any): void => {
-  console.log('\n' + '='.repeat(60))
-  console.log('📊 CYRE METRICS RAW DATA DUMP')
-  console.log('='.repeat(60))
-
-  console.log(`Trigger: ${data.dumpInfo.trigger}`)
-  console.log(`Timestamp: ${data.dumpInfo.timestamp}`)
-  console.log(
-    `Events: ${data.dumpInfo.dumpedEvents}/${data.dumpInfo.totalEvents}`
-  )
-
-  if (data.dumpInfo.timespan) {
-    console.log(
-      `Timespan: ${data.dumpInfo.timespan.oldest} → ${data.dumpInfo.timespan.newest}`
-    )
-  }
-
-  console.log('\n📈 SYSTEM METRICS:')
-  console.log(`  Calls: ${data.systemMetrics.totalCalls}`)
-  console.log(`  Executions: ${data.systemMetrics.totalExecutions}`)
-  console.log(`  Errors: ${data.systemMetrics.totalErrors}`)
-  console.log(`  Call Rate: ${data.systemMetrics.callRate}/sec`)
-  console.log(`  Uptime: ${(data.systemMetrics.uptime / 1000).toFixed(1)}s`)
-
-  console.log('\n📊 EVENT BREAKDOWN:')
-  Object.entries(data.eventBreakdown.byEventType).forEach(([type, count]) => {
-    console.log(`  ${type}: ${count}`)
-  })
-
-  if (Object.keys(data.eventBreakdown.byLocation).length > 0) {
-    console.log('\n📍 LOCATION BREAKDOWN:')
-    Object.entries(data.eventBreakdown.byLocation).forEach(
-      ([location, count]) => {
-        console.log(`  ${location}: ${count}`)
-      }
-    )
-  }
-
-  console.log('\n🏢 CHANNEL SUMMARY:')
-  console.log(`  Total Channels: ${data.channelSummary.totalChannels}`)
-
-  if (data.channelSummary.channelMetrics.length > 0) {
-    console.log('  Top Channels by Activity:')
-    data.channelSummary.channelMetrics
-      .sort((a: any, b: any) => b.calls - a.calls)
-      .slice(0, 5)
-      .forEach((channel: any) => {
-        console.log(
-          `    ${channel.id}: ${channel.calls} calls, ${(
-            channel.successRate * 100
-          ).toFixed(1)}% success`
-        )
-      })
-  }
-
-  console.log('\n📝 RECENT EVENTS:')
-  data.rawEvents.slice(0, 10).forEach((event: RawEvent) => {
-    const time = new Date(event.timestamp).toLocaleTimeString()
-    const location = event.location ? `@${event.location}` : ''
-    const message = event.message ? ` - ${event.message}` : ''
-    console.log(
-      `  ${time} | ${event.actionId} | ${event.eventType} ${location}${message}`
-    )
-  })
-
-  console.log('='.repeat(60) + '\n')
-}
-
-/**
- * Dump to JSON format with file output to specified directory
- */
-const dumpToJson = (data: any): void => {
-  const jsonOutput = JSON.stringify(data, null, 2)
-
-  // Always attempt file output for JSON dumps
-  if (typeof process !== 'undefined') {
-    try {
-      const fs = require('fs')
-      const path = require('path')
-
-      log.debug(
-        `Attempting to create JSON dump in directory: ${dumpConfig.outputDirectory}`
-      )
-
-      // Create directory if it doesn't exist
-      if (!fs.existsSync(dumpConfig.outputDirectory)) {
-        log.debug(`Creating directory: ${dumpConfig.outputDirectory}`)
-        fs.mkdirSync(dumpConfig.outputDirectory, {recursive: true})
-      }
-
-      // Generate filename with timestamp
-      const timestamp = new Date()
-        .toISOString()
-        .replace(/[:.]/g, '-')
-        .replace('T', '_')
-        .split('.')[0] // Remove milliseconds
-
-      const filename = dumpConfig.filenamePattern.replace(
-        '{timestamp}',
-        timestamp
-      )
-      const fullPath = path.join(dumpConfig.outputDirectory, filename)
-
-      log.debug(`Writing JSON dump to: ${fullPath}`)
-
-      // Write JSON file
-      fs.writeFileSync(fullPath, jsonOutput, 'utf8')
-
-      // Verify file was created
-      if (fs.existsSync(fullPath)) {
-        const stats = fs.statSync(fullPath)
-        log.success(
-          `📄 Raw metrics data exported to: ${fullPath} (${stats.size} bytes)`
-        )
-      } else {
-        log.error(
-          `File creation failed - file does not exist after write: ${fullPath}`
-        )
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      log.error(`Failed to write metrics dump file: ${errorMessage}`)
-      log.error(`Output directory: ${dumpConfig.outputDirectory}`)
-      log.error(`Filename pattern: ${dumpConfig.filenamePattern}`)
-      log.warn('📄 JSON RAW DATA DUMP (console fallback):')
-      console.log(jsonOutput)
-    }
-  } else {
-    // Browser environment - console output only
-    log.debug('Browser environment detected - using console output')
-    console.log('📄 JSON RAW DATA DUMP:')
-    console.log(jsonOutput)
-  }
+  process.nextTick(() => cleanupOldEvents())
 }
 
 /**

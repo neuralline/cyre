@@ -598,7 +598,7 @@ const scheduleNext = (formation: Timer): void => {
 }
 
 // Main TimeKeeper interface with updated API
-export const TimeKeeper = {
+export const TimeKeeper = Object.freeze({
   /**
    * Create a new timer formation
    * @param interval - Duration for subsequent executions (default duration)
@@ -842,6 +842,6 @@ export const TimeKeeper = {
       }
     }
   }
-}
+})
 
 export default TimeKeeper
