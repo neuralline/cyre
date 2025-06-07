@@ -1,4 +1,4 @@
-// demo/interactive-features-demo.ts
+// demo/smart-city.ts
 // Simple demo showing Cyre features with real-time feedback
 
 import {cyre, createBranch, schema} from '../src'

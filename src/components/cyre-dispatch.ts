@@ -29,12 +29,22 @@ export const useDispatch = async (
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
+  const isTestAction = action.id.includes('diagnostic-test-action')
 
   // Preserve falsy values like 0, undefined, false, ''
   const currentPayload = payload !== undefined ? payload : action.payload
 
+  if (isTestAction) {
+    console.log('🔍 USE_DISPATCH START:', {
+      actionId: action.id,
+      hasPayload: payload !== undefined,
+      currentPayload: currentPayload,
+      payloadType: typeof currentPayload
+    })
+  }
+
   try {
-    sensor.log(action.id, {
+    sensor.callToDispatch(action.id, {
       timestamp: Date.now(),
       payloadType: typeof currentPayload,
       hasSchema: !!action.schema,
@@ -43,14 +53,32 @@ export const useDispatch = async (
 
     // Get subscriber
     const subscriber = subscribers.get(action.id)
+
+    if (isTestAction) {
+      console.log('🔍 SUBSCRIBER CHECK:', {
+        subscriberFound: !!subscriber,
+        subscriberId: subscriber?.id,
+        hasFunction: typeof subscriber?.fn === 'function'
+      })
+    }
+
     if (!subscriber) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
+
+      if (isTestAction) {
+        console.log('🔍 NO SUBSCRIBER FOUND:', error)
+      }
+
       sensor.log(action.id, 'no subscriber', 'dispatch-validation', {
         subscriberFound: false,
         actionExists: !!io.get(action.id)
       })
 
       return {ok: false, payload: null, message: error}
+    }
+
+    if (isTestAction) {
+      console.log('🔍 CALLING cyreExecute with subscriber function')
     }
 
     sensor.log(action.id, 'dispatch', 'dispatch-to-execute')
@@ -65,10 +93,20 @@ export const useDispatch = async (
       subscriber.fn
     )
 
+    if (isTestAction) {
+      console.log('🔍 cyreExecute RESULT:', {
+        ok: result.ok,
+        payload: result.payload,
+        message: result.message,
+        error: result.error,
+        intraLink: result.intraLink
+      })
+    }
+
     const totalTime = performance.now() - startTime
 
     // Record execution metrics
-    sensor.log(action.id, totalTime, {
+    sensor.dispatchToExecute(action.id, totalTime, {
       success: result.ok,
       executionPath: 'direct-dispatch',
       payloadPreserved: true,
@@ -77,22 +115,33 @@ export const useDispatch = async (
 
     // Update payload history after successful execution for change detection
     if (result.ok) {
-      // Store the payload that was actually used for execution
-      payloadState.set(action.id, currentPayload, 'call')
+      if (action.detectChanges) {
+        // Store exact payload value for change detection
+        payloadState.set(action.id, action.payload, 'call')
+      }
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
     } else {
+      if (isTestAction) {
+        console.log('🔍 EXECUTION FAILED:', {
+          message: result.message,
+          error: result.error
+        })
+      }
+
       sensor.log(action.id, 'error', 'execution-failure', {
         errorMessage: result.message,
         executionTime: totalTime
       })
     }
 
-    return {
+    const finalResult: CyreResponse = {
       ok: result.ok,
       payload: result.payload,
-      message: result.ok ? result.message : result.error || 'Execution failed',
+      message: `${
+        result.ok ? result.message : result.error || 'Execution failed'
+      }`,
       metadata: {
         executionTime: totalTime,
         intraLink: result.intraLink, // Pass through IntraLink metadata
@@ -100,8 +149,18 @@ export const useDispatch = async (
         schemaUsed: !!action.schema
       }
     }
+
+    if (isTestAction) {
+      console.log('🔍 FINAL useDispatch RESULT:', finalResult)
+    }
+
+    return finalResult
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
+
+    if (isTestAction) {
+      console.log('🔍 useDispatch EXCEPTION:', errorMessage)
+    }
 
     log.error(`Dispatch failed for ${action.id}: ${errorMessage}`)
     sensor.error(action.id, errorMessage, 'dispatch-execution')

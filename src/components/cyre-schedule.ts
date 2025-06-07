@@ -12,12 +12,9 @@ import type {
   TimelineLoad,
   TaskFilter
 } from '../types/timeline'
-import type {ActionPayload, Priority} from '../types/core'
-import {timeline} from '../context/state'
 import {metricsState} from '../context/metrics-state'
 import {sensor} from '../context/metrics-report'
 import {TimeKeeper} from './cyre-timekeeper'
-import {log} from './cyre-log'
 
 /*
   

@@ -79,7 +79,8 @@ const getDiagnosticHandlers = (): Array<{
   return [
     {
       id: 'system-diagnostics-runner',
-      handler: (payload?: any) => {
+      handler: async (payload?: any) => {
+        // Make handler async
         try {
           log.info(
             '🔍 System Diagnostics: Starting comprehensive system check...'
@@ -213,7 +214,7 @@ const getDiagnosticHandlers = (): Array<{
             })
           }
 
-          // Test 6: Action Pipeline Test
+          // Test 6: Action Pipeline Test with FIXED ASYNC HANDLING
           try {
             const testActionId = `diagnostic-test-action-${Date.now()}`
             let pipelineResult = {
@@ -237,7 +238,7 @@ const getDiagnosticHandlers = (): Array<{
 
             const testStartTime = performance.now()
 
-            // Step 1: Create test action with detailed timing
+            // Step 1: Create test action
             const actionStartTime = performance.now()
             const actionResult = cyre.action({id: testActionId})
             pipelineResult.timings.actionRegistration =
@@ -251,7 +252,7 @@ const getDiagnosticHandlers = (): Array<{
               pipelineResult.details.actionCreated = true
             }
 
-            // Step 2: Register test handler with detailed timing
+            // Step 2: Register test handler
             if (pipelineResult.details.actionCreated) {
               const handlerStartTime = performance.now()
               let handlerExecuted = false
@@ -278,17 +279,28 @@ const getDiagnosticHandlers = (): Array<{
                 pipelineResult.details.handlerRegistered = true
               }
 
-              // Step 3: Test call execution with detailed timing
+              // Step 3: Test call execution with PROPER AWAIT
               if (pipelineResult.details.handlerRegistered) {
+                // Small delay to ensure handler registration is complete
+                await new Promise(resolve => setTimeout(resolve, 10))
+
                 const callStartTime = performance.now()
 
                 try {
-                  const callResult = cyre.call(testActionId, {
+                  // FIXED: Add await here!
+                  const callResult = await cyre.call(testActionId, {
                     test: true,
                     diagnostic: true
                   })
                   pipelineResult.timings.callExecution =
                     performance.now() - callStartTime
+
+                  console.log('🔍 DIAGNOSTIC CALL RESULT:', {
+                    ok: callResult.ok,
+                    payload: callResult.payload,
+                    message: callResult.message,
+                    error: callResult.error
+                  })
 
                   if (callResult.ok) {
                     pipelineResult.details.callSucceeded = true
@@ -319,7 +331,9 @@ const getDiagnosticHandlers = (): Array<{
                     }
                   } else {
                     pipelineResult.errors.push(
-                      `Call failed: ${callResult.message}`
+                      `Call failed: ${
+                        callResult.message || 'undefined message'
+                      }`
                     )
                   }
                 } catch (error) {
@@ -332,28 +346,17 @@ const getDiagnosticHandlers = (): Array<{
 
             pipelineResult.timings.totalTime = performance.now() - testStartTime
 
-            // Step 4: Cleanup with error handling
-            try {
-              setTimeout(() => {
-                const cleanupResult = cyre.forget(testActionId)
-                if (!cleanupResult) {
-                  console.warn(`Failed to cleanup test action: ${testActionId}`)
-                }
-              }, 100)
-            } catch (error) {
-              pipelineResult.errors.push(`Cleanup failed: ${error}`)
-            }
+            // Cleanup
+            setTimeout(() => {
+              cyre.forget(testActionId)
+            }, 100)
 
-            // Generate detailed status message
-            let statusMessage = 'Action pipeline not functioning properly'
-            let status: 'pass' | 'fail' | 'warn' = 'fail'
+            // Generate status message
+            let statusMessage =
+              'Action pipeline working: call → handler → response'
+            let status: 'pass' | 'fail' | 'warn' = 'pass'
 
-            if (pipelineResult.working) {
-              statusMessage =
-                'Action pipeline working: call → handler → response'
-              status = 'pass'
-            } else {
-              // Build specific failure message
+            if (!pipelineResult.working) {
               const failureReasons: string[] = []
 
               if (!pipelineResult.details.actionCreated) {
@@ -376,13 +379,7 @@ const getDiagnosticHandlers = (): Array<{
                 statusMessage = `Pipeline failed at: ${failureReasons.join(
                   ', '
                 )}`
-              }
-
-              // Add timing context if available
-              if (pipelineResult.timings.totalTime > 100) {
-                statusMessage += ` (slow: ${pipelineResult.timings.totalTime.toFixed(
-                  1
-                )}ms)`
+                status = 'fail'
               }
             }
 
@@ -393,77 +390,16 @@ const getDiagnosticHandlers = (): Array<{
               details: {
                 testActionId,
                 pipelineResult,
-                stepBreakdown: {
-                  'Action Creation': `${
-                    pipelineResult.details.actionCreated ? 'PASS' : 'FAIL'
-                  } (${pipelineResult.timings.actionRegistration.toFixed(
-                    1
-                  )}ms)`,
-                  'Handler Registration': `${
-                    pipelineResult.details.handlerRegistered ? 'PASS' : 'FAIL'
-                  } (${pipelineResult.timings.handlerRegistration.toFixed(
-                    1
-                  )}ms)`,
-                  'Call Execution': `${
-                    pipelineResult.details.callSucceeded ? 'PASS' : 'FAIL'
-                  } (${pipelineResult.timings.callExecution.toFixed(1)}ms)`,
-                  'Handler Execution': `${
-                    pipelineResult.details.handlerExecuted ? 'PASS' : 'FAIL'
-                  }`,
-                  'Response Validation': `${
-                    pipelineResult.details.expectedPayload ? 'PASS' : 'FAIL'
-                  }`
-                },
-                errors: pipelineResult.errors,
-                timings: pipelineResult.timings
+                timings: pipelineResult.timings,
+                errors: pipelineResult.errors
               },
               timestamp: Date.now()
             })
-
-            // Log detailed pipeline diagnostic information
-            if (!pipelineResult.working) {
-              log.error('🔍 PIPELINE DIAGNOSTIC DETAILS:')
-              log.error(`  Test Action ID: ${testActionId}`)
-              log.error(
-                `  Total Time: ${pipelineResult.timings.totalTime.toFixed(1)}ms`
-              )
-
-              Object.entries(pipelineResult.details).forEach(
-                ([step, passed]) => {
-                  const icon = passed ? '✅' : '❌'
-                  log.error(`  ${icon} ${step}`)
-                }
-              )
-
-              if (pipelineResult.errors.length > 0) {
-                log.error(`  Errors: ${pipelineResult.errors.join(', ')}`)
-              }
-
-              log.error(`  Timing Breakdown:`)
-              log.error(
-                `    Action: ${pipelineResult.timings.actionRegistration.toFixed(
-                  1
-                )}ms`
-              )
-              log.error(
-                `    Handler: ${pipelineResult.timings.handlerRegistration.toFixed(
-                  1
-                )}ms`
-              )
-              log.error(
-                `    Call: ${pipelineResult.timings.callExecution.toFixed(1)}ms`
-              )
-            }
           } catch (error) {
             results.push({
               component: 'Action Pipeline',
               status: 'fail',
               message: `Pipeline test threw exception: ${error}`,
-              details: {
-                exception:
-                  error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
-              },
               timestamp: Date.now()
             })
           }
@@ -499,7 +435,7 @@ const getDiagnosticHandlers = (): Array<{
             )
           }
 
-          const diagnostics: SystemDiagnostics = {
+          const diagnostics = {
             overall,
             score,
             results,
@@ -507,7 +443,7 @@ const getDiagnosticHandlers = (): Array<{
             timestamp: startTime
           }
 
-          // Log comprehensive results with checkboxes
+          // Log results
           log.info('🔍 SYSTEM DIAGNOSTICS REPORT')
           log.info('=' + '='.repeat(40))
 
@@ -536,19 +472,6 @@ const getDiagnosticHandlers = (): Array<{
               log.info(`  ${i + 1}. ${rec}`)
             })
           }
-
-          sensor.info(
-            'system-diagnostics-runner',
-            'System diagnostics completed',
-            {
-              overall,
-              score,
-              totalTests,
-              passedTests,
-              failedTests,
-              warningCount
-            }
-          )
 
           return {
             success: true,

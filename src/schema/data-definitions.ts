@@ -5,9 +5,8 @@ import {schema} from '../schema/cyre-schema'
 import type {IO} from '../types/core'
 import {hasTalent, type TalentName} from './talent-definitions'
 import {pathEngine} from './path-engine'
-import {fusionDataDefinition, patternDataDefinition} from './fusion-plugin'
-import {compileIntelligenceConfig} from '../intelligence/intelligence-compiler'
 import {log} from '../components/cyre-log'
+import {sensor} from '../metrics'
 
 /*
 
@@ -71,8 +70,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     }
     return {ok: true, data: value}
   },
-  pattern: patternDataDefinition,
-  fusion: fusionDataDefinition,
 
   // Path validation and indexing
   path: (value: any): DataDefResult => {
@@ -200,6 +197,11 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   },
 
   required: (value: any): DataDefResult => {
+    if (value === undefined) {
+      // If not explicitly set, will be inferred from schema presence
+      return {ok: true, data: undefined, talentName: 'required'}
+    }
+
     if (typeof value !== 'boolean' && value !== 'non-empty') {
       return {ok: false, error: 'Required must be boolean or "non-empty"'}
     }
@@ -273,7 +275,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   type: (value: any): DataDefResult => ({ok: true, data: value}),
   payload: (value: any): DataDefResult => ({ok: true, data: value}),
   group: (value: any): DataDefResult => ({ok: true, data: value}),
-  tags: (value: any): DataDefResult => ({ok: true, data: value}),
+  tags: (value: string[]): DataDefResult => ({ok: true, data: value}),
 
   // Internal fields (optimization flags)
   _hasFastPath: (value: any): DataDefResult => ({ok: true, data: value}),
@@ -295,108 +297,105 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
  * Compile action with talent discovery, pipeline building, and path indexing
  */
 export const compileAction = (
-  action: Partial<IO>
+  config: Partial<IO>
 ): {
   compiledAction: IO
   errors: string[]
   hasFastPath: boolean
 } => {
-  const errors: string[] = []
-  const compiledAction: Partial<IO> = {}
-  const processingPipeline: TalentName[] = []
+  try {
+    const warnings: string[] = []
+    const errors: string[] = []
+    let compiledAction = {...config}
 
-  // Track talent categories
-  let hasProtections = false
-  let hasScheduling = false
-  let hasIntelligence = false // NEW
+    // Auto-infer required from schema presence
+    if (config.schema && config.required === undefined) {
+      compiledAction.required = true
+      // Remove the annoying warning
+      // warnings.push('Schema defined - auto-setting required: true')
+    }
 
-  // Process fields in order to preserve user-defined execution sequence
-  const actionKeys = Object.keys(action)
+    // Validate each field
+    for (const [field, value] of Object.entries(config)) {
+      const definition = dataDefinitions[field]
 
-  for (const key of actionKeys) {
-    const value = action[key as keyof typeof action]
-    const definition = dataDefinitions[key as keyof typeof dataDefinitions]
+      if (!definition) {
+        // Skip unknown fields silently or log debug
+        sensor.error(
+          'data-definitions',
+          `data-definitions unknown definition: ${field}`
+        )
+        continue
+      }
 
-    if (definition) {
       const result = definition(value)
 
       if (!result.ok) {
         if (result.blocking) {
-          // Early return for blocking conditions
-          return {
-            compiledAction: {
-              ...action,
-              _isBlocked: true,
-              _blockReason: result.error!
-            } as IO,
-            errors: [result.error!],
-            hasFastPath: false
-          }
+          errors.push(`${field}: ${result.error}`)
+        } else {
+          warnings.push(`${field}: ${result.error}`)
         }
-        log.error(
-          `data-definitions verification failed ${key}: ${result.error}`
-        )
-        errors.push(`${key}: ${result.error}`)
-      } else {
-        compiledAction[key as keyof IO] = result.data
+        continue
+      }
 
-        // Build pipeline based on talent category
-        if (result.talentName) {
-          if (PROTECTION_TALENTS.includes(result.talentName as any)) {
-            hasProtections = true
-          } else if (PROCESSING_TALENTS.includes(result.talentName as any)) {
-            // Add to pipeline in user-defined order
-            processingPipeline.push(result.talentName)
-          } else if (SCHEDULING_TALENTS.includes(result.talentName as any)) {
-            hasScheduling = true
-          } else if (['fusion', 'patterns'].includes(result.talentName)) {
-            hasIntelligence = true // NEW
-          }
+      compiledAction[field] = result.data
+
+      // Set talent flags for optimization
+      if (result.talentName) {
+        const talentName = result.talentName
+
+        if (PROTECTION_TALENTS.includes(talentName as any)) {
+          compiledAction._hasProtections = true
+        }
+        if (PROCESSING_TALENTS.includes(talentName as any)) {
+          compiledAction._hasProcessing = true
+        }
+        if (SCHEDULING_TALENTS.includes(talentName as any)) {
+          compiledAction._hasScheduling = true
         }
       }
-    } else {
-      // Pass through unknown fields
-      compiledAction[key as keyof IO] = value
-      log.error(`data-definitions unknown definition: ${key}: `)
     }
-  }
 
-  // Cross-attribute validation
-  const crossValidationErrors = validateCrossAttributes(compiledAction as IO)
-  errors.push(...crossValidationErrors)
+    // Fast path optimization
+    const hasTalents =
+      compiledAction._hasProtections ||
+      compiledAction._hasProcessing ||
+      compiledAction._hasScheduling
 
-  // NEW: Compile intelligence configuration for performance
-  let intelligenceConfig = null
-  if (hasIntelligence) {
-    try {
-      intelligenceConfig = compileIntelligenceConfig(compiledAction as IO)
-    } catch (error) {
-      errors.push(`Intelligence compilation failed: ${error}`)
+    compiledAction._hasFastPath = !hasTalents
+
+    if (errors.length > 0) {
+      return {
+        ok: false,
+        error: `Compilation failed: ${errors.join(', ')}`,
+        warnings
+      }
     }
-  }
 
-  // Set optimization flags
-  const hasProcessing = processingPipeline.length > 0
-  const hasFastPath =
-    !hasProtections && !hasProcessing && !hasScheduling && !hasIntelligence
+    // Only warn about real issues, not schema auto-enforcement
+    const realWarnings = warnings.filter(
+      w => !w.includes('schema validation without required')
+    )
 
-  // Build final compiled action
-  const finalAction: IO = {
-    ...compiledAction,
-    _hasFastPath: hasFastPath,
-    _hasProtections: hasProtections,
-    _hasProcessing: hasProcessing,
-    _hasScheduling: hasScheduling,
-    _hasIntelligence: hasIntelligence, // NEW
-    _intelligenceConfig: intelligenceConfig, // NEW
-    _processingTalents: processingPipeline,
-    _isBlocked: false
-  } as IO
-
-  return {
-    compiledAction: finalAction,
-    errors,
-    hasFastPath
+    return {
+      ok: true,
+      compiledAction,
+      warnings: realWarnings,
+      talentFlags: {
+        hasProtections: Boolean(compiledAction._hasProtections),
+        hasProcessing: Boolean(compiledAction._hasProcessing),
+        hasScheduling: Boolean(compiledAction._hasScheduling),
+        hasFastPath: Boolean(compiledAction._hasFastPath)
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Compilation exception: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    }
   }
 }
 

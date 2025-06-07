@@ -189,7 +189,7 @@ export const sensor = {
     })
   },
 
-  warning: (
+  warn: (
     actionId: ActionId,
     message?: string,
     metadata?: Record<string, unknown>

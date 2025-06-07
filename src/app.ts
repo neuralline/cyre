@@ -29,16 +29,14 @@ import {pathPlugin} from './schema/path-plugin'
 import {createBranch} from './hooks/create-branch'
 import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
-import {intelligence} from './schema/fusion-plugin'
 import {dev} from './dev/dev'
 import {metrics} from './metrics'
-import {
-  CyreConfig,
-  persistence,
-  PersistentState
-} from './context/persistent-state'
+
 import {registerSystemIntelligence} from './intelligence/system-intelligence'
-import {registerSystemDiagnostics, runDiagnostics} from './intelligence/system-diagnostics'
+import {
+  registerSystemDiagnostics,
+  runDiagnostics
+} from './intelligence/system-diagnostics'
 
 /* 
     Neural Line
@@ -120,8 +118,6 @@ const initialize = async (
     initializeBreathing()
     TimeKeeper.resume()
 
-    const stats = persistence.getStats()
-
     // Register standardized system intelligence
     try {
       const intelligenceResults = await registerSystemIntelligence(
@@ -130,7 +126,7 @@ const initialize = async (
       systemOrchestrationIds.push(...intelligenceResults.registered)
 
       if (intelligenceResults.failed.length > 0) {
-        sensor.info(
+        sensor.debug(
           'initialize',
           `System intelligence: ${intelligenceResults.registered.length} registered, ${intelligenceResults.failed.length} failed`,
           {
@@ -151,37 +147,34 @@ const initialize = async (
       )
     }
 
-    // Register system diagnostics for comprehensive testing
-    try {
-      const diagnosticsResults = registerSystemDiagnostics(orchestration)
-      systemOrchestrationIds.push(...diagnosticsResults.registered)
+    // // Register system diagnostics for comprehensive testing
+    // try {
+    //   const diagnosticsResults = registerSystemDiagnostics(orchestration)
+    //   systemOrchestrationIds.push(...diagnosticsResults.registered)
 
-      if (diagnosticsResults.failed.length > 0) {
-        sensor.warning(
-          'initialize',
-          `System diagnostics: ${diagnosticsResults.registered.length} registered, ${diagnosticsResults.failed.length} failed`,
-          {
-            registered: diagnosticsResults.registered,
-            failed: diagnosticsResults.failed
-          }
-        )
-      } else {
-        sensor.success(
-          'initialize',
-          `Registered ${diagnosticsResults.registered.length} system diagnostic orchestrations`
-        )
-      }
-    } catch (error) {
-      sensor.warning(
-        'initialize',
-        `System diagnostics registration deferred: ${error}`
-      )
-    }
+    //   if (diagnosticsResults.failed.length > 0) {
+    //     sensor.warn(
+    //       'initialize',
+    //       `System diagnostics: ${diagnosticsResults.registered.length} registered, ${diagnosticsResults.failed.length} failed`,
+    //       {
+    //         registered: diagnosticsResults.registered,
+    //         failed: diagnosticsResults.failed
+    //       }
+    //     )
+    //   } else {
+    //     sensor.success(
+    //       'initialize',
+    //       `Registered ${diagnosticsResults.registered.length} system diagnostic orchestrations`
+    //     )
+    //   }
+    // } catch (error) {
+    //   sensor.error(
+    //     'initialize',
+    //     `System diagnostics registration deferred: ${error}`
+    //   )
+    // }
 
-    sensor.debug(
-      'initialize',
-      `Restored ${stats.actionCount} actions, ${stats.subscriberCount} subscribers`
-    )
+    sensor.debug('initialize', ` subscribers`)
 
     sensor.log('system', 'success', 'system-initialization', {
       timestamp: Date.now(),
@@ -194,9 +187,7 @@ const initialize = async (
         'metrics-tracking',
         'breathing-system',
         'persistent-state'
-      ],
-      restoredActions: stats.actionCount,
-      restoredSubscribers: stats.subscriberCount
+      ]
     })
 
     sysInitialize = true
@@ -705,10 +696,6 @@ const shutdown = (): void => {
       orchestration.stop(id)
     })
 
-    persistence.saveState().catch(error => {
-      log.error(`Failed to save state during shutdown: ${error}`)
-    })
-
     clear()
 
     if (typeof process !== 'undefined' && process.exit) {
@@ -781,7 +768,6 @@ export const cyre = Object.freeze({
   schema,
   createBranch,
 
-  intelligence,
   // SEAMLESS QUERY INTEGRATION
   query,
   path: pathPlugin,
@@ -801,21 +787,6 @@ export const cyre = Object.freeze({
   getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
   updatePayload: (id: string, payload: ActionPayload): void =>
     payloadState.set(id, payload),
-
-  // Persistent state methods
-  saveState: async (key?: string): Promise<void> => {
-    await persistence.saveState(key)
-  },
-
-  loadState: async (key?: string): Promise<void> => {
-    const state = await persistence.loadState(key)
-    if (state) {
-      persistence.hydrate(state)
-    }
-  },
-
-  exportState: (): PersistentState => persistence.serialize(),
-  getStats: () => persistence.getStats(),
 
   // Control methods with metrics
   pause: (id?: string): void => {
@@ -885,7 +856,7 @@ export const cyre = Object.freeze({
     // Log the adaptation with metrics context
     if (loadLevel > 0.9) {
       log.warn('High system load detected - adapting orchestration frequency')
-      sensor.warning('system', 'Load adaptation triggered', {
+      sensor.warn('system', 'Load adaptation triggered', {
         requestedLoad: loadLevel,
         actualStress: breathing.stress,
         callRate: systemMetrics.callRate,
@@ -990,16 +961,16 @@ export const cyre = Object.freeze({
 
   getChannelGroups: (channelId: string) => {
     return groupOperations.getChannelGroups(channelId)
-  },// System diagnostics methods
+  }, // System diagnostics methods
   runSystemDiagnostics: async () => {
     return await runDiagnostics()
   },
-  
+
   getSystemDiagnostics: () => {
     const overview = cyre.orchestration.getSystemOverview()
     const breathing = metricsState.get().breathing
     const systemMetrics = metrics.getSystemMetrics()
-    
+
     return {
       timestamp: Date.now(),
       orchestrations: {
@@ -1024,13 +995,15 @@ export const cyre = Object.freeze({
       }
     }
   },
-  
+
   // Manual trigger for immediate diagnostics
   triggerDiagnostics: async () => {
     try {
       log.info('🔍 Manual diagnostics triggered...')
-      const result = await cyre.call('system-diagnostics-runner', {manual: true})
-      
+      const result = await cyre.call('system-diagnostics-runner', {
+        manual: true
+      })
+
       if (result.ok) {
         log.success('🔍 Manual diagnostics completed successfully')
         return result.payload

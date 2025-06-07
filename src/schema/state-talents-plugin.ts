@@ -196,24 +196,31 @@ export const detectChanges = (action: IO, payload: any): TalentResult => {
  * Required payload talent - validates payload existence
  */
 const required = (action: IO, payload: any): TalentResult => {
-  if (action.required === undefined) {
+  // Auto-infer required from schema presence if not explicitly set
+  const effectiveRequired =
+    action.required !== undefined ? action.required : Boolean(action.schema)
+
+  if (!effectiveRequired) {
     return {ok: true, payload}
   }
 
-  if (action.required === true && payload === undefined) {
+  if (effectiveRequired === true && payload === undefined) {
     sensor.log(action.id, 'error', 'talent-required', {
       reason: 'Required payload not provided',
-      payloadProvided: false
+      payloadProvided: false,
+      autoInferred: action.required === undefined && Boolean(action.schema)
     })
 
     return {
       ok: false,
-      message: 'Required payload not provided',
+      message: action.schema
+        ? 'Payload required for schema validation'
+        : 'Required payload not provided',
       payload
     }
   }
 
-  if (action.required === 'non-empty') {
+  if (effectiveRequired === 'non-empty') {
     const isEmpty =
       payload === undefined ||
       payload === null ||
@@ -235,11 +242,6 @@ const required = (action: IO, payload: any): TalentResult => {
       }
     }
   }
-
-  sensor.log(action.id, 'info', 'talent-required', {
-    payloadMeetsRequirement: true,
-    requirement: action.required
-  })
 
   return {
     ok: true,
@@ -304,21 +306,27 @@ const schema = (action: IO, payload: any): TalentResult => {
 const executeStatePipeline = (action: IO, payload: any): TalentResult => {
   let currentPayload = payload
 
-  // 1. Schema validation first
+  // 1. FIXED: Check required FIRST, with auto-inference from schema
+  const effectiveRequired =
+    action.required !== undefined ? action.required : Boolean(action.schema) // Auto-infer from schema presence
+
+  if (effectiveRequired) {
+    const requiredResult = required(
+      {...action, required: effectiveRequired},
+      currentPayload
+    )
+    if (!requiredResult.ok) return requiredResult
+    currentPayload = requiredResult.payload
+  }
+
+  // 2. Schema validation (after required check)
   if (action.schema) {
     const schemaResult = schema(action, currentPayload)
     if (!schemaResult.ok) return schemaResult
     currentPayload = schemaResult.payload
   }
 
-  // 2. Required validation
-  if (action.required) {
-    const requiredResult = required(action, currentPayload)
-    if (!requiredResult.ok) return requiredResult
-    currentPayload = requiredResult.payload
-  }
-
-  // 3. Selector - extract part of payload
+  // 3. Selector
   if (action.selector) {
     const selectorResult = selector(action, currentPayload)
     if (!selectorResult.ok) return selectorResult
@@ -352,6 +360,10 @@ const executeStatePipeline = (action: IO, payload: any): TalentResult => {
     message: 'State pipeline executed successfully'
   }
 }
+
+/**
+ * FIXED: Required payload talent with auto-inference
+ */
 
 // Export the state talents plugin
 export const stateTalents = {

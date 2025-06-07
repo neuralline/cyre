@@ -27,6 +27,18 @@ export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
+  const isTestAction = action.id.includes('diagnostic-test-action')
+
+  if (isTestAction) {
+    console.log('🔍 PROCESS_CALL START:', {
+      actionId: action.id,
+      hasPayload: payload !== undefined,
+      hasFastPath: action._hasFastPath,
+      hasProcessing: action._hasProcessing,
+      hasScheduling: action._hasScheduling
+    })
+  }
+
   sensor.log(action.id, 'call', 'call-processing', {
     timestamp: Date.now(),
     hasPayload: payload !== undefined,
@@ -40,12 +52,30 @@ export async function processCall(
 
   // STEP 1: Fast path check - no processing needed
   if (action._hasFastPath) {
+    if (isTestAction) {
+      console.log('🔍 TAKING FAST PATH to useDispatch')
+    }
     sensor.log(action.id, 'info', 'fast-path-execution')
-    return await useDispatch(action, currentPayload)
+    const result = await useDispatch(action, currentPayload)
+
+    if (isTestAction) {
+      console.log('🔍 FAST PATH RESULT:', {
+        ok: result.ok,
+        payload: result.payload,
+        message: result.message,
+        error: result.error
+      })
+    }
+
+    return result
   }
 
   // STEP 2: Execute processing talents pipeline
   if (action._hasProcessing) {
+    if (isTestAction) {
+      console.log('🔍 EXECUTING PROCESSING PIPELINE')
+    }
+
     sensor.log(action.id, 'info', 'processing-pipeline-start', {
       talents: action._processingTalents || []
     })
@@ -53,6 +83,10 @@ export async function processCall(
     const pipelineResult = executeProcessingPipeline(action, currentPayload)
 
     if (!pipelineResult.ok) {
+      if (isTestAction) {
+        console.log('🔍 PROCESSING PIPELINE BLOCKED:', pipelineResult.message)
+      }
+
       sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
         reason: pipelineResult.message,
         blocked: true
@@ -68,6 +102,12 @@ export async function processCall(
     // Update payload with processed result
     currentPayload = pipelineResult.payload
 
+    if (isTestAction) {
+      console.log('🔍 PROCESSING PIPELINE COMPLETE:', {
+        payloadTransformed: currentPayload !== originalPayload
+      })
+    }
+
     sensor.log(action.id, 'success', 'processing-pipeline-complete', {
       payloadTransformed: currentPayload !== originalPayload,
       finalPayloadType: typeof currentPayload
@@ -79,6 +119,10 @@ export async function processCall(
     action._hasScheduling &&
     (action.interval || action.delay || action.repeat)
   ) {
+    if (isTestAction) {
+      console.log('🔍 EXECUTING SCHEDULING')
+    }
+
     sensor.log(action.id, 'info', 'scheduling-execution', {
       interval: action.interval,
       delay: action.delay,
@@ -97,12 +141,28 @@ export async function processCall(
   }
 
   // STEP 5: Final execution with processed payload
+  if (isTestAction) {
+    console.log('🔍 DISPATCHING TO HANDLER:', {
+      finalPayloadType: typeof currentPayload,
+      payloadProcessed: currentPayload !== originalPayload
+    })
+  }
+
   sensor.log(action.id, 'info', 'dispatching-to-handler', {
     finalPayloadType: typeof currentPayload,
     payloadProcessed: currentPayload !== originalPayload
   })
 
   const result = await useDispatch(action, currentPayload)
+
+  if (isTestAction) {
+    console.log('🔍 FINAL DISPATCH RESULT:', {
+      ok: result.ok,
+      payload: result.payload,
+      message: result.message,
+      error: result.error
+    })
+  }
 
   sensor.log(action.id, 'info', 'call-processing-complete', {
     success: result.ok,

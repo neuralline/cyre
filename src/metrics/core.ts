@@ -319,18 +319,78 @@ const cleanupOldEvents = (retentionTime = 3600000): void => {
  * Format message for terminal output
  */
 const formatMessage = (event: SensorEvent): string => {
-  let msg = `[${event.actionId}] ${event.eventType}`
+  // Better error context and suggestions
+  if (event.eventType === 'error') {
+    if (
+      event.location === 'schema-talent' &&
+      event.message?.includes('Cannot read properties of undefined')
+    ) {
+      return `${event.actionId}: Schema validation failed - missing schema property. Add schema to your action config.`
+    }
 
-  if (event.location) msg += ` @${event.location}`
-  if (event.message) msg += ` - ${event.message}`
+    if (event.location === 'compilation-errors') {
+      return `${event.actionId}: ${event.message}. Check your action configuration.`
+    }
 
+    if (event.message?.includes('Priority must be an object')) {
+      return `${event.actionId}: Priority should be a string like "high", not an object. Use priority: "high" instead of priority: { level: "high" }`
+    }
+  }
+
+  // Better warning context
+  if (event.eventType === 'warning') {
+    if (event.message?.includes('schema validation without required')) {
+      return `${event.actionId}: Schema defined but no 'required' field. Add required: true to enforce payload validation.`
+    }
+
+    if (event.message?.includes('DUPLICATE LISTENER')) {
+      return `${event.actionId}: Duplicate listener detected. Use cyre.forget('${event.actionId}') before adding new listeners.`
+    }
+  }
+
+  // Throttle/debounce info
+  if (event.eventType === 'throttle') {
+    const remaining = event.metadata?.remaining || 0
+    return `${event.actionId}: Throttled (${remaining}ms remaining) - this is expected behavior`
+  }
+
+  if (event.eventType === 'debounce') {
+    const delay = event.metadata?.debounceMs || 0
+    return `⏳ ${event.actionId}: Debounced (${delay}ms) - this is expected behavior`
+  }
+
+  // Success/info messages
+  if (event.eventType === 'success') {
+    return `✅ ${event.actionId}: ${
+      event.message || 'Operation completed successfully'
+    }`
+  }
+
+  // Default format with better structure
+  let msg = `${event.actionId}`
+
+  if (
+    event.location &&
+    !['talent-', 'schema-', 'compilation-'].some(prefix =>
+      event.location!.startsWith(prefix)
+    )
+  ) {
+    msg += ` (${event.location})`
+  }
+
+  if (event.message) {
+    msg += `: ${event.message}`
+  }
+
+  // Add useful metadata without clutter
   if (event.metadata) {
-    const parts: string[] = []
     const meta = event.metadata
+    const parts: string[] = []
 
-    if (meta.duration) parts.push(`${meta.duration}ms`)
-    if (meta.remaining) parts.push(`${meta.remaining}ms left`)
-    if (meta.reason) parts.push(String(meta.reason))
+    if (typeof meta.duration === 'number') parts.push(`${meta.duration}ms`)
+    if (typeof meta.remaining === 'number')
+      parts.push(`${meta.remaining}ms left`)
+    if (meta.reason && typeof meta.reason === 'string') parts.push(meta.reason)
 
     if (parts.length > 0) msg += ` (${parts.join(', ')})`
   }

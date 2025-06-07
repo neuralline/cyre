@@ -179,52 +179,50 @@ const getSystemHandlers = (): Array<{
     {
       id: 'memory-monitor',
       handler: (payload?: any) => {
-        try {
-          log.info('🧠 Memory Monitor: Checking memory usage...')
+        log.info('🧠 Memory Monitor: Checking memory usage...')
 
-          const systemMetrics = metrics.getSystemMetrics()
-          const events = metrics.getEvents({since: Date.now() - 300000})
+        const systemMetrics = metrics.getSystemMetrics()
+        const events = metrics.getEvents({since: Date.now() - 300000})
 
-          const estimatedMemory = {
-            totalCalls: systemMetrics.totalCalls,
-            totalExecutions: systemMetrics.totalExecutions,
-            recentEvents: events.length,
-            memoryScore: Math.min(
-              (systemMetrics.totalCalls + events.length) / 10000,
-              1
-            )
-          }
-
-          const needsCleanup =
-            estimatedMemory.memoryScore > 0.8 || events.length > 1000
-
-          const result = {
-            success: true,
-            memoryUsage: estimatedMemory.memoryScore,
-            needsCleanup,
-            metrics: estimatedMemory,
-            timestamp: Date.now()
-          }
-
-          if (needsCleanup) {
-            log.warn(
-              `🧠 Memory Alert: ${events.length} recent events, score: ${(
-                estimatedMemory.memoryScore * 100
-              ).toFixed(1)}%`
-            )
-          } else {
-            log.info(
-              `🧠 Memory OK: ${events.length} events, score: ${(
-                estimatedMemory.memoryScore * 100
-              ).toFixed(1)}%`
-            )
-          }
-
-          return result
-        } catch (error) {
-          log.error(`❌ Memory monitor failed: ${error}`)
-          return {success: false, error: String(error)}
+        const estimatedMemory = {
+          totalCalls: systemMetrics.totalCalls,
+          totalExecutions: systemMetrics.totalExecutions,
+          recentEvents: events.length,
+          memoryScore: Math.min(
+            (systemMetrics.totalCalls + events.length) / 10000,
+            1
+          )
         }
+
+        const needsCleanup =
+          estimatedMemory.memoryScore > 0.8 || events.length > 1000
+
+        const result = {
+          success: true,
+          memoryUsage: estimatedMemory.memoryScore,
+          needsCleanup,
+          metrics: estimatedMemory,
+          timestamp: Date.now()
+        }
+
+        if (needsCleanup) {
+          log.warn(
+            `🧠 Memory Alert: ${events.length} recent events, score: ${(
+              estimatedMemory.memoryScore * 100
+            ).toFixed(1)}%`
+          )
+        } else {
+          log.info(
+            `🧠 Memory OK: ${events.length} events, score: ${(
+              estimatedMemory.memoryScore * 100
+            ).toFixed(1)}%`
+          )
+        }
+
+        return result
+
+        log.error(`❌ Memory monitor failed: ${error}`)
+        return {success: false, error: String(error)}
       }
     },
     {
@@ -659,7 +657,7 @@ export const registerSystemIntelligence = (
       try {
         const actionResult = cyre.action(action)
         if (!actionResult.ok) {
-          log.error(
+          sensor.error(
             `❌ Failed to register action ${action.id}: ${actionResult.message}`
           )
           failed.push(action.id)

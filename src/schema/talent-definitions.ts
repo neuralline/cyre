@@ -1,13 +1,12 @@
 // src/schema/talent-definitions.ts
 // Talent definitions with proper error reporting and logging
 
-import type {IO} from '../types/core'
+import type {CyreResponse, IO} from '../types/core'
 import {metricsState} from '../context/metrics-state'
 import {sensor} from '../context/metrics-report'
 import {TimeKeeper} from '../components/cyre-timekeeper'
 import {io} from '../context/state'
 import {pathTalents} from './path-plugin'
-import {fusion, patterns} from './fusion-pattern-talents'
 import {stateTalents} from './state-talents-plugin'
 import {log} from '../components/cyre-log'
 
@@ -145,14 +144,14 @@ export const recuperation = (action: IO, payload: any): TalentResult => {
 // SCHEDULING TALENTS (Post-pipeline)
 // ===========================================
 
-export const scheduleExecution = (action: IO, payload: any): TalentResult => {
+export const scheduleExecution = (action: IO, payload: any): CyreResponse => {
   const interval = action.interval
   const delay = action.delay
   const repeat = action.repeat
 
   // If no scheduling needed, return success
   if (!interval && !delay && !repeat) {
-    return {ok: true, payload}
+    return {ok: true, payload, message: 'Scheduled'}
   }
 
   // Use interval for duration, default to delay if no interval
@@ -232,8 +231,6 @@ export const talents = {
   debounce,
   recuperation,
   path: pathTalents,
-  pattern: patterns,
-  fusion: fusion,
 
   // Processing talents (handled in processCall pipeline) - FROM PLUGIN
   ...stateTalents,
@@ -289,7 +286,7 @@ export const executeTalent = (
 
     // Log slow talent execution
     if (executionTime > 10) {
-      sensor.warning(action.id, `Slow talent execution: ${talentName}`, {
+      sensor.warn(action.id, `Slow talent execution: ${talentName}`, {
         executionTime,
         talentName,
         threshold: 10

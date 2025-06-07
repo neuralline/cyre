@@ -1,7 +1,6 @@
 // src/types/core.ts
 // Enhanced IO interface with additional channel fields
 
-import type {Schema} from '../schema/cyre-schema'
 export type * from './timer'
 export type * from './orchestration'
 
@@ -19,11 +18,24 @@ export interface PriorityConfig {
   maxDelay?: number
 }
 
+export interface TalentResult {
+  ok: boolean
+  error?: boolean
+  message?: string
+  payload?: any
+  delay?: number
+  schedule?: {
+    interval?: number
+    delay?: number
+    repeat?: number | boolean
+  }
+}
+
 export interface CyreResponse<T = any> {
   ok: boolean
   payload: T
   message: string
-  error?: any
+  error?: boolean | string
   timestamp?: number
   metadata?: {
     executionTime?: number
@@ -152,64 +164,6 @@ export interface IO {
   selector?: SelectorFunction
   /** Transform payload before execution */
   transform?: TransformFunction
-
-  // Multi-sensor fusion
-  fusion?: {
-    spatial?: {
-      sensors: Array<{
-        id: string
-        location: {x: number; y: number; z?: number}
-        weight?: number
-        maxDistance?: number
-      }>
-      method: 'weighted' | 'kalman' | 'consensus'
-      distanceThreshold: number
-    }
-    temporal?: {
-      sensors: string[]
-      windowSize: number
-      method: 'average' | 'median' | 'weighted' | 'kalman'
-      weights?: number[]
-    }
-    crossDomain?: {
-      sensors: Array<{
-        id: string
-        domain: string
-        transform?: (value: any) => number
-        weight: number
-      }>
-      correlationModel: 'linear' | 'neural' | 'custom'
-    }
-  }
-
-  // Pattern recognition
-  patterns?: {
-    sequences?: Array<{
-      name: string
-      conditions: Array<{
-        channelPattern: string
-        condition: (payload: any) => boolean
-        timeout?: number
-      }>
-      timeout: number
-      allowOverlap: boolean
-    }>
-    anomalies?: Array<{
-      name: string
-      channelPattern: string
-      method: 'zscore' | 'iqr' | 'isolation' | 'custom'
-      threshold: number
-      windowSize: number
-      customDetector?: (values: number[]) => boolean
-    }>
-    frequency?: Array<{
-      name: string
-      channelPattern: string
-      expectedInterval: number
-      tolerance: number
-      minOccurrences: number
-    }>
-  }
 
   // Internal optimization fields
   /** Pre-computed blocking state for instant rejection */

@@ -139,6 +139,7 @@ export const metricsState = {
       ...current,
       ...update,
       lastUpdate: Date.now(),
+      // FIXED: Properly handle hibernation state updates
       inRecuperation: update.inRecuperation ?? metricsState.inRecuperation,
       hibernating: update.hibernating ?? metricsState.hibernating,
       activeFormations: update.activeFormations ?? metricsState.activeFormations
@@ -150,6 +151,18 @@ export const metricsState = {
     }
 
     metricsStore.set('quantum', next)
+
+    // FIXED: Update module-level state tracking
+    if (update.hibernating !== undefined) {
+      metricsState.hibernating = update.hibernating
+    }
+    if (update.inRecuperation !== undefined) {
+      metricsState.inRecuperation = update.inRecuperation
+    }
+    if (update.activeFormations !== undefined) {
+      metricsState.activeFormations = update.activeFormations
+    }
+
     return next
   },
 
@@ -456,7 +469,7 @@ export const updateBreathingFromMetrics = async (): Promise<void> => {
 
       // Import sensor safely
       const {sensor} = await import('../context/metrics-report.js')
-      sensor.warning(
+      sensor.warn(
         'system',
         `High stress detected: ${(stress * 100).toFixed(1)}%`,
         {

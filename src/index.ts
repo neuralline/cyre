@@ -78,27 +78,11 @@ import {log} from './components/cyre-log'
 // Import schema system
 import schema from './schema/cyre-schema'
 
-// Import stream system
-import {createStream} from './stream'
-
-// Import group system
-import {groupOperations} from './components/cyre-group'
-
 // Import orchestration system
 import {orchestration} from './orchestration/orchestration-engine'
 
 // Main exports with branch system
-export {
-  cyre,
-  log,
-  useCyre,
-  cyreCompose,
-  createBranch,
-  createStream,
-  schema,
-  groupOperations,
-  orchestration
-}
+export {cyre, log, useCyre, cyreCompose, createBranch, schema, orchestration}
 
 // Export branch types
 export type {

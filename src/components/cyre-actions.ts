@@ -189,14 +189,10 @@ export const CyreActions = (action: IO): RegistrationResult => {
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error)
-          sensor.warning(
-            action.id,
-            `Failed to remove old path: ${errorMessage}`,
-            {
-              oldPath: existingAction.path,
-              error: errorMessage
-            }
-          )
+          sensor.warn(action.id, `Failed to remove old path: ${errorMessage}`, {
+            oldPath: existingAction.path,
+            error: errorMessage
+          })
         }
       }
     }
@@ -242,7 +238,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
     // Log warnings if present
     if (crossValidation.warnings.length > 0) {
-      sensor.warning(action.id, 'Configuration warnings detected', {
+      sensor.warn(action.id, 'Configuration warnings detected', {
         warnings: crossValidation.warnings,
         actionId: action.id
       })
@@ -334,7 +330,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         // Verify indexing worked
         const indexedPath = pathEngine.getPath(finalAction.id)
         if (indexedPath !== finalAction.path) {
-          sensor.warning(finalAction.id, 'Path indexing mismatch detected', {
+          sensor.warn(finalAction.id, 'Path indexing mismatch detected', {
             expected: finalAction.path,
             actual: indexedPath,
             indexed: !!indexedPath
@@ -366,13 +362,9 @@ export const CyreActions = (action: IO): RegistrationResult => {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
 
-      sensor.warning(
-        finalAction.id,
-        `Group assignment failed: ${errorMessage}`,
-        {
-          error: errorMessage
-        }
-      )
+      sensor.warn(finalAction.id, `Group assignment failed: ${errorMessage}`, {
+        error: errorMessage
+      })
 
       log.warn(`Group assignment failed for ${finalAction.id}: ${errorMessage}`)
       // Continue with registration even if group assignment fails
@@ -406,7 +398,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
 
-        sensor.warning(
+        sensor.warn(
           finalAction.id,
           `Payload initialization failed: ${errorMessage}`,
           {

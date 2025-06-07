@@ -1,276 +1,91 @@
 // src/components/cyre-timekeeper.ts
+// Timer system with centralized timeline and quartz engine
+
 import type {Timer, TimerDuration, TimerRepeat} from '../types/timer'
 import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-log'
-import {metricsState, Result} from '../context/metrics-state'
+import {sensor} from '../context/metrics-report'
 import {timeline} from '../context/state'
+import {metricsState} from '../context/metrics-state'
 
 /* 
       C.Y.R.E. - T.I.M.E.K.E.E.P.E.R.
-      Q0.0U0.0A0.0N0.0T0.0U0.0M0
-
       
-      Repeat logic and execution handling
-
-      Cyre Interval, Delay, Repeat Logic
-
-      Interval Actions:
-      First execution WAITS for the interval, then repeats 
-      Aligns with setInterval behavior that developers expect
-
-      Delay Actions:
-      First execution WAITS for delay
-      overwrites interval for initial execution waiting time
-     
-      Repeat Handling:
-      repeat specifies TOTAL number of executions 
-      repeat: 3 = Execute exactly 3 times total
-      Proper decrementing to avoid infinite loops
-
-      Combined Delay and Interval:
-      Delay applies first, then interval timing for subsequent executions
-      No immediate executions for interval or delay actions
-
-      Edge Cases:
-      { repeat: 0 } = Do not execute at all. 
-      { repeat: 1, interval: 1000 } = Wait 1000ms, execute once, done.
-      { delay: 0 } = wait 0ms then execute.
+      Rock-solid timer system with:
+      - Centralized timeline as single source of truth
+      - Quartz engine for precise execution coordination
+      - Drift compensation for accuracy
+      - Smart interval grouping for performance
+      - Time chunking for long durations
+      - Adaptive timing with breathing system
+      - High precision for <50ms, standard for ≥50ms
       
-      1. Always replace existing timekeeper for same action ID
-      2. Delay handling: delay for first execution, interval for subsequent
-      3. delay = 0 executes immediately, then uses interval
-      4. After first execution, delay becomes undefined, interval takes over
-      5. Proper metrics integration
-      6. Maintains all existing timekeeper functionality
-
-      Logic:
-      - { delay: 500, interval: 1000, repeat: 3 }
-        → Wait 500ms → Execute → Wait 1000ms → Execute → Wait 1000ms → Execute
-      - { delay: 0, interval: 1000, repeat: 3 }  
-        → Execute immediately → Wait 1000ms → Execute → Wait 1000ms → Execute
-      - { interval: 1000, repeat: 3 } (no delay)
-        → Wait 1000ms → Execute → Wait 1000ms → Execute → Wait 1000ms → Execute
-
-
-      Redesigned with:
-      - Single _quartz timer source for all timing operations
-      - Delay & Interval handling: delay controls first execution, interval for subsequent
-      - Timer precision tiers based on duration
-      - Cross-platform compatibility (browser/Node.js)
-      - Better memory and race condition management
-      - Enhanced long duration optimization with chunking
-
-      API: keep(interval, callback, repeat?, id?, delay?) => Result<Timer, Error>
-      
-      Timing Logic:
-      - delay parameter controls first execution timing
-      - interval parameter controls subsequent execution timing  
-      - Combined: {delay: 500, interval: 1000, repeat: 3} 
-        → Wait 500ms → Execute → Wait 1000ms → Execute → Wait 1000ms → Execute
+      Used by: orchestration, scheduler, repeat, delay, debounce, interval
 */
 
-// Timer precision tiers for optimal performance
-enum PrecisionTier {
-  HIGH = 'high', // < 50ms - setImmediate/hrtime precision
-  MEDIUM = 'medium', // < 1s - setTimeout precision
-  LOW = 'low', // < 1min - setInterval precision
-  CHUNKED = 'chunked' // > 1min - chunked execution
-}
-
-// Cross-platform timer detection
+// Environment detection for optimal timer strategy
 const TimerEnvironment = {
   hasHrTime:
     typeof process !== 'undefined' && typeof process.hrtime === 'function',
   hasPerformance:
     typeof performance !== 'undefined' && typeof performance.now === 'function',
   hasSetImmediate: typeof setImmediate !== 'undefined',
+  isNode: typeof process !== 'undefined' && process.versions?.node,
+  isBrowser: typeof window !== 'undefined',
   isTest: typeof process !== 'undefined' && process.env.NODE_ENV === 'test'
 }
 
-// Single unified timer source - _quartz
-const _quartz = {
-  activeTimers: new Map<
-    string,
-    {
-      timeoutId: NodeJS.Timeout | number
-      startTime: number
-      executionId: string
-      isExecuting: boolean
-      cleanup?: () => void
-    }
-  >(),
-
-  // Precision timer factory based on duration
-  createTimer: (
-    callback: () => void,
-    duration: number,
-    id: string
-  ): NodeJS.Timeout | number => {
-    const tier = _quartz.getPrecisionTier(duration)
-    const executionId = `${id}-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`
-
-    // Prevent race conditions - cleanup existing timer first
-    _quartz.clearTimer(id)
-
-    const wrappedCallback = () => {
-      const timerData = _quartz.activeTimers.get(id)
-      if (
-        !timerData ||
-        timerData.executionId !== executionId ||
-        timerData.isExecuting
-      ) {
-        return // Prevent duplicate execution
-      }
-
-      timerData.isExecuting = true
-      _quartz.activeTimers.set(id, timerData)
-
-      try {
-        callback()
-      } finally {
-        const currentTimer = _quartz.activeTimers.get(id)
-        if (currentTimer && currentTimer.executionId === executionId) {
-          currentTimer.isExecuting = false
-          _quartz.activeTimers.set(id, currentTimer)
-        }
-      }
-    }
-
-    let timeoutId: NodeJS.Timeout | number
-
-    // In test environment, use setTimeout with actual duration
-    if (TimerEnvironment.isTest) {
-      timeoutId = setTimeout(wrappedCallback, duration)
-    } else {
-      switch (tier) {
-        case PrecisionTier.HIGH:
-          timeoutId = _quartz.createHighPrecisionTimer(
-            wrappedCallback,
-            duration
-          )
-          break
-        case PrecisionTier.CHUNKED:
-          timeoutId = _quartz.createChunkedTimer(wrappedCallback, duration, id)
-          break
-        default:
-          timeoutId = _quartz.createMediumPrecisionTimer(
-            wrappedCallback,
-            duration
-          )
-      }
-    }
-
-    _quartz.activeTimers.set(id, {
-      timeoutId,
-      startTime: Date.now(),
-      executionId,
-      isExecuting: false
-    })
-
-    return timeoutId
-  },
-
-  // High precision timer for sub-50ms intervals
-  createHighPrecisionTimer: (
-    callback: () => void,
-    duration: number
-  ): NodeJS.Timeout => {
-    if (TimerEnvironment.isTest) {
-      return setTimeout(callback, duration) as NodeJS.Timeout
-    }
-
-    const start = TimerEnvironment.hasHrTime ? process.hrtime() : Date.now()
-
-    const checkTime = () => {
-      const elapsed = TimerEnvironment.hasHrTime
-        ? (() => {
-            const [seconds, nanoseconds] = process.hrtime(
-              start as [number, number]
-            )
-            return seconds * 1000 + nanoseconds / 1000000
-          })()
-        : Date.now() - (start as number)
-
-      if (elapsed >= duration) {
-        callback()
-      } else {
-        const remaining = duration - elapsed
-        if (remaining < 1 && TimerEnvironment.hasSetImmediate) {
-          setImmediate(checkTime)
-        } else {
-          setTimeout(checkTime, Math.max(0, Math.floor(remaining / 2)))
-        }
-      }
-    }
-
-    return setTimeout(checkTime, 0) as NodeJS.Timeout
-  },
-
-  // Medium precision for standard intervals
-  createMediumPrecisionTimer: (
-    callback: () => void,
-    duration: number
-  ): NodeJS.Timeout => {
-    const systemState = metricsState.get()
-    const stressFactor = 1 + (systemState.stress?.combined || 0) * 0.1
-    const adjustedDuration = Math.floor(duration * stressFactor)
-
-    return setTimeout(callback, adjustedDuration) as NodeJS.Timeout
-  },
-
-  // Chunked timer for long durations (> 1 minute)
-  createChunkedTimer: (
-    callback: () => void,
-    duration: number,
-    id: string
-  ): NodeJS.Timeout => {
-    const chunkSize = Math.min(duration, TIMING.MAX_TIMEOUT / 2)
-    const remainingTime = duration - chunkSize
-
-    const chunkCallback = () => {
-      if (remainingTime <= 0) {
-        callback()
-      } else {
-        // Schedule next chunk
-        _quartz.createTimer(
-          () => {
-            _quartz.createChunkedTimer(callback, remainingTime, id)
-          },
-          chunkSize,
-          `${id}-chunk`
-        )
-      }
-    }
-
-    return setTimeout(chunkCallback, chunkSize) as NodeJS.Timeout
-  },
-
-  // Determine precision tier based on duration
-  getPrecisionTier: (duration: number): PrecisionTier => {
-    if (duration < 50) return PrecisionTier.HIGH
-    if (duration < 1000) return PrecisionTier.MEDIUM
-    if (duration < 60000) return PrecisionTier.LOW
-    return PrecisionTier.CHUNKED
-  },
-
-  // Clear timer with proper cleanup
-  clearTimer: (id: string): void => {
-    const timerData = _quartz.activeTimers.get(id)
-    if (timerData) {
-      clearTimeout(timerData.timeoutId as NodeJS.Timeout)
-      _quartz.activeTimers.delete(id)
-    }
-  },
-
-  // Get timer statistics
-  getStats: () => ({
-    activeCount: _quartz.activeTimers.size,
-    activeIds: Array.from(_quartz.activeTimers.keys()),
-    memoryUsage: _quartz.activeTimers.size * 64 // Rough estimate in bytes
-  })
+// High precision time measurement
+const now = (): number => {
+  if (TimerEnvironment.hasPerformance) {
+    return performance.now()
+  }
+  if (TimerEnvironment.hasHrTime) {
+    const [seconds, nanoseconds] = process.hrtime()
+    return seconds * 1000 + nanoseconds / 1000000
+  }
+  return Date.now()
 }
+
+// Timeline interface to avoid circular dependency
+interface TimelineInterface {
+  add: (timer: Timer) => void
+  get: (id: string) => Timer | undefined
+  forget: (id: string) => boolean
+  clear: () => void
+  getAll: () => Timer[]
+  getActive: () => Timer[]
+}
+
+// Metrics interface to avoid circular dependency
+interface MetricsInterface {
+  get: () => {
+    hibernating: boolean
+    stress?: {combined: number}
+    breathing: {currentRate: number}
+  }
+  update: (update: any) => void
+}
+
+const getTimeline = (): TimelineInterface => {
+  return timeline
+}
+
+const getMetricsState = (): MetricsInterface => {
+  return metricsState
+}
+
+// Timer state management with immutability
+const createTimerState = (timer: Timer, updates: Partial<Timer>): Timer => ({
+  ...timer,
+  ...updates,
+  metrics: timer.metrics
+    ? {
+        ...timer.metrics,
+        ...updates.metrics
+      }
+    : timer.metrics
+})
 
 // Duration conversion utility
 const convertDurationToMs = (duration: TimerDuration): number => {
@@ -283,54 +98,367 @@ const convertDurationToMs = (duration: TimerDuration): number => {
   )
 }
 
-// Enhanced formation initialization with delay/interval logic
-const initializeFormation = (
+// Precision tier calculation
+const getPrecisionTier = (
+  interval: number
+): 'high' | 'standard' | 'chunked' => {
+  if (interval < 50) return 'high'
+  if (interval > TIMING.MAX_TIMEOUT) return 'chunked'
+  return 'standard'
+}
+
+// Drift compensation calculation
+const calculateDriftCompensation = (
+  scheduledTime: number,
+  actualTime: number,
+  baseInterval: number
+): number => {
+  const drift = actualTime - scheduledTime
+
+  // Only compensate if drift is significant (>5% of interval)
+  if (Math.abs(drift) > baseInterval * 0.05) {
+    return Math.max(1, baseInterval - drift)
+  }
+
+  return baseInterval
+}
+
+// Quartz Engine - Centralized execution coordinator
+const QuartzEngine = {
+  // Core state
+  quartzTimer: null as NodeJS.Timeout | null,
+  quartzInterval: 10, // 10ms for high precision
+  isRunning: false,
+  lastTickTime: 0,
+
+  // Execution groups for efficiency
+  executionGroups: new Map<number, Set<string>>(),
+  precisionGroups: new Map<'high' | 'standard' | 'chunked', Set<string>>(),
+
+  // Performance metrics
+  metrics: {
+    totalTicks: 0,
+    missedTicks: 0,
+    driftCompensations: 0,
+    executionErrors: 0
+  },
+
+  start(): void {
+    if (this.isRunning) return
+
+    this.isRunning = true
+    this.lastTickTime = now()
+
+    // Use setImmediate for Node.js high precision
+    if (TimerEnvironment.isNode && TimerEnvironment.hasSetImmediate) {
+      const tick = () => {
+        if (this.isRunning) {
+          this.tick()
+          setImmediate(tick)
+        }
+      }
+      setImmediate(tick)
+    } else {
+      // Fallback to setInterval for browsers
+      this.quartzTimer = setInterval(() => this.tick(), this.quartzInterval)
+    }
+
+    sensor.info('quartz', 'Quartz engine started', {
+      mode: TimerEnvironment.isNode ? 'setImmediate' : 'setInterval',
+      interval: this.quartzInterval
+    })
+  },
+
+  stop(): void {
+    this.isRunning = false
+
+    if (this.quartzTimer) {
+      clearInterval(this.quartzTimer)
+      this.quartzTimer = null
+    }
+
+    this.executionGroups.clear()
+    this.precisionGroups.clear()
+
+    sensor.info('quartz', 'Quartz engine stopped', this.metrics)
+  },
+
+  tick(): void {
+    const tickStart = now()
+    const currentTime = Date.now()
+    const systemState = getMetricsState().get()
+
+    // Skip if hibernating
+    if (systemState.hibernating) return
+
+    this.metrics.totalTicks++
+
+    // Track tick timing for drift detection
+    if (this.lastTickTime > 0) {
+      const tickInterval = tickStart - this.lastTickTime
+      if (tickInterval > this.quartzInterval * 2) {
+        this.metrics.missedTicks++
+      }
+    }
+    this.lastTickTime = tickStart
+
+    // Get formations by precision tier for optimal execution order
+    const timeline = getTimeline()
+    const activeFormations = timeline.getActive()
+
+    // Group by precision tier
+    const highPrecision: Timer[] = []
+    const standardPrecision: Timer[] = []
+
+    for (const formation of activeFormations) {
+      if (currentTime >= formation.nextExecutionTime) {
+        const tier = getPrecisionTier(formation.duration)
+        if (tier === 'high') {
+          highPrecision.push(formation)
+        } else {
+          standardPrecision.push(formation)
+        }
+      }
+    }
+
+    // Execute high precision first
+    for (const formation of highPrecision) {
+      this.executeFormation(formation, currentTime)
+    }
+
+    // Then standard precision
+    for (const formation of standardPrecision) {
+      this.executeFormation(formation, currentTime)
+    }
+  },
+
+  async executeFormation(formation: Timer, currentTime: number): Promise<void> {
+    const executionStart = now()
+
+    try {
+      // Calculate drift
+      const drift = currentTime - formation.nextExecutionTime
+
+      sensor.debug(formation.id, 'Timer execution starting', {
+        scheduledTime: formation.nextExecutionTime,
+        actualTime: currentTime,
+        drift,
+        executionCount: formation.executionCount
+      })
+
+      // Execute callback
+      await Promise.resolve(formation.callback())
+
+      const executionDuration = now() - executionStart
+
+      // Update formation state immutably
+      const updatedFormation = createTimerState(formation, {
+        executionCount: formation.executionCount + 1,
+        lastExecutionTime: currentTime,
+        hasExecutedOnce: true,
+        delay: undefined, // Clear delay after first execution
+        repeat:
+          typeof formation.repeat === 'number' && formation.repeat > 0
+            ? formation.repeat - 1
+            : formation.repeat
+      })
+
+      // Update metrics
+      if (updatedFormation.metrics) {
+        updatedFormation.metrics.totalExecutions++
+        updatedFormation.metrics.successfulExecutions++
+        updatedFormation.metrics.lastExecutionTime = executionDuration
+        updatedFormation.metrics.averageExecutionTime =
+          (updatedFormation.metrics.averageExecutionTime *
+            (updatedFormation.metrics.totalExecutions - 1) +
+            executionDuration) /
+          updatedFormation.metrics.totalExecutions
+
+        if (executionDuration > updatedFormation.metrics.longestExecutionTime) {
+          updatedFormation.metrics.longestExecutionTime = executionDuration
+        }
+        if (
+          executionDuration < updatedFormation.metrics.shortestExecutionTime
+        ) {
+          updatedFormation.metrics.shortestExecutionTime = executionDuration
+        }
+      }
+
+      // Save updated state
+      getTimeline().add(updatedFormation)
+
+      // Schedule next execution if needed
+      if (this.shouldContinue(updatedFormation)) {
+        this.scheduleNext(updatedFormation, currentTime, drift)
+      } else {
+        // Formation completed
+        this.removeFromGroups(updatedFormation)
+        getTimeline().forget(updatedFormation.id)
+
+        sensor.info(updatedFormation.id, 'Timer completed', {
+          totalExecutions: updatedFormation.executionCount,
+          averageExecutionTime: updatedFormation.metrics?.averageExecutionTime
+        })
+      }
+    } catch (error) {
+      this.metrics.executionErrors++
+
+      sensor.error(formation.id, String(error), 'timer-execution', {
+        executionCount: formation.executionCount
+      })
+
+      // Update failure metrics
+      if (formation.metrics) {
+        formation.metrics.failedExecutions++
+      }
+
+      // Continue with repeat logic even on error
+      if (this.shouldContinue(formation)) {
+        this.scheduleNext(formation, currentTime, 0)
+      } else {
+        this.removeFromGroups(formation)
+        getTimeline().forget(formation.id)
+      }
+    }
+  },
+
+  shouldContinue(formation: Timer): boolean {
+    return (
+      formation.repeat === true ||
+      formation.repeat === Infinity ||
+      (typeof formation.repeat === 'number' && formation.repeat > 0)
+    )
+  },
+
+  scheduleNext(
+    formation: Timer,
+    currentTime: number,
+    previousDrift: number
+  ): void {
+    const systemState = getMetricsState().get()
+    const stressFactor = 1 + (systemState.stress?.combined || 0) * 0.1
+
+    // Determine base interval
+    let baseInterval: number
+    if (!formation.hasExecutedOnce && formation.delay !== undefined) {
+      baseInterval = formation.delay
+    } else {
+      baseInterval = formation.interval || formation.originalDuration
+    }
+
+    // Apply drift compensation for precision
+    if (
+      Math.abs(previousDrift) > 5 &&
+      getPrecisionTier(baseInterval) === 'high'
+    ) {
+      baseInterval = calculateDriftCompensation(
+        formation.nextExecutionTime,
+        currentTime,
+        baseInterval
+      )
+      this.metrics.driftCompensations++
+    }
+
+    // Apply stress adaptation
+    const adaptedInterval = Math.max(1, Math.floor(baseInterval * stressFactor))
+
+    // Handle chunking for long durations
+    let isInRecuperation = false
+    let finalInterval = adaptedInterval
+
+    if (adaptedInterval > TIMING.MAX_TIMEOUT) {
+      isInRecuperation = true
+      finalInterval = TIMING.RECUPERATION
+    }
+
+    // Calculate next execution time
+    const nextExecutionTime = currentTime + finalInterval
+
+    // Update formation state
+    const updatedFormation = createTimerState(formation, {
+      nextExecutionTime,
+      duration: finalInterval,
+      isInRecuperation
+    })
+
+    // Update groups
+    this.addToGroups(updatedFormation)
+
+    // Save to timeline
+    getTimeline().add(updatedFormation)
+
+    sensor.debug(updatedFormation.id, 'Next execution scheduled', {
+      baseInterval,
+      adaptedInterval: finalInterval,
+      stressFactor,
+      nextExecutionTime,
+      driftCompensation: previousDrift !== 0
+    })
+  },
+
+  addToGroups(formation: Timer): void {
+    // Add to interval group
+    const groupKey = Math.round(formation.duration / 10) * 10
+    if (!this.executionGroups.has(groupKey)) {
+      this.executionGroups.set(groupKey, new Set())
+    }
+    this.executionGroups.get(groupKey)!.add(formation.id)
+
+    // Add to precision group
+    const tier = getPrecisionTier(formation.duration)
+    if (!this.precisionGroups.has(tier)) {
+      this.precisionGroups.set(tier, new Set())
+    }
+    this.precisionGroups.get(tier)!.add(formation.id)
+  },
+
+  removeFromGroups(formation: Timer): void {
+    // Remove from interval groups
+    for (const [, group] of this.executionGroups) {
+      group.delete(formation.id)
+    }
+
+    // Remove from precision groups
+    for (const [, group] of this.precisionGroups) {
+      group.delete(formation.id)
+    }
+  }
+}
+
+// Formation creation
+const createFormation = (
   id: string,
   interval: number,
-  callback: () => void,
+  callback: () => void | Promise<void>,
   repeat?: TimerRepeat,
   delay?: number
 ): Timer => {
-  if (!id || typeof interval !== 'number' || typeof callback !== 'function') {
-    throw new Error('Invalid formation parameters')
-  }
-
-  const now = Date.now()
-  const systemState = metricsState.get()
+  const currentTime = Date.now()
+  const systemState = getMetricsState().get()
   const stressFactor = 1 + (systemState.stress?.combined || 0) * 0.1
 
-  // Delay/Interval Logic:
-  // - If delay is specified, use it for first execution
-  // - Otherwise, use interval for first execution
-  // - After first execution, always use interval for subsequent executions
   const initialDuration = delay !== undefined ? delay : interval
-  const isLongDuration = initialDuration >= TIMING.MAX_TIMEOUT
+  const adaptedDuration = Math.floor(initialDuration * stressFactor)
+  const tier = getPrecisionTier(adaptedDuration)
 
   const formation: Timer = {
     id,
-    startTime: now,
-    duration: isLongDuration
-      ? TIMING.MAX_TIMEOUT
-      : Math.floor(initialDuration * stressFactor),
-    originalDuration: interval, // Store original interval for subsequent executions
+    startTime: currentTime,
+    duration: adaptedDuration,
+    originalDuration: interval,
     callback,
     repeat,
     executionCount: 0,
     lastExecutionTime: 0,
-    nextExecutionTime:
-      now +
-      (isLongDuration
-        ? TIMING.MAX_TIMEOUT
-        : Math.floor(initialDuration * stressFactor)),
-    isInRecuperation: isLongDuration,
+    nextExecutionTime: currentTime + adaptedDuration,
+    isInRecuperation: tier === 'chunked',
     status: 'active',
     isActive: true,
+    delay,
+    interval,
+    hasExecutedOnce: false,
 
-    // Store delay information for proper handling
-    delay: delay,
-    interval: interval,
-    hasExecutedOnce: false, // Track if first execution completed
-
+    // Comprehensive metrics
     metrics: {
       totalExecutions: 0,
       successfulExecutions: 0,
@@ -349,276 +477,39 @@ const initializeFormation = (
     }
   }
 
-  if (isLongDuration) {
-    formation.recuperationInterval = createRecuperationChecker(formation)
-  }
+  sensor.info(id, 'Timer created', {
+    interval,
+    delay,
+    repeat,
+    adaptedDuration,
+    stressFactor,
+    precisionTier: tier
+  })
 
   return formation
 }
 
-// Enhanced callback execution with better error handling and metrics
-const executeCallback = async (formation: Timer): Promise<void> => {
-  if (!formation?.id) return
+// Result type for functional error handling
+export type Result<T, E = Error> =
+  | {kind: 'ok'; value: T}
+  | {kind: 'error'; error: E}
 
-  const startTime = TimerEnvironment.hasPerformance
-    ? performance.now()
-    : Date.now()
-  const currentFormation = timeline.get(formation.id)
-
-  if (!currentFormation || !currentFormation.isActive) {
-    return
-  }
-
-  try {
-    // Execute the callback
-    await currentFormation.callback()
-
-    const executionTime = TimerEnvironment.hasPerformance
-      ? performance.now() - startTime
-      : Date.now() - startTime
-
-    // Update metrics
-    currentFormation.metrics.totalExecutions++
-    currentFormation.metrics.successfulExecutions++
-    currentFormation.metrics.lastExecutionTime = executionTime
-    currentFormation.metrics.longestExecutionTime = Math.max(
-      currentFormation.metrics.longestExecutionTime,
-      executionTime
-    )
-    currentFormation.metrics.shortestExecutionTime = Math.min(
-      currentFormation.metrics.shortestExecutionTime,
-      executionTime
-    )
-    currentFormation.metrics.averageExecutionTime =
-      (currentFormation.metrics.averageExecutionTime *
-        (currentFormation.metrics.totalExecutions - 1) +
-        executionTime) /
-      currentFormation.metrics.totalExecutions
-
-    currentFormation.executionCount++
-    currentFormation.lastExecutionTime = Date.now()
-
-    // Mark that first execution is complete
-    if (!currentFormation.hasExecutedOnce) {
-      currentFormation.hasExecutedOnce = true
-      // After first execution, clear delay and use interval for subsequent executions
-      if (currentFormation.delay !== undefined) {
-        currentFormation.delay = undefined
-      }
-    }
-
-    // Handle repeat logic
-    if (
-      typeof currentFormation.repeat === 'number' &&
-      currentFormation.repeat > 0
-    ) {
-      currentFormation.repeat = currentFormation.repeat - 1
-    }
-
-    timeline.add(currentFormation)
-
-    // Schedule next execution if needed
-    if (
-      currentFormation.repeat === true ||
-      currentFormation.repeat === Infinity ||
-      (typeof currentFormation.repeat === 'number' &&
-        currentFormation.repeat > 0)
-    ) {
-      scheduleNext(currentFormation)
-    } else {
-      // Clean up completed formation
-      _quartz.clearTimer(currentFormation.id)
-      timeline.forget(currentFormation.id)
-    }
-  } catch (error) {
-    const executionTime = TimerEnvironment.hasPerformance
-      ? performance.now() - startTime
-      : Date.now() - startTime
-
-    const updatedFormation = timeline.get(formation.id)
-    if (updatedFormation) {
-      updatedFormation.metrics.failedExecutions++
-      updatedFormation.metrics.lastExecutionTime = executionTime
-      timeline.add(updatedFormation)
-    }
-
-    log.error(`Timer execution failed for ${formation.id}: ${error}`)
-
-    // Continue with repeat logic even on error
-    if (
-      currentFormation.repeat === true ||
-      currentFormation.repeat === Infinity ||
-      (typeof currentFormation.repeat === 'number' &&
-        currentFormation.repeat > 0)
-    ) {
-      scheduleNext(currentFormation)
-    } else {
-      _quartz.clearTimer(currentFormation.id)
-      timeline.forget(currentFormation.id)
-    }
-  }
-}
-
-// Enhanced recuperation checker with better memory management
-const createRecuperationChecker = (formation: Timer): NodeJS.Timeout => {
-  if (!formation?.id) {
-    return undefined as unknown as NodeJS.Timeout
-  }
-
-  const checkInterval = Math.min(
-    formation.duration > TIMING.RECUPERATION
-      ? TIMING.RECUPERATION
-      : formation.duration / 10,
-    10000 // Maximum 10 second check interval
-  )
-
-  let lastCheck = Date.now()
-
-  const check = () => {
-    const currentFormation = timeline.get(formation.id)
-    if (!currentFormation || !currentFormation.isActive) {
-      return // Stop checking if formation is gone or inactive
-    }
-
-    const now = Date.now()
-    const systemState = metricsState.get()
-    const stressFactor = 1 + (systemState.stress?.combined || 0) * 0.1
-
-    // Adjust timing based on stress and elapsed time
-    if (now - lastCheck > checkInterval || Math.abs(stressFactor - 1) > 0.1) {
-      const baseInterval = currentFormation.hasExecutedOnce
-        ? currentFormation.interval || currentFormation.originalDuration
-        : currentFormation.delay !== undefined
-        ? currentFormation.delay
-        : currentFormation.originalDuration
-
-      const remainingOriginal =
-        baseInterval - currentFormation.executionCount * TIMING.MAX_TIMEOUT
-
-      currentFormation.duration = Math.min(
-        Math.max(remainingOriginal * stressFactor, 1000), // Minimum 1 second
-        TIMING.MAX_TIMEOUT
-      )
-
-      currentFormation.nextExecutionTime = now + currentFormation.duration
-      timeline.add(currentFormation)
-      lastCheck = now
-    }
-
-    // Continue checking if still active and not hibernating
-    if (!systemState.hibernating && currentFormation.status === 'active') {
-      const nextCheck = setTimeout(check, checkInterval)
-      currentFormation.recuperationInterval = nextCheck
-      timeline.add(currentFormation)
-    }
-  }
-
-  return setTimeout(check, checkInterval) as NodeJS.Timeout
-}
-
-// Enhanced scheduling with delay/interval logic
-const scheduleNext = (formation: Timer): void => {
-  if (!formation?.id) return
-
-  const systemState = metricsState.get()
-  if (systemState.hibernating) return
-
-  const currentFormation = timeline.get(formation.id)
-  if (!currentFormation || !currentFormation.isActive) return
-
-  // Prevent runaway executions
-  if (currentFormation.executionCount > 10000) {
-    log.error(`Maximum execution count exceeded for ${currentFormation.id}`)
-    _quartz.clearTimer(currentFormation.id)
-    timeline.forget(currentFormation.id)
-    return
-  }
-
-  const now = Date.now()
-  const stressFactor = 1 + (systemState.stress?.combined || 0) * 0.1
-
-  // Delay/Interval Logic:
-  // - For first execution: use delay if specified, otherwise use interval
-  // - For subsequent executions: always use interval
-  let nextDuration: number
-
-  if (
-    !currentFormation.hasExecutedOnce &&
-    currentFormation.delay !== undefined
-  ) {
-    // First execution with delay specified
-    nextDuration = currentFormation.delay
-  } else {
-    // Subsequent executions or first execution without delay
-    nextDuration =
-      currentFormation.interval || currentFormation.originalDuration
-  }
-
-  // Apply stress factor and bounds checking
-  nextDuration = Math.max(1, Math.floor(nextDuration * stressFactor))
-
-  // Handle long durations with recuperation
-  if (currentFormation.isInRecuperation) {
-    const remainingOriginal =
-      nextDuration - currentFormation.executionCount * TIMING.MAX_TIMEOUT
-    nextDuration = Math.min(
-      remainingOriginal * stressFactor,
-      TIMING.MAX_TIMEOUT
-    )
-
-    if (
-      nextDuration <= TIMING.MAX_TIMEOUT &&
-      remainingOriginal <= TIMING.MAX_TIMEOUT
-    ) {
-      currentFormation.isInRecuperation = false
-      if (currentFormation.recuperationInterval) {
-        clearTimeout(currentFormation.recuperationInterval)
-        currentFormation.recuperationInterval = undefined
-      }
-    }
-  }
-
-  currentFormation.duration = nextDuration
-  currentFormation.nextExecutionTime = now + nextDuration
-
-  // Create timer using unified _quartz system
-  try {
-    _quartz.createTimer(
-      () => executeCallback(currentFormation),
-      nextDuration,
-      currentFormation.id
-    )
-    timeline.add(currentFormation)
-  } catch (error) {
-    log.error(
-      `Failed to schedule next execution for ${currentFormation.id}: ${error}`
-    )
-    timeline.forget(currentFormation.id)
-  }
-}
-
-// Main TimeKeeper interface with updated API
-export const TimeKeeper = Object.freeze({
-  /**
-   * Create a new timer formation
-   * @param interval - Duration for subsequent executions (default duration)
-   * @param callback - Function to execute
-   * @param repeat - Number of times to repeat or boolean for infinite (optional)
-   * @param id - Unique identifier for the timer (optional)
-   * @param delay - For delayed for first execution (optional)
-   */
+// Main TimeKeeper API
+export const TimeKeeper = {
   keep: (
     interval: number | TimerDuration,
-    callback: () => void,
+    callback: () => void | Promise<void>,
     repeat?: TimerRepeat,
-    id: string = `keep-${crypto.randomUUID()}`,
+    id: string = `timer-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 9)}`,
     delay?: number
   ): Result<Timer, Error> => {
     try {
+      // Validate inputs
       const intervalMs =
         typeof interval === 'number' ? interval : convertDurationToMs(interval)
 
-      // Validate parameters
       if (intervalMs < 0) {
         throw new Error('Interval cannot be negative')
       }
@@ -629,219 +520,216 @@ export const TimeKeeper = Object.freeze({
         throw new Error('Callback must be a function')
       }
 
-      // Clean up any existing timer with same ID
-      _quartz.clearTimer(id)
+      const timeline = getTimeline()
+
+      // Remove existing timer with same ID
       timeline.forget(id)
 
-      const formation = initializeFormation(
-        id,
-        intervalMs,
-        callback,
-        repeat,
-        delay
-      )
+      // Create new formation
+      const formation = createFormation(id, intervalMs, callback, repeat, delay)
+
+      // Add to timeline
       timeline.add(formation)
 
-      // Schedule first execution
-      scheduleNext(formation)
+      // Add to execution groups
+      QuartzEngine.addToGroups(formation)
+
+      // Start quartz if not running
+      if (!QuartzEngine.isRunning) {
+        QuartzEngine.start()
+      }
 
       return {kind: 'ok', value: formation}
     } catch (error) {
-      log.error(`Timer creation failed: ${error}`)
+      sensor.error(id, String(error), 'timer-creation')
       return {
         kind: 'error',
-        error:
-          error instanceof Error ? error : new Error('Timer creation failed')
+        error: error instanceof Error ? error : new Error(String(error))
       }
     }
   },
+
   wait: (
     duration: number,
-    id: string = `wait-${crypto.randomUUID()}`
+    id: string = `wait-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   ): Promise<void> => {
-    // Validate duration
     if (duration <= 0) {
-      return Promise.resolve() // Resolve immediately for zero or negative durations
+      return Promise.resolve()
     }
 
     return new Promise((resolve, reject) => {
-      try {
-        // Clear any existing timer first
-        _quartz.clearTimer(id)
+      const result = TimeKeeper.keep(
+        duration,
+        () => {
+          TimeKeeper.forget(id)
+          resolve()
+        },
+        1, // Execute once
+        id
+      )
 
-        // Use _quartz's timer creation for consistent behavior
-        const timeoutId = _quartz.createTimer(
-          () => {
-            // Clean up and resolve
-            _quartz.activeTimers.delete(id)
-            resolve()
-          },
-          duration,
-          id
-        )
-
-        // Store for cancellation
-        _quartz.activeTimers.set(id, {
-          timeoutId,
-          startTime: Date.now(),
-          executionId: `${id}-${Date.now()}`,
-          isExecuting: false
-        })
-
-        // Handle cancellation
-        const cleanup = () => {
-          _quartz.clearTimer(id)
-          _quartz.activeTimers.delete(id)
-          resolve() // Resolve on cancellation
-        }
-
-        // Store cleanup function for forget
-        _quartz.activeTimers.get(id)!.cleanup = cleanup
-      } catch (error) {
-        reject(
-          error instanceof Error
-            ? error
-            : new Error('Wait timer creation failed')
-        )
+      if (result.kind === 'error') {
+        reject(result.error)
       }
     })
   },
+
   forget: (id: string): void => {
-    _quartz.clearTimer(id)
-
+    const timeline = getTimeline()
     const formation = timeline.get(id)
-    if (formation?.recuperationInterval) {
-      clearTimeout(formation.recuperationInterval)
-    }
 
-    timeline.forget(id)
+    if (formation) {
+      QuartzEngine.removeFromGroups(formation)
+      timeline.forget(id)
+      sensor.debug(id, 'Timer forgotten')
+    }
   },
 
   pause: (id?: string): void => {
+    const timeline = getTimeline()
+
     if (id) {
       const formation = timeline.get(id)
       if (formation) {
-        _quartz.clearTimer(id)
-        if (formation.recuperationInterval) {
-          clearTimeout(formation.recuperationInterval)
-        }
-        formation.status = 'paused'
-        formation.isActive = false
-        timeline.add(formation)
-        log.debug(`Timer paused: ${id}`)
+        const updated = createTimerState(formation, {
+          status: 'paused',
+          isActive: false
+        })
+        timeline.add(updated)
+        QuartzEngine.removeFromGroups(updated)
+        sensor.debug(id, 'Timer paused')
       }
     } else {
-      // Pause all timers
+      // Pause all
       timeline.getAll().forEach(formation => {
-        _quartz.clearTimer(formation.id)
-        if (formation.recuperationInterval) {
-          clearTimeout(formation.recuperationInterval)
-        }
-        formation.status = 'paused'
-        formation.isActive = false
-        timeline.add(formation)
+        const updated = createTimerState(formation, {
+          status: 'paused',
+          isActive: false
+        })
+        timeline.add(updated)
+        QuartzEngine.removeFromGroups(updated)
       })
-      log.debug('All timers paused')
+      sensor.debug('system', 'All timers paused')
     }
   },
 
   resume: (id?: string): void => {
-    const systemState = metricsState.get()
+    const timeline = getTimeline()
+    const systemState = getMetricsState().get()
+
     if (systemState.hibernating) {
-      log.warn('Cannot resume timers while system is hibernating')
+      log.warn('Cannot resume timers while hibernating')
       return
     }
 
     if (id) {
       const formation = timeline.get(id)
       if (formation && formation.status === 'paused') {
-        formation.status = 'active'
-        formation.isActive = true
-        timeline.add(formation)
-        scheduleNext(formation)
-        log.debug(`Timer resumed: ${id}`)
+        const updated = createTimerState(formation, {
+          status: 'active',
+          isActive: true
+        })
+        timeline.add(updated)
+        QuartzEngine.scheduleNext(updated, Date.now(), 0)
+
+        if (!QuartzEngine.isRunning) {
+          QuartzEngine.start()
+        }
+
+        sensor.debug(id, 'Timer resumed')
       }
     } else {
-      // Resume all paused timers
-      timeline.getAll().forEach(formation => {
+      // Resume all
+      const formations = timeline.getAll()
+      formations.forEach(formation => {
         if (formation.status === 'paused') {
-          formation.status = 'active'
-          formation.isActive = true
-          timeline.add(formation)
-          scheduleNext(formation)
+          const updated = createTimerState(formation, {
+            status: 'active',
+            isActive: true
+          })
+          timeline.add(updated)
+          QuartzEngine.scheduleNext(updated, Date.now(), 0)
         }
       })
-      log.debug('All timers resumed')
+
+      if (!QuartzEngine.isRunning && timeline.getActive().length > 0) {
+        QuartzEngine.start()
+      }
+
+      sensor.debug('system', 'All timers resumed')
     }
   },
 
   hibernate: (): void => {
     log.debug('TimeKeeper entering hibernation')
 
-    // Update metrics state first and ensure it's set
-    metricsState.update({hibernating: true})
+    // Stop quartz first
+    QuartzEngine.stop()
 
-    // Clear all active timers
-    timeline.getAll().forEach(formation => {
-      _quartz.clearTimer(formation.id)
-      if (formation.recuperationInterval) {
-        clearTimeout(formation.recuperationInterval)
-      }
-    })
+    // Clear timeline
+    getTimeline().clear()
 
-    // Clear timeline after all timers are cleared
-    timeline.clear()
+    // Update metrics state
+    getMetricsState().update({hibernating: true})
 
-    // Double-check and force hibernation state
-    const currentState = metricsState.get()
-    if (!currentState.hibernating) {
-      metricsState.update({hibernating: true})
-    }
-
-    // Verify state is set
-    const finalState = metricsState.get()
-    if (!finalState.hibernating) {
-      log.critical('Failed to set hibernation state')
-      throw new Error('Failed to set hibernation state')
-    }
+    sensor.info('system', 'TimeKeeper hibernated')
   },
 
   reset: (): void => {
-    log.debug('TimeKeeper reset initiated')
-    metricsState.update({hibernating: false})
+    // Stop quartz
+    QuartzEngine.stop()
 
-    // Clear all timers and formations
-    timeline.getAll().forEach(formation => {
-      _quartz.clearTimer(formation.id)
-      if (formation.recuperationInterval) {
-        clearTimeout(formation.recuperationInterval)
-      }
-    })
+    // Clear timeline
+    getTimeline().clear()
 
-    timeline.clear()
+    // Reset hibernation state
+    getMetricsState().update({hibernating: false})
 
-    // Clear quartz timers
-    _quartz.activeTimers.clear()
+    // Reset quartz metrics
+    QuartzEngine.metrics = {
+      totalTicks: 0,
+      missedTicks: 0,
+      driftCompensations: 0,
+      executionErrors: 0
+    }
+
+    sensor.info('system', 'TimeKeeper reset complete')
   },
 
   status: () => {
+    const timeline = getTimeline()
     const formations = timeline.getAll()
-    const quartzStats = _quartz.getStats()
+    const activeFormations = timeline.getActive()
+    const systemState = getMetricsState().get()
 
     return {
-      activeFormations: timeline.getActive().length,
+      activeFormations: activeFormations.length,
       totalFormations: formations.length,
       inRecuperation: formations.some(f => f.isInRecuperation),
-      hibernating: metricsState.get().hibernating,
-      formations: formations,
-      quartzStats,
+      hibernating: systemState.hibernating,
+      quartzRunning: QuartzEngine.isRunning,
+      executionGroups: QuartzEngine.executionGroups.size,
+      formations,
       environment: TimerEnvironment,
-      memoryUsage: {
-        formations: formations.length * 256, // Rough estimate
-        quartz: quartzStats.memoryUsage
+      quartzMetrics: QuartzEngine.metrics,
+
+      // Group statistics
+      groupStats: Array.from(QuartzEngine.executionGroups.entries()).map(
+        ([interval, ids]) => ({
+          interval,
+          timerCount: ids.size,
+          timerIds: Array.from(ids)
+        })
+      ),
+
+      // Precision tier breakdown
+      precisionTiers: {
+        high: QuartzEngine.precisionGroups.get('high')?.size || 0,
+        standard: QuartzEngine.precisionGroups.get('standard')?.size || 0,
+        chunked: QuartzEngine.precisionGroups.get('chunked')?.size || 0
       }
     }
   }
-})
+}
 
 export default TimeKeeper

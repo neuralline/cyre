@@ -2,7 +2,6 @@
 // High-performance path resolution with foreign key indexing
 
 import {io} from '../context/state'
-import type {IO, StateKey} from '../types/core'
 import {createStore} from '../context/create-store'
 
 /*
