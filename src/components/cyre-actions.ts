@@ -1,5 +1,5 @@
 // src/components/cyre-actions.ts
-// Action registration with comprehensive error reporting and talent compilation
+// Action registration with performance optimized compilation
 
 import {sensor} from '../context/metrics-report'
 import type {IO} from '../types/core'
@@ -7,19 +7,20 @@ import {addChannelToGroups, getChannelGroups} from './cyre-group'
 import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
 import {io} from '../context/state'
-import {compileAction} from '../schema/data-definitions'
+import {compileActionWithStats} from '../schema/compilation-integration'
 import {pathEngine} from '../schema/path-engine'
 
 /*
 
       C.Y.R.E - A.C.T.I.O.N.S
 
-      Action registration with comprehensive error reporting:
+      Performance optimized action registration:
       1. Validate basic structure with detailed error messages
-      2. Compile action with talent discovery and error reporting
-      3. Set optimization flags with validation
+      2. Compile action with performance tracking and statistics
+      3. Set optimization flags with validation and warnings
       4. Index paths with error handling
       5. Store compiled action with success confirmation
+      6. Track performance metrics for optimization
 
 */
 
@@ -29,6 +30,8 @@ interface RegistrationResult {
   payload?: IO
   errors?: string[]
   warnings?: string[]
+  compilationTime?: number
+  hasFastPath?: boolean
 }
 
 /**
@@ -60,7 +63,8 @@ const validateChannelId = (
       details: {
         provided: action.id,
         hasId: 'id' in action,
-        actionKeys: Object.keys(action)
+        actionKeys: Object.keys(action),
+        suggestions: ['Provide a unique string identifier for this action']
       }
     }
   }
@@ -69,7 +73,13 @@ const validateChannelId = (
     return {
       valid: false,
       error: 'Action ID must be a string',
-      details: {provided: action.id, type: typeof action.id}
+      details: {
+        provided: action.id,
+        type: typeof action.id,
+        suggestions: [
+          'Use a string identifier like "user-login" or "data-fetch"'
+        ]
+      }
     }
   }
 
@@ -77,7 +87,11 @@ const validateChannelId = (
     return {
       valid: false,
       error: 'Action ID cannot be empty or whitespace only',
-      details: {provided: action.id, length: action.id.length}
+      details: {
+        provided: action.id,
+        length: action.id.length,
+        suggestions: ['Provide a meaningful non-empty string identifier']
+      }
     }
   }
 
@@ -95,7 +109,9 @@ const validateCrossAttributes = (
 
   // Interval requires repeat
   if (action.interval !== undefined && action.repeat === undefined) {
-    errors.push('interval requires repeat to be specified')
+    errors.push(
+      'interval requires repeat to be specified (suggestion: add repeat: true for infinite)'
+    )
   }
 
   // Throttle and debounce conflict
@@ -105,7 +121,9 @@ const validateCrossAttributes = (
     action.throttle > 0 &&
     action.debounce > 0
   ) {
-    errors.push('throttle and debounce cannot both be active')
+    errors.push(
+      'throttle and debounce cannot both be active (suggestion: choose one based on use case)'
+    )
   }
 
   // MaxWait requires debounce
@@ -114,29 +132,56 @@ const validateCrossAttributes = (
   }
 
   if (action.maxWait && action.debounce && action.maxWait <= action.debounce) {
-    errors.push('maxWait must be greater than debounce')
+    errors.push(
+      'maxWait must be greater than debounce (suggestion: set maxWait to at least 2x debounce)'
+    )
   }
 
   // Path validation
   if (action.path) {
     if (!pathEngine.isValidPath(action.path)) {
-      errors.push('path must be a valid hierarchical path')
+      errors.push(
+        'path must be a valid hierarchical path (suggestion: use format "app/users/profile")'
+      )
     }
   }
 
   // Performance warnings
-  if (action.throttle && action.throttle < 10) {
-    warnings.push('very low throttle values may impact performance')
+  if (action.throttle && action.throttle < 16) {
+    warnings.push(
+      'throttle below 16ms may cause performance issues - consider using requestAnimationFrame'
+    )
   }
 
-  if (action.debounce && action.debounce < 25) {
-    warnings.push('very low debounce values may not be effective')
+  if (action.debounce && action.debounce < 100) {
+    warnings.push(
+      'very short debounce may be ineffective - consider 100ms or higher'
+    )
+  }
+
+  if (action.interval && action.interval < 1000) {
+    warnings.push(
+      'frequent intervals may impact performance - monitor system load'
+    )
   }
 
   // Schema and condition warnings
   if (action.schema && !action.required) {
     warnings.push(
       'schema validation without required may allow undefined payloads'
+    )
+  }
+
+  // Talent combination warnings
+  if (action.condition && action.selector) {
+    warnings.push(
+      'using both condition and selector - ensure selector runs before condition'
+    )
+  }
+
+  if (action.transform && !action.detectChanges) {
+    warnings.push(
+      'transform without detectChanges may cause unnecessary executions'
     )
   }
 
@@ -147,119 +192,54 @@ export const CyreActions = (action: IO): RegistrationResult => {
   const startTime = performance.now()
 
   try {
-    // 1. Validate ID requirements with detailed error reporting
-    const idValidation = validateChannelId(action)
-    if (!idValidation.valid) {
+    // 1. VALIDATE CHANNEL ID AND BASIC STRUCTURE
+    const validation = validateChannelId(action)
+    if (!validation.valid) {
+      const registrationTime = performance.now() - startTime
+
       sensor.error(
         action?.id || 'unknown',
-        idValidation.error!,
-        'action-validation-failed',
+        validation.error!,
+        'action-id-validation-failed',
         {
-          validationDetails: idValidation.details,
-          actionStructure:
-            typeof action === 'object' ? Object.keys(action) : 'not-object'
+          ...validation.details,
+          registrationTime
         }
       )
 
-      log.error(
-        `Action validation failed: ${idValidation.error}`,
-        idValidation.details
-      )
+      log.error(`Action ID validation failed: ${validation.error}`)
 
       return {
         ok: false,
-        message: idValidation.error!,
-        errors: [idValidation.error!]
+        message: validation.error!,
+        errors: [validation.error!],
+        compilationTime: registrationTime
       }
     }
 
-    // 2. Check if channel exists
-    const exists = io.get(action.id) !== undefined
-    const now = Date.now()
+    // 2. CHECK IF ACTION EXISTS
+    const exists = !!io.get(action.id)
 
-    // If channel exists and has a path, remove it from path indexes first
-    if (exists) {
-      const existingAction = io.get(action.id)
-      if (existingAction?.path) {
-        try {
-          pathEngine.remove(action.id)
-          sensor.log(action.id, 'info', 'path-removed-for-update', {
-            oldPath: existingAction.path
-          })
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error)
-          sensor.warn(action.id, `Failed to remove old path: ${errorMessage}`, {
-            oldPath: existingAction.path,
-            error: errorMessage
-          })
-        }
-      }
+    // 3. SET DEFAULTS FOR OPTIONAL ATTRIBUTES
+    const actionWithDefaults: Partial<IO> = {
+      type: action.id, // Default type to id if not specified
+      ...action
     }
 
-    // 3. Add timestamps and defaults
-    const actionWithDefaults = {
-      ...action,
-      timeOfCreation: now,
-      timestamp: now,
-      type: action.type || action.id
-    }
-
-    // 4. Cross-attribute validation with warnings
-    const crossValidation = validateCrossAttributes(actionWithDefaults)
-    if (crossValidation.errors.length > 0) {
-      const detailedMessage = `Cross-validation failed: ${crossValidation.errors.join(
-        ', '
-      )}`
-
-      sensor.error(
-        action.id,
-        detailedMessage, // Use detailed message in sensor too
-        'cross-validation-errors',
-        {
-          errors: crossValidation.errors,
-          warnings: crossValidation.warnings,
-          actionConfig: Object.keys(actionWithDefaults)
-        }
-      )
-
-      log.error(
-        `Cross-validation failed for ${action.id}:`,
-        crossValidation.errors
-      )
-
-      return {
-        ok: false,
-        message: detailedMessage,
-        errors: crossValidation.errors,
-        warnings: crossValidation.warnings
-      }
-    }
-
-    // Log warnings if present
-    if (crossValidation.warnings.length > 0) {
-      sensor.warn(action.id, 'Configuration warnings detected', {
-        warnings: crossValidation.warnings,
-        actionId: action.id
-      })
-
-      crossValidation.warnings.forEach(warning => {
-        log.warn(`${action.id}: ${warning}`)
-      })
-    }
-
-    // 5. COMPILE ACTION WITH TALENT DISCOVERY AND ERROR REPORTING
+    // 4. COMPILE ACTION WITH PERFORMANCE TRACKING
     let compilation
     try {
-      compilation = compileAction(actionWithDefaults)
+      compilation = compileActionWithStats(actionWithDefaults)
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
+      const registrationTime = performance.now() - startTime
 
       sensor.error(action.id, errorMessage, 'compilation-exception', {
         errorType: error instanceof Error ? error.constructor.name : 'Unknown',
         stack: error instanceof Error ? error.stack : undefined,
-        actionConfig: Object.keys(actionWithDefaults)
+        actionConfig: Object.keys(actionWithDefaults),
+        registrationTime
       })
 
       log.error(
@@ -269,7 +249,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
       return {
         ok: false,
         message: `Compilation exception: ${errorMessage}`,
-        errors: [errorMessage]
+        errors: [errorMessage],
+        compilationTime: registrationTime
       }
     }
 
@@ -280,8 +261,10 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
       sensor.error(action.id, detailedMessage, 'compilation-errors', {
         errors: compilation.errors,
+        warnings: compilation.warnings,
         hasFastPath: compilation.hasFastPath,
-        actionConfig: Object.keys(actionWithDefaults)
+        actionConfig: Object.keys(actionWithDefaults),
+        compilationTime: compilation.compilationTime
       })
 
       log.error(
@@ -295,25 +278,60 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
         sensor.log(action.id, 'blocked', 'action-blocked-during-compilation', {
           blockReason: compilation.compiledAction._blockReason,
-          errors: compilation.errors
+          errors: compilation.errors,
+          compilationTime: compilation.compilationTime
         })
 
         return {
           ok: false,
           message: compilation.compiledAction._blockReason!,
           payload: compilation.compiledAction,
-          errors: compilation.errors
+          errors: compilation.errors,
+          warnings: compilation.warnings,
+          compilationTime: compilation.compilationTime
         }
       }
 
       return {
         ok: false,
         message: `Compilation failed: ${compilation.errors.join(', ')}`,
-        errors: compilation.errors
+        errors: compilation.errors,
+        warnings: compilation.warnings,
+        compilationTime: compilation.compilationTime
       }
     }
 
     const finalAction = compilation.compiledAction
+
+    // 5. CROSS-ATTRIBUTE VALIDATION WITH DETAILED WARNINGS
+    const crossValidation = validateCrossAttributes(finalAction)
+    if (crossValidation.errors.length > 0) {
+      sensor.error(
+        action.id,
+        'Cross-validation failed',
+        'cross-validation-errors',
+        {
+          errors: crossValidation.errors,
+          warnings: crossValidation.warnings,
+          compilationTime: compilation.compilationTime
+        }
+      )
+
+      log.error(
+        `Cross-validation failed for ${action.id}:`,
+        crossValidation.errors
+      )
+
+      return {
+        ok: false,
+        message: `Cross-validation failed: ${crossValidation.errors.join(
+          ', '
+        )}`,
+        errors: crossValidation.errors,
+        warnings: [...compilation.warnings, ...crossValidation.warnings],
+        compilationTime: compilation.compilationTime
+      }
+    }
 
     // 6. INDEX PATH IF PROVIDED
     if (finalAction.path && pathEngine.isValidPath(finalAction.path)) {
@@ -324,7 +342,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
           path: finalAction.path,
           segments: pathEngine.parse(finalAction.path).length,
           indexed: true,
-          isUpdate: exists
+          isUpdate: exists,
+          compilationTime: compilation.compilationTime
         })
 
         // Verify indexing worked
@@ -352,10 +371,11 @@ export const CyreActions = (action: IO): RegistrationResult => {
         log.error(`Path indexing failed for ${finalAction.id}: ${errorMessage}`)
 
         // Continue with registration even if path indexing fails
+        crossValidation.warnings.push(`Path indexing failed: ${errorMessage}`)
       }
     }
 
-    // 7. Add to groups with error handling
+    // 7. ADD TO GROUPS WITH ERROR HANDLING
     try {
       addChannelToGroups(finalAction.id)
     } catch (error) {
@@ -368,17 +388,21 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
       log.warn(`Group assignment failed for ${finalAction.id}: ${errorMessage}`)
       // Continue with registration even if group assignment fails
+      crossValidation.warnings.push(`Group assignment failed: ${errorMessage}`)
     }
 
-    // 8. Store compiled action
+    // 8. STORE COMPILED ACTION
     try {
       io.set(finalAction)
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
+      const registrationTime = performance.now() - startTime
 
       sensor.error(finalAction.id, errorMessage, 'action-storage-failed', {
-        errorType: error instanceof Error ? error.constructor.name : 'Unknown'
+        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+        registrationTime,
+        compilationTime: compilation.compilationTime
       })
 
       log.error(`Failed to store action ${finalAction.id}: ${errorMessage}`)
@@ -386,11 +410,12 @@ export const CyreActions = (action: IO): RegistrationResult => {
       return {
         ok: false,
         message: `Action storage failed: ${errorMessage}`,
-        errors: [errorMessage]
+        errors: [errorMessage],
+        compilationTime: compilation.compilationTime
       }
     }
 
-    // 9. Initialize payload state if provided
+    // 9. INITIALIZE PAYLOAD STATE IF PROVIDED
     if ('payload' in action && action.payload !== undefined) {
       try {
         payloadState.set(finalAction.id, action.payload, 'initial')
@@ -411,17 +436,20 @@ export const CyreActions = (action: IO): RegistrationResult => {
           `Payload initialization failed for ${finalAction.id}: ${errorMessage}`
         )
         // Continue - payload initialization failure is not critical
+        crossValidation.warnings.push(
+          `Payload initialization failed: ${errorMessage}`
+        )
       }
     }
 
-    // 10. Generate status message and metrics
+    // 10. GENERATE STATUS MESSAGE AND METRICS
     const channelGroups = getChannelGroups(finalAction.id)
     const actionMessage = exists ? 'Action updated' : 'Action registered'
     const registrationTime = performance.now() - startTime
 
     let statusMsg: string
     if (finalAction._hasFastPath) {
-      statusMsg = 'Fast path (no talents)'
+      statusMsg = 'Fast path (optimized)'
     } else {
       const features: string[] = []
       if (finalAction._hasProtections) features.push('protections')
@@ -430,6 +458,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         features.push(`${talentCount} processing talents`)
       }
       if (finalAction._hasScheduling) features.push('scheduling')
+      if (finalAction._hasIntelligence) features.push('intelligence')
       statusMsg = features.join(', ')
     }
 
@@ -438,8 +467,14 @@ export const CyreActions = (action: IO): RegistrationResult => {
       statusMsg += ` (path: ${finalAction.path})`
     }
 
-    log.debug(`${actionMessage} ${finalAction.id}: ${statusMsg}`)
+    // Add performance info for slow compilations
+    if (compilation.compilationTime > 5) {
+      statusMsg += ` [${compilation.compilationTime.toFixed(1)}ms compilation]`
+    }
 
+    //log.debug(`${actionMessage} ${finalAction.id}: ${statusMsg}`)
+
+    // Comprehensive metrics logging
     sensor.log(finalAction.id, 'success', 'action-registration-complete', {
       isUpdate: exists,
       attributeCount: Object.keys(action).length,
@@ -447,6 +482,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
       hasProtections: finalAction._hasProtections,
       hasProcessing: finalAction._hasProcessing,
       hasScheduling: finalAction._hasScheduling,
+      hasIntelligence: finalAction._hasIntelligence,
       processingTalents: finalAction._processingTalents,
       isBlocked: finalAction._isBlocked,
       groupCount: channelGroups.length,
@@ -454,15 +490,22 @@ export const CyreActions = (action: IO): RegistrationResult => {
       path: finalAction.path,
       pathIndexed: !!finalAction.path,
       compilationSuccess: true,
+      compilationTime: compilation.compilationTime,
       registrationTime,
-      warnings: crossValidation.warnings
+      warnings: [...compilation.warnings, ...crossValidation.warnings],
+      cacheStats: compilation.stats
     })
+
+    // Combine all warnings
+    const allWarnings = [...compilation.warnings, ...crossValidation.warnings]
 
     return {
       ok: true,
       message: `${actionMessage}: ${statusMsg}`,
       payload: finalAction,
-      warnings: crossValidation.warnings
+      warnings: allWarnings,
+      compilationTime: compilation.compilationTime,
+      hasFastPath: finalAction._hasFastPath
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -490,7 +533,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
     return {
       ok: false,
       message: `Registration failed: ${errorMessage}`,
-      errors: [errorMessage]
+      errors: [errorMessage],
+      compilationTime: registrationTime
     }
   }
 }

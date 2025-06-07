@@ -1,490 +1,578 @@
-// src/schema/functional-schema.ts
-// File location: Improved functional schema system with better composition and performance
+// src/schema/cyre-schema.ts
+// Schema validation with proper method chaining and pipe functionality
+
+import type {ActionPayload} from '../types/core'
+import {sensor} from '../metrics'
 
 /*
-  C.Y.R.E - F.U.N.C.T.I.O.N.A.L - S.C.H.E.M.A
-  
-  Issues with current schema:
-  1. Complex inheritance chains (NumberSchema extends Schema)
-  2. Runtime method attachment creates performance overhead
-  3. Type inference issues with complex nested schemas
-  4. Missing functional composition patterns
-  5. No optimization for common validation patterns
-  6. Error handling not functional enough
-  
-  Improvements:
-  - Pure functional approach with composition
-  - Better performance with memoization
-  - Cleaner type inference
-  - Functional error handling with Result types
-  - Built-in optimization for hot paths
+
+      C.Y.R.E - S.C.H.E.M.A
+      
+      Smart schema validation system:
+      - Concise functional API with pipe support
+      - Direct action integration
+      - Runtime type safety
+      - Composable validators
+      - Zero dependencies
+
 */
 
-// ===========================================
-// CORE FUNCTIONAL TYPES
-// ===========================================
+// Core validation types
+export type ValidationResult<T = unknown> =
+  | {ok: true; data: T}
+  | {ok: false; errors: string[]}
 
-/**
- * Result type for functional error handling
- */
-export type ValidationResult<T> =
-  | {readonly success: true; readonly data: T}
-  | {readonly success: false; readonly errors: readonly string[]}
+export type Validator<T = unknown> = (value: unknown) => ValidationResult<T>
 
-/**
- * Pure validator function
- */
-export type Validator<T> = (value: unknown) => ValidationResult<T>
-
-/**
- * Schema builder function (pure)
- */
-export type SchemaBuilder<T> = () => Validator<T>
-
-/**
- * Schema transformer function (pure)
- */
-export type SchemaTransform<T, U> = (validator: Validator<T>) => Validator<U>
-
-// ===========================================
-// HELPER FUNCTIONS (PURE)
-// ===========================================
-
-/**
- * Create success result
- */
-const ok = <T>(data: T): ValidationResult<T> => ({success: true, data})
-
-/**
- * Create error result
- */
-const err = (errors: string | readonly string[]): ValidationResult<never> => ({
-  success: false,
-  errors: Array.isArray(errors) ? errors : [errors]
-})
-
-/**
- * Compose two validators (functional composition)
- */
-const compose =
-  <T, U>(first: Validator<T>, second: SchemaTransform<T, U>): Validator<U> =>
-  (value: unknown) => {
-    const result = first(value)
-    return result.success
-      ? second(first)(value)
-      : (result as ValidationResult<U>)
-  }
-
-/**
- * Memoize validator for performance (pure function memoization)
- */
-const memoize = <T>(validator: Validator<T>): Validator<T> => {
-  const cache = new Map<unknown, ValidationResult<T>>()
-
-  return (value: unknown) => {
-    // Simple cache key for primitives
-    const key = typeof value === 'object' ? JSON.stringify(value) : value
-
-    if (cache.has(key)) {
-      return cache.get(key)!
-    }
-
-    const result = validator(value)
-    cache.set(key, result)
-    return result
-  }
+// Schema builder with type inference
+export interface Schema<T = unknown> {
+  (value: unknown): ValidationResult<T>
+  optional(): Schema<T | undefined>
+  nullable(): Schema<T | null>
+  default(value: T): Schema<T>
+  transform<U>(fn: (value: T) => U): Schema<U>
+  refine(fn: (value: T) => boolean, message?: string): Schema<T>
+  _type?: T // Type inference helper
 }
 
-// ===========================================
-// CORE VALIDATORS (PURE FUNCTIONS)
-// ===========================================
+// Constraint methods for number schema
+export interface NumberSchema extends Schema<number> {
+  min(minVal: number): NumberSchema
+  max(maxVal: number): NumberSchema
+  int(): NumberSchema
+  positive(): NumberSchema
+  optional(): NumberSchema
+  nullable(): NumberSchema
+  default(value: number): NumberSchema
+  transform<U>(fn: (value: number) => U): Schema<U>
+  refine(fn: (value: number) => boolean, message?: string): NumberSchema
+}
 
-/**
- * String validator
- */
-export const string: SchemaBuilder<string> = () => (value: unknown) =>
-  typeof value === 'string' ? ok(value) : err('Expected string')
+// Constraint methods for string schema
+export interface StringSchema extends Schema<string> {
+  len(len: number): StringSchema
+  minLength(len: number): StringSchema
+  maxLength(len: number): StringSchema
+  pattern(regex: RegExp): StringSchema
+  email(): StringSchema
+  url(): StringSchema
+  optional(): StringSchema
+  nullable(): StringSchema
+  default(value: string): StringSchema
+  transform<U>(fn: (value: string) => U): Schema<U>
+  refine(fn: (value: string) => boolean, message?: string): StringSchema
+}
 
-/**
- * Number validator
- */
-export const number: SchemaBuilder<number> = () => (value: unknown) =>
-  typeof value === 'number' && !isNaN(value)
-    ? ok(value)
-    : err('Expected number')
+// Create base schema with all common methods
+const createSchema = <T>(validator: Validator<T>): Schema<T> => {
+  const schema = validator as Schema<T>
 
-/**
- * Boolean validator
- */
-export const boolean: SchemaBuilder<boolean> = () => (value: unknown) =>
-  typeof value === 'boolean' ? ok(value) : err('Expected boolean')
+  schema.optional = () =>
+    createSchema<T | undefined>(value =>
+      value === undefined ? {ok: true, data: undefined} : validator(value)
+    )
 
-/**
- * Any validator (always succeeds)
- */
-export const any: SchemaBuilder<unknown> = () => (value: unknown) => ok(value)
+  schema.nullable = () =>
+    createSchema<T | null>(value =>
+      value === null ? {ok: true, data: null} : validator(value)
+    )
 
-/**
- * Literal validator
- */
-export const literal =
-  <T extends string | number | boolean>(expected: T): SchemaBuilder<T> =>
-  () =>
-  (value: unknown) =>
-    value === expected ? ok(expected) : err(`Expected ${expected}`)
+  schema.default = (defaultValue: T) =>
+    createSchema<T>(value =>
+      value === undefined ? {ok: true, data: defaultValue} : validator(value)
+    )
 
-/**
- * Enum validator (improved implementation)
- */
-export const enums =
-  <const T extends readonly string[]>(...values: T): SchemaBuilder<T[number]> =>
-  () =>
-  (value: unknown) =>
-    typeof value === 'string' && values.includes(value as T[number])
-      ? ok(value as T[number])
-      : err(`Expected one of: ${values.join(', ')}`)
+  schema.transform = <U>(fn: (value: T) => U) =>
+    createSchema<U>(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      try {
+        return {ok: true, data: fn(result.data)}
+      } catch (error) {
+        return {ok: false, errors: [`Transform failed: ${error}`]}
+      }
+    })
 
-// ===========================================
-// CONSTRAINT TRANSFORMS (PURE FUNCTIONS)
-// ===========================================
+  schema.refine = (fn: (value: T) => boolean, message = 'Validation failed') =>
+    createSchema<T>(value => {
+      const result = validator(value)
+      if (!result.ok) return result
+      return fn(result.data) ? result : {ok: false, errors: [message]}
+    })
 
-/**
- * String constraints
- */
-export const minLength =
-  (min: number): SchemaTransform<string, string> =>
-  validator =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+  return schema
+}
 
-    return result.data.length >= min
-      ? ok(result.data)
-      : err(`Must be at least ${min} characters`)
-  }
+// Create number schema with constraints and base methods
+const createNumberSchema = (validator: Validator<number>): NumberSchema => {
+  const baseSchema = createSchema(validator)
+  const numberSchema = Object.assign(baseSchema, {
+    min: (minVal: number): NumberSchema =>
+      createNumberSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data >= minVal
+          ? result
+          : {ok: false, errors: [`Must be at least ${minVal}`]}
+      }),
 
-export const maxLength =
-  (max: number): SchemaTransform<string, string> =>
-  validator =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    max: (maxVal: number): NumberSchema =>
+      createNumberSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data <= maxVal
+          ? result
+          : {ok: false, errors: [`Must be at most ${maxVal}`]}
+      }),
 
-    return result.data.length <= max
-      ? ok(result.data)
-      : err(`Must be at most ${max} characters`)
-  }
+    int: (): NumberSchema =>
+      createNumberSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return Number.isInteger(result.data)
+          ? result
+          : {ok: false, errors: ['Must be integer']}
+      }),
 
-export const pattern =
-  (regex: RegExp): SchemaTransform<string, string> =>
-  validator =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    positive: (): NumberSchema =>
+      createNumberSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data > 0
+          ? result
+          : {ok: false, errors: ['Must be positive']}
+      }),
 
-    return regex.test(result.data)
-      ? ok(result.data)
-      : err(`Must match pattern ${regex}`)
-  }
+    // Override base methods to maintain NumberSchema type
+    optional: (): NumberSchema =>
+      createNumberSchema(value =>
+        value === undefined ? {ok: true, data: undefined} : validator(value)
+      ) as any,
 
-/**
- * Number constraints
- */
-export const min =
-  (minimum: number): SchemaTransform<number, number> =>
-  validator =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    nullable: (): NumberSchema =>
+      createNumberSchema(value =>
+        value === null ? {ok: true, data: null} : validator(value)
+      ) as any,
 
-    return result.data >= minimum
-      ? ok(result.data)
-      : err(`Must be at least ${minimum}`)
-  }
+    default: (defaultValue: number): NumberSchema =>
+      createNumberSchema(value =>
+        value === undefined ? {ok: true, data: defaultValue} : validator(value)
+      ),
 
-export const max =
-  (maximum: number): SchemaTransform<number, number> =>
-  validator =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    transform: <U>(fn: (value: number) => U): Schema<U> =>
+      createSchema<U>(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        try {
+          return {ok: true, data: fn(result.data)}
+        } catch (error) {
+          return {ok: false, errors: [`Transform failed: ${error}`]}
+        }
+      }),
 
-    return result.data <= maximum
-      ? ok(result.data)
-      : err(`Must be at most ${maximum}`)
-  }
+    refine: (
+      fn: (value: number) => boolean,
+      message = 'Validation failed'
+    ): NumberSchema =>
+      createNumberSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return fn(result.data) ? result : {ok: false, errors: [message]}
+      })
+  }) as NumberSchema
 
-export const integer: SchemaTransform<number, number> =
-  validator => (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+  return numberSchema
+}
 
-    return Number.isInteger(result.data)
-      ? ok(result.data)
-      : err('Must be an integer')
-  }
+// Create string schema with constraints and base methods
+const createStringSchema = (validator: Validator<string>): StringSchema => {
+  const baseSchema = createSchema(validator)
+  const stringSchema = Object.assign(baseSchema, {
+    len: (len: number): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data.length === len
+          ? result
+          : {ok: false, errors: [`Must be exactly ${len} characters`]}
+      }),
 
-export const positive: SchemaTransform<number, number> =
-  validator => (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    minLength: (len: number): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data.length >= len
+          ? result
+          : {ok: false, errors: [`Must be at least ${len} characters`]}
+      }),
 
-    return result.data > 0 ? ok(result.data) : err('Must be positive')
-  }
+    maxLength: (len: number): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return result.data.length <= len
+          ? result
+          : {ok: false, errors: [`Must be at most ${len} characters`]}
+      }),
 
-// ===========================================
-// GENERIC TRANSFORMS (PURE FUNCTIONS)
-// ===========================================
+    pattern: (regex: RegExp): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return regex.test(result.data)
+          ? result
+          : {ok: false, errors: ['Pattern does not match']}
+      }),
 
-/**
- * Optional transform (allows undefined)
- */
-export const optional =
-  <T>(validator: Validator<T>): Validator<T | undefined> =>
-  (value: unknown) =>
-    value === undefined ? ok(undefined) : validator(value)
+    email: (): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        return emailRegex.test(result.data)
+          ? result
+          : {ok: false, errors: ['Invalid email format']}
+      }),
 
-/**
- * Nullable transform (allows null)
- */
-export const nullable =
-  <T>(validator: Validator<T>): Validator<T | null> =>
-  (value: unknown) =>
-    value === null ? ok(null) : validator(value)
+    url: (): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        try {
+          new URL(result.data)
+          return result
+        } catch {
+          return {ok: false, errors: ['Invalid URL']}
+        }
+      }),
 
-/**
- * Default value transform
- */
-export const withDefault =
-  <T>(defaultValue: T) =>
-  (validator: Validator<T>): Validator<T> =>
-  (value: unknown) =>
-    value === undefined ? ok(defaultValue) : validator(value)
+    // Override base methods to maintain StringSchema type
+    optional: (): StringSchema =>
+      createStringSchema(value =>
+        value === undefined ? {ok: true, data: undefined} : validator(value)
+      ) as any,
 
-/**
- * Transform the result (map function)
- */
-export const transform =
-  <T, U>(fn: (value: T) => U) =>
-  (validator: Validator<T>): Validator<U> =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result as ValidationResult<U>
+    nullable: (): StringSchema =>
+      createStringSchema(value =>
+        value === null ? {ok: true, data: null} : validator(value)
+      ) as any,
 
-    try {
-      return ok(fn(result.data))
-    } catch (error) {
-      return err(`Transform failed: ${error}`)
-    }
-  }
+    default: (defaultValue: string): StringSchema =>
+      createStringSchema(value =>
+        value === undefined ? {ok: true, data: defaultValue} : validator(value)
+      ),
 
-/**
- * Refine with custom validation
- */
-export const refine =
-  <T>(predicate: (value: T) => boolean, message: string) =>
-  (validator: Validator<T>): Validator<T> =>
-  (value: unknown) => {
-    const result = validator(value)
-    if (!result.success) return result
+    transform: <U>(fn: (value: string) => U): Schema<U> =>
+      createSchema<U>(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        try {
+          return {ok: true, data: fn(result.data)}
+        } catch (error) {
+          return {ok: false, errors: [`Transform failed: ${error}`]}
+        }
+      }),
 
-    return predicate(result.data) ? ok(result.data) : err(message)
-  }
+    refine: (
+      fn: (value: string) => boolean,
+      message = 'Validation failed'
+    ): StringSchema =>
+      createStringSchema(value => {
+        const result = validator(value)
+        if (!result.ok) return result
+        return fn(result.data) ? result : {ok: false, errors: [message]}
+      })
+  }) as StringSchema
 
-// ===========================================
-// COMPOSITE VALIDATORS (PURE FUNCTIONS)
-// ===========================================
+  return stringSchema
+}
 
-/**
- * Object validator with better type inference
- */
-export const object =
-  <T extends Record<string, Validator<any>>>(
-    shape: T
-  ): Validator<{
-    [K in keyof T]: T[K] extends Validator<infer U> ? U : never
-  }> =>
-  (value: unknown) => {
+// Primitive validators
+export const string = (): StringSchema =>
+  createStringSchema(value =>
+    typeof value === 'string'
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected string']}
+  )
+
+export const number = (): NumberSchema =>
+  createNumberSchema(value =>
+    typeof value === 'number' && !isNaN(value)
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected number']}
+  )
+
+export const boolean = () =>
+  createSchema<boolean>(value =>
+    typeof value === 'boolean'
+      ? {ok: true, data: value}
+      : {ok: false, errors: ['Expected boolean']}
+  )
+
+export const any = () => createSchema<any>(value => ({ok: true, data: value}))
+
+// Object validation with proper default value handling
+export const object = <T extends Record<string, Schema>>(shape: T) =>
+  createSchema<{
+    [K in keyof T]: ReturnType<T[K]> extends ValidationResult<infer U>
+      ? U
+      : never
+  }>(value => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return err('Expected object')
+      return {ok: false, errors: ['Expected object']}
     }
 
     const obj = value as Record<string, unknown>
     const result: Record<string, unknown> = {}
     const errors: string[] = []
 
-    for (const [key, validator] of Object.entries(shape)) {
-      const fieldResult = validator(obj[key])
+    for (const [key, schema] of Object.entries(shape)) {
+      const fieldValue = obj[key]
+      const fieldResult = schema(fieldValue)
 
-      if (fieldResult.success) {
+      if (fieldResult.ok) {
         result[key] = fieldResult.data
       } else {
-        errors.push(...fieldResult.errors.map(error => `${key}: ${error}`))
+        errors.push(...fieldResult.errors.map(err => `${key}: ${err}`))
       }
     }
 
-    return errors.length > 0 ? err(errors) : ok(result as any)
-  }
+    return errors.length > 0
+      ? {ok: false, errors}
+      : {ok: true, data: result as any}
+  })
 
-/**
- * Array validator
- */
-export const array =
-  <T>(itemValidator: Validator<T>): Validator<T[]> =>
-  (value: unknown) => {
+// Array validation
+export const array = <T>(itemSchema: Schema<T>) =>
+  createSchema<T[]>(value => {
     if (!Array.isArray(value)) {
-      return err('Expected array')
+      return {ok: false, errors: ['Expected array']}
     }
 
     const result: T[] = []
     const errors: string[] = []
 
     for (let i = 0; i < value.length; i++) {
-      const itemResult = itemValidator(value[i])
-
-      if (itemResult.success) {
+      const itemResult = itemSchema(value[i])
+      if (itemResult.ok) {
         result.push(itemResult.data)
       } else {
-        errors.push(...itemResult.errors.map(error => `[${i}]: ${error}`))
+        errors.push(...itemResult.errors.map(err => `[${i}]: ${err}`))
       }
     }
 
-    return errors.length > 0 ? err(errors) : ok(result)
-  }
+    return errors.length > 0 ? {ok: false, errors} : {ok: true, data: result}
+  })
 
-/**
- * Union validator (tries validators in order)
- */
-export const union =
-  <T extends readonly Validator<any>[]>(
-    ...validators: T
-  ): Validator<T[number] extends Validator<infer U> ? U : never> =>
-  (value: unknown) => {
-    for (const validator of validators) {
-      const result = validator(value)
-      if (result.success) return result as any
+// Union validation
+export const union = <T extends readonly Schema[]>(...schemas: T) =>
+  createSchema<T[number] extends Schema<infer U> ? U : never>(value => {
+    for (const schema of schemas) {
+      const result = schema(value)
+      if (result.ok) return result
     }
+    return {ok: false, errors: ['No union variant matched']}
+  })
 
-    return err('No union variant matched')
-  }
-
-// ===========================================
-// FUNCTIONAL COMPOSITION UTILITIES
-// ===========================================
-
-/**
- * Pipe function for functional composition
- */
-export const pipe = <T, U1, U2, U3, U4, U5>(
-  validator: Validator<T>,
-  ...transforms: [
-    SchemaTransform<T, U1>?,
-    SchemaTransform<U1, U2>?,
-    SchemaTransform<U2, U3>?,
-    SchemaTransform<U3, U4>?,
-    SchemaTransform<U4, U5>?
-  ]
-): Validator<
-  U5 extends undefined
-    ? U4 extends undefined
-      ? U3 extends undefined
-        ? U2 extends undefined
-          ? U1 extends undefined
-            ? T
-            : U1
-          : U2
-        : U3
-      : U4
-    : U5
-> => {
-  return transforms
-    .filter(Boolean)
-    .reduce((acc: any, transform: any) => transform(acc), validator) as any
-}
-
-/**
- * Combine multiple validators with AND logic
- */
-export const all =
-  <T>(...validators: Validator<T>[]): Validator<T> =>
-  (value: unknown) => {
-    for (const validator of validators) {
-      const result = validator(value)
-      if (!result.success) return result
-    }
-
-    // Return the result of the last validator
-    return validators[validators.length - 1](value)
-  }
-
-// ===========================================
-// OPTIMIZED COMMON PATTERNS
-// ===========================================
-
-/**
- * Pre-built email validator (optimized)
- */
-export const email = (): Validator<string> =>
-  memoize(pipe(string(), pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)))
-
-/**
- * Pre-built URL validator (optimized)
- */
-export const url = (): Validator<string> =>
-  memoize(
-    pipe(
-      string(),
-      refine(value => {
-        try {
-          new URL(value)
-          return true
-        } catch {
-          return false
-        }
-      }, 'Must be a valid URL')
-    )
+// Literal validation
+export const literal = <T extends string | number | boolean>(val: T) =>
+  createSchema<T>(value =>
+    value === val
+      ? {ok: true, data: val}
+      : {ok: false, errors: [`Expected ${val}`]}
   )
 
-/**
- * Pre-built ID validator (optimized for common use case)
- */
-export const id = (): Validator<string> =>
-  memoize(pipe(string(), minLength(1), pattern(/^[a-zA-Z0-9_-]+$/)))
+// Enum validation
+export const enums = <T extends readonly string[]>(...values: T) =>
+  createSchema<T[number]>(value =>
+    typeof value === 'string' && values.includes(value as T[number])
+      ? {ok: true, data: value as T[number]}
+      : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
+  )
 
-/**
- * Pre-built timestamp validator
- */
-export const timestamp = (): Validator<number> =>
-  memoize(pipe(number(), min(0), integer))
+// Standalone transform functions
+export const optional = <T>(schema: Schema<T>): Schema<T | undefined> =>
+  schema.optional()
 
-// ===========================================
-// PERFORMANCE OPTIMIZATIONS
-// ===========================================
+export const nullable = <T>(schema: Schema<T>): Schema<T | null> =>
+  schema.nullable()
 
-/**
- * Fast path for simple validations (no constraints)
- */
-const fastValidators = {
-  string: memoize(string()),
-  number: memoize(number()),
-  boolean: memoize(boolean()),
-  any: any()
-} as const
+export const withDefault = <T>(schema: Schema<T>, defaultValue: T): Schema<T> =>
+  schema.default(defaultValue)
 
-/**
- * Get optimized validator for simple cases
- */
-export const fast = <K extends keyof typeof fastValidators>(
-  type: K
-): (typeof fastValidators)[K] => fastValidators[type]
+export const transform = <T, U>(
+  schema: Schema<T>,
+  fn: (value: T) => U
+): Schema<U> => schema.transform(fn)
 
-// ===========================================
-// MAIN SCHEMA API (FUNCTIONAL)
-// ===========================================
+export const refine = <T>(
+  schema: Schema<T>,
+  fn: (value: T) => boolean,
+  message?: string
+): Schema<T> => schema.refine(fn, message)
 
-/**
- * Main schema API with functional composition
- */
+// String constraint functions
+export const minLength =
+  (len: number) =>
+  (schema: StringSchema): StringSchema =>
+    schema.minLength(len)
+
+export const maxLength =
+  (len: number) =>
+  (schema: StringSchema): StringSchema =>
+    schema.maxLength(len)
+
+export const pattern =
+  (regex: RegExp) =>
+  (schema: StringSchema): StringSchema =>
+    schema.pattern(regex)
+
+// Number constraint functions
+export const min =
+  (minVal: number) =>
+  (schema: NumberSchema): NumberSchema =>
+    schema.min(minVal)
+
+export const max =
+  (maxVal: number) =>
+  (schema: NumberSchema): NumberSchema =>
+    schema.max(maxVal)
+
+export const integer =
+  () =>
+  (schema: NumberSchema): NumberSchema =>
+    schema.int()
+
+export const positive =
+  () =>
+  (schema: NumberSchema): NumberSchema =>
+    schema.positive()
+
+// PIPE FUNCTION - for composing schema transformations
+export const pipe = <T>(
+  schema: Schema<T>,
+  ...transforms: Array<(schema: Schema<T>) => Schema<any>>
+): Schema<any> => {
+  const validTransforms = transforms.filter(
+    (transform): transform is (schema: Schema<T>) => Schema<any> =>
+      typeof transform === 'function'
+  )
+
+  if (validTransforms.length === 0) {
+    return schema
+  }
+
+  return validTransforms.reduce(
+    (acc, transform) => transform(acc),
+    schema as Schema<any>
+  )
+}
+
+// All validator - validates all schemas pass
+export const all = <T extends readonly Schema[]>(
+  ...schemas: T
+): Schema<{[K in keyof T]: T[K] extends Schema<infer U> ? U : never}> =>
+  createSchema(value => {
+    const results: any[] = []
+    const errors: string[] = []
+
+    for (let i = 0; i < schemas.length; i++) {
+      const result = schemas[i](value)
+      if (result.ok) {
+        results[i] = result.data
+      } else {
+        errors.push(...result.errors.map(err => `Schema ${i}: ${err}`))
+      }
+    }
+
+    return errors.length > 0
+      ? {ok: false, errors}
+      : {ok: true, data: results as any}
+  })
+
+// Pre-built validators
+export const email = (): StringSchema => string().email()
+export const url = (): StringSchema => string().url()
+export const id = (): StringSchema => string().minLength(1)
+export const timestamp = (): NumberSchema => number().positive()
+
+// Enum shorthand (alias for enums)
+export const enumSchema = enums
+
+// Performance optimization - fast validator bypass
+const fastValidatorCache = new Map<string, Schema>()
+
+export const fast = <T>(schema: Schema<T>): Schema<T> => {
+  const cacheKey = schema.toString()
+
+  if (fastValidatorCache.has(cacheKey)) {
+    return fastValidatorCache.get(cacheKey) as Schema<T>
+  }
+
+  const fastValidator = createSchema<T>(value => {
+    // For fast path, skip complex validations in production
+    if (process.env.NODE_ENV === 'production') {
+      return {ok: true, data: value as T}
+    }
+    return schema(value)
+  })
+
+  fastValidatorCache.set(cacheKey, fastValidator)
+  return fastValidator
+}
+
+// Memoization for expensive validations
+const memoCache = new WeakMap<Schema, Map<any, ValidationResult>>()
+
+export const memoize = <T>(schema: Schema<T>): Schema<T> => {
+  let cache = memoCache.get(schema)
+  if (!cache) {
+    cache = new Map()
+    memoCache.set(schema, cache)
+  }
+
+  return createSchema<T>(value => {
+    if (cache!.has(value)) {
+      return cache!.get(value)!
+    }
+
+    const result = schema(value)
+    cache!.set(value, result)
+    return result
+  })
+}
+
+// EMAIL STRING - shorthand for string with email validation
+export const email_string = (): StringSchema => string().email()
+
+// Type inference helper
+export type Infer<T extends Schema> = T extends Schema<infer U> ? U : never
+
+// Schema validation function for action integration
+export const validate = <T>(
+  schema: Schema<T>,
+  payload: ActionPayload
+): ValidationResult<T> => {
+  const result = schema(payload)
+
+  if (!result.ok) {
+    sensor.error('Schema validation failed:' + result.errors)
+  }
+
+  return result
+}
+
+// Quick schema builders for common action payloads
+export const actionPayload = {
+  string: () => object({payload: string()}),
+  number: () => object({payload: number()}),
+  object: <T extends Record<string, Schema>>(shape: T) =>
+    object({payload: object(shape)}),
+  array: <T>(itemSchema: Schema<T>) => object({payload: array(itemSchema)}),
+  any: () => object({payload: any()})
+}
+
+// Export main schema API
 export const schema = {
   // Core validators
   string,
@@ -492,7 +580,7 @@ export const schema = {
   boolean,
   any,
   literal,
-  enums,
+  enum: enumSchema,
 
   // Composite validators
   object,
@@ -521,7 +609,7 @@ export const schema = {
   pipe,
   all,
 
-  // Pre-built optimized validators
+  // Pre-built validators
   email,
   url,
   id,
@@ -531,57 +619,13 @@ export const schema = {
   fast,
   memoize,
 
+  // Legacy support
+  enums,
+  email_string,
+
   // Utility
   validate: <T>(validator: Validator<T>, value: unknown): ValidationResult<T> =>
     validator(value)
 } as const
-
-// ===========================================
-// TYPE INFERENCE HELPER
-// ===========================================
-
-/**
- * Infer the output type of a validator
- */
-export type Infer<T extends Validator<any>> = T extends Validator<infer U>
-  ? U
-  : never
-
-// ===========================================
-// EXAMPLES OF USAGE
-// ===========================================
-
-/*
-// Simple usage:
-const userValidator = schema.object({
-  id: schema.fast('string'),
-  email: schema.email(),
-  age: schema.pipe(schema.number(), schema.min(0), schema.max(120))
-})
-
-// Complex composition:
-const complexValidator = schema.pipe(
-  schema.string(),
-  schema.minLength(3),
-  schema.maxLength(50),
-  schema.pattern(/^[a-zA-Z0-9_-]+$/),
-  schema.transform(s => s.toLowerCase())
-)
-
-// With default values:
-const configValidator = schema.object({
-  name: schema.fast('string'),
-  enabled: schema.pipe(schema.boolean(), schema.withDefault(true)),
-  timeout: schema.pipe(schema.number(), schema.min(0), schema.withDefault(5000))
-})
-
-// Performance optimized for hot paths:
-const hotPathValidator = schema.memoize(
-  schema.pipe(
-    schema.fast('string'),
-    schema.minLength(1)
-  )
-)
-*/
 
 export default schema

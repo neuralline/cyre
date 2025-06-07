@@ -26,17 +26,13 @@ import type {OrchestrationConfig} from './types/orchestration'
 
 import {pathPlugin} from './schema/path-plugin'
 
-import {createBranch} from './hooks/create-branch'
 import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
 import {dev} from './dev/dev'
 import {metrics} from './metrics'
 
 import {registerSystemIntelligence} from './intelligence/system-intelligence'
-import {
-  registerSystemDiagnostics,
-  runDiagnostics
-} from './intelligence/system-diagnostics'
+import {runDiagnostics} from './intelligence/system-diagnostics'
 
 /* 
     Neural Line
@@ -766,7 +762,6 @@ export const cyre = Object.freeze({
   // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
   schema,
-  createBranch,
 
   // SEAMLESS QUERY INTEGRATION
   query,

@@ -1,3 +1,4 @@
+// src/examples/timekeeper-demo.ts
 import {TimeKeeper} from '../src/components/cyre-timekeeper'
 import {log} from '../src/components/cyre-log'
 
@@ -349,7 +350,7 @@ async function demonstrateEdgeCases() {
 
   // Test wait cancellation
   log.info('\nTesting wait cancellation')
-  const waitPromise = TimeKeeper.wait(1000, 'wait-to-cancel')
+  const waitPromise = await TimeKeeper.wait(1000, 'wait-to-cancel')
   TimeKeeper.forget('wait-to-cancel')
   await waitPromise
   log.info('Wait cancellation completed')

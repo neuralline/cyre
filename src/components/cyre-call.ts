@@ -1,173 +1,234 @@
 // src/components/cyre-call.ts
-// Call processor with proper talent pipeline integration
+// Runtime optimized call processor with fast execution paths
 
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {useDispatch} from './cyre-dispatch'
 import {sensor} from '../context/metrics-report'
 import {io} from '../context/state'
 import payloadState from '../context/payload-state'
-import {
-  scheduleExecution,
-  executeProcessingPipeline
-} from '../schema/talent-definitions'
+import {scheduleExecution, executePipeline} from '../schema/talent-definitions'
 
 /*
 
-      C.Y.R.E - C.A.L.L - P.R.O.C.E.S.S.O.R
+      C.Y.R.E - C.A.L.L - P.R.O.C.E.S.S.O.R - O.P.T.I.M.I.Z.E.D
       
-      Call flow with proper talent pipeline integration:
-      1. Execute processing talents pipeline (selector, condition, transform, etc.)
-      2. Check for scheduling requirements (interval/delay/repeat)
-      3. Update payload state for change detection
-      4. Dispatch to final handler
+      Runtime optimized call flow with minimal overhead:
+      1. Fast path bypass (pre-compiled optimization flags)
+      2. Optimized pipeline execution with cached talent functions
+      3. Minimal logging in hot paths
+      4. Early termination on common conditions
+      5. Reduced object creation and memory allocation
 
 */
 
+// Cache frequently accessed action properties to avoid repeated lookups
+interface CachedActionData {
+  _hasFastPath: boolean
+  _hasProcessing: boolean
+  _hasScheduling: boolean
+  _processingTalents?: string[]
+  isTestAction: boolean
+}
+
+const actionCache = new Map<string, CachedActionData>()
+const CACHE_SIZE_LIMIT = 500
+
+/**
+ * Get cached action data or create new cache entry
+ */
+const getCachedActionData = (action: IO): CachedActionData => {
+  let cached = actionCache.get(action.id)
+
+  if (!cached) {
+    cached = {
+      _hasFastPath: action._hasFastPath,
+      _hasProcessing: action._hasProcessing,
+      _hasScheduling: action._hasScheduling,
+      _processingTalents: action._processingTalents,
+      isTestAction: action.id.includes('diagnostic-test-action')
+    }
+
+    // Manage cache size
+    if (actionCache.size >= CACHE_SIZE_LIMIT) {
+      const firstKey = actionCache.keys().next().value
+      actionCache.delete(firstKey)
+    }
+
+    actionCache.set(action.id, cached)
+  }
+
+  return cached
+}
+
+/**
+ * Fast path execution - minimal overhead for simple actions
+ */
+const executeFastPath = async (
+  action: IO,
+  payload: ActionPayload | undefined,
+  cachedData: CachedActionData
+): Promise<CyreResponse> => {
+  // Minimal logging for fast path
+  if (cachedData.isTestAction) {
+    console.log('🔍 TAKING FAST PATH to useDispatch')
+  }
+
+  sensor.log(action.id, 'info', 'fast-path-execution')
+
+  const result = await useDispatch(action, payload ?? action.payload)
+
+  if (cachedData.isTestAction) {
+    console.log('🔍 FAST PATH RESULT:', {
+      ok: result.ok,
+      payload: result.payload?.constructor?.name || typeof result.payload,
+      hasMessage: !!result.message
+    })
+  }
+
+  return result
+}
+
+/**
+ * Processing pipeline execution with optimizations
+ */
+const executeProcessingPath = async (
+  action: IO,
+  payload: ActionPayload | undefined,
+  cachedData: CachedActionData
+): Promise<CyreResponse> => {
+  const currentPayload = payload ?? action.payload
+
+  if (cachedData.isTestAction) {
+    console.log('🔍 EXECUTING OPTIMIZED PROCESSING PIPELINE')
+  }
+
+  // Use optimized pipeline execution
+  const pipelineResult = executePipeline(action, currentPayload)
+
+  if (!pipelineResult.ok) {
+    if (cachedData.isTestAction) {
+      console.log('🔍 PROCESSING PIPELINE BLOCKED:', pipelineResult.message)
+    }
+
+    sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
+      reason: pipelineResult.message,
+      talents: cachedData._processingTalents
+    })
+
+    return {
+      ok: false,
+      payload: pipelineResult.payload,
+      message: pipelineResult.message || 'Pipeline blocked execution'
+    }
+  }
+
+  if (cachedData.isTestAction) {
+    console.log('🔍 PROCESSING PIPELINE SUCCESS - proceeding to dispatch')
+  }
+
+  // Continue to dispatch with processed payload
+  return await useDispatch(action, pipelineResult.payload)
+}
+
+/**
+ * Scheduling path execution
+ */
+const executeSchedulingPath = (
+  action: IO,
+  payload: ActionPayload | undefined
+): CyreResponse => {
+  const currentPayload = payload ?? action.payload
+
+  sensor.log(action.id, 'info', 'scheduling-execution', {
+    interval: action.interval,
+    delay: action.delay,
+    repeat: action.repeat
+  })
+
+  return scheduleExecution(action, currentPayload)
+}
+
+/**
+ * Main optimized process call function
+ */
 export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
-  const isTestAction = action.id.includes('diagnostic-test-action')
+  // Get cached action data to avoid repeated property access
+  const cachedData = getCachedActionData(action)
 
-  if (isTestAction) {
+  if (cachedData.isTestAction) {
     console.log('🔍 PROCESS_CALL START:', {
       actionId: action.id,
       hasPayload: payload !== undefined,
-      hasFastPath: action._hasFastPath,
-      hasProcessing: action._hasProcessing,
-      hasScheduling: action._hasScheduling
+      hasFastPath: cachedData._hasFastPath,
+      hasProcessing: cachedData._hasProcessing,
+      hasScheduling: cachedData._hasScheduling
     })
   }
 
+  // Minimal sensor logging for performance
   sensor.log(action.id, 'call', 'call-processing', {
     timestamp: Date.now(),
     hasPayload: payload !== undefined,
-    hasFastPath: action._hasFastPath,
-    hasProcessing: action._hasProcessing,
-    hasScheduling: action._hasScheduling
+    path: cachedData._hasFastPath ? 'fast' : 'complex'
   })
 
-  const originalPayload = payload ?? action.payload
-  let currentPayload = originalPayload
+  // OPTIMIZED EXECUTION PATHS
 
-  // STEP 1: Fast path check - no processing needed
-  if (action._hasFastPath) {
-    if (isTestAction) {
-      console.log('🔍 TAKING FAST PATH to useDispatch')
-    }
-    sensor.log(action.id, 'info', 'fast-path-execution')
-    const result = await useDispatch(action, currentPayload)
-
-    if (isTestAction) {
-      console.log('🔍 FAST PATH RESULT:', {
-        ok: result.ok,
-        payload: result.payload,
-        message: result.message,
-        error: result.error
-      })
-    }
-
-    return result
+  // FAST PATH: No talents, direct dispatch
+  if (cachedData._hasFastPath) {
+    return await executeFastPath(action, payload, cachedData)
   }
 
-  // STEP 2: Execute processing talents pipeline
-  if (action._hasProcessing) {
-    if (isTestAction) {
-      console.log('🔍 EXECUTING PROCESSING PIPELINE')
+  // SCHEDULING PATH: Handle scheduling first (non-blocking)
+  if (cachedData._hasScheduling) {
+    const scheduleResult = executeSchedulingPath(action, payload)
+
+    // If scheduling handled everything, return early
+    if (!cachedData._hasProcessing) {
+      return scheduleResult
     }
 
-    sensor.log(action.id, 'info', 'processing-pipeline-start', {
-      talents: action._processingTalents || []
-    })
-
-    const pipelineResult = executeProcessingPipeline(action, currentPayload)
-
-    if (!pipelineResult.ok) {
-      if (isTestAction) {
-        console.log('🔍 PROCESSING PIPELINE BLOCKED:', pipelineResult.message)
-      }
-
-      sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
-        reason: pipelineResult.message,
-        blocked: true
-      })
-
-      return {
-        ok: false,
-        payload: pipelineResult.payload,
-        message: pipelineResult.message || 'Processing pipeline failed'
-      }
-    }
-
-    // Update payload with processed result
-    currentPayload = pipelineResult.payload
-
-    if (isTestAction) {
-      console.log('🔍 PROCESSING PIPELINE COMPLETE:', {
-        payloadTransformed: currentPayload !== originalPayload
-      })
-    }
-
-    sensor.log(action.id, 'success', 'processing-pipeline-complete', {
-      payloadTransformed: currentPayload !== originalPayload,
-      finalPayloadType: typeof currentPayload
-    })
+    // Continue to processing with scheduled payload
+    // Note: In scheduling mode, we don't usually process immediately
+    // but this allows for hybrid scheduling + processing actions
   }
 
-  // STEP 3: Check for scheduling requirements
-  if (
-    action._hasScheduling &&
-    (action.interval || action.delay || action.repeat)
-  ) {
-    if (isTestAction) {
-      console.log('🔍 EXECUTING SCHEDULING')
-    }
-
-    sensor.log(action.id, 'info', 'scheduling-execution', {
-      interval: action.interval,
-      delay: action.delay,
-      repeat: action.repeat
-    })
-
-    return scheduleExecution(action, currentPayload)
+  // PROCESSING PATH: Execute talent pipeline
+  if (cachedData._hasProcessing) {
+    return await executeProcessingPath(action, payload, cachedData)
   }
 
-  // STEP 4: Update payload state for change detection history
-  if (action.detectChanges) {
-    payloadState.set(action.id, currentPayload, 'call')
-    sensor.log(action.id, 'info', 'payload-state-updated', {
-      payloadType: typeof currentPayload
-    })
-  }
-
-  // STEP 5: Final execution with processed payload
-  if (isTestAction) {
-    console.log('🔍 DISPATCHING TO HANDLER:', {
-      finalPayloadType: typeof currentPayload,
-      payloadProcessed: currentPayload !== originalPayload
-    })
-  }
-
-  sensor.log(action.id, 'info', 'dispatching-to-handler', {
-    finalPayloadType: typeof currentPayload,
-    payloadProcessed: currentPayload !== originalPayload
+  // FALLBACK: Should not reach here if compilation is correct
+  sensor.log(action.id, 'warning', 'unexpected-execution-path', {
+    hasFastPath: cachedData._hasFastPath,
+    hasProcessing: cachedData._hasProcessing,
+    hasScheduling: cachedData._hasScheduling
   })
 
-  const result = await useDispatch(action, currentPayload)
+  // Default to direct dispatch
+  return await useDispatch(action, payload ?? action.payload)
+}
 
-  if (isTestAction) {
-    console.log('🔍 FINAL DISPATCH RESULT:', {
-      ok: result.ok,
-      payload: result.payload,
-      message: result.message,
-      error: result.error
-    })
+/**
+ * Clear action cache (for testing or memory management)
+ */
+export const clearProcessCallCache = (): void => {
+  actionCache.clear()
+}
+
+/**
+ * Get cache statistics for monitoring
+ */
+export const getProcessCallCacheStats = (): {
+  size: number
+  limit: number
+  hitRate?: number
+} => {
+  return {
+    size: actionCache.size,
+    limit: CACHE_SIZE_LIMIT
   }
-
-  sensor.log(action.id, 'info', 'call-processing-complete', {
-    success: result.ok,
-    executionTime: result.metadata?.executionTime
-  })
-
-  return result
 }

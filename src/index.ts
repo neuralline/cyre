@@ -70,10 +70,11 @@ CYRE TODO:
 
 // Import the cyre instance and related utilities from app.ts
 import {cyre} from './app'
-import {cyreCompose} from './hooks/cyre-compose'
+import {useGroup} from './hooks/use-group'
 import {useCyre} from './hooks/use-cyre'
-import {createBranch} from './hooks/create-branch'
+import {useBranch} from './hooks/use-branch'
 import {log} from './components/cyre-log'
+import {metrics} from './metrics/integration'
 
 // Import schema system
 import schema from './schema/cyre-schema'
@@ -82,86 +83,7 @@ import schema from './schema/cyre-schema'
 import {orchestration} from './orchestration/orchestration-engine'
 
 // Main exports with branch system
-export {cyre, log, useCyre, cyreCompose, createBranch, schema, orchestration}
-
-// Export branch types
-export type {
-  Branch,
-  BranchConfig,
-  BranchSetup,
-  BranchStats
-} from './types/branch'
-
-// Export orchestration types
-export type {
-  OrchestrationConfig,
-  OrchestrationTrigger,
-  WorkflowStep,
-  OrchestrationAction,
-  TriggerEvent,
-  StepResult,
-  ErrorHandlingConfig,
-  MonitoringConfig,
-  AlertConfig,
-  ConditionFunction,
-  OrchestrationRuntime,
-  OrchestrationMetrics
-} from './types/orchestration'
-
-// Export types with unique names to avoid conflicts
-export type {
-  IO as CyreIO,
-  EventHandler as CyreEventHandler,
-  ISubscriber as CyreSubscriber,
-  SubscriptionResponse as CyreSubscriptionResponse,
-  ActionPayload as CyreActionPayload,
-  Priority as CyrePriority,
-  TimerDuration as CyreTimerDuration,
-  CyreResponse as CyreCoreResponse
-} from './types/core'
-
-// Export hook types
-export type {
-  CyreHook as CyreHookType,
-  CyreChannel as CyreChannelType
-} from './types/hooks-interface'
-
-// Export composition types
-export type {
-  CompositionOptions,
-  CyreComposedResponse
-} from './hooks/cyre-compose'
-
-// Export stream types
-export type {
-  Stream as CyreStream,
-  StreamObserver as CyreStreamObserver,
-  StreamSubscription as CyreStreamSubscription,
-  StreamOperator as CyreStreamOperator,
-  StreamErrorHandler as CyreStreamErrorHandler,
-  StreamConfig as CyreStreamConfig
-} from './types/stream'
-
-// Export schema types
-export type {
-  Schema as CyreSchema,
-  ValidationResult as CyreValidationResult,
-  Validator as CyreValidator,
-  Infer as CyreInfer
-} from './schema/cyre-schema'
-
-// Export group types
-export type {
-  GroupConfig as CyreGroupConfig,
-  GroupState as CyreGroupState,
-  GroupResult as CyreGroupResult,
-  GroupStats as CyreGroupStats,
-  GroupMetrics as CyreGroupMetrics,
-  GroupOperations as CyreGroupOperations,
-  AlertConfig as CyreAlertConfig,
-  AlertState as CyreAlertState,
-  GroupMiddleware as CyreGroupMiddleware
-} from './types/core'
+export {cyre, log, useCyre, useGroup, useBranch, schema, orchestration, metrics}
 
 // Version information
 export const version = '4.6.0'

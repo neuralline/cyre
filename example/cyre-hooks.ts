@@ -1,4 +1,4 @@
-// src/examples/cyre4-practical-service.ts
+// example/cyre-hooks.ts
 
 import {useCyre, cyre} from '../src'
 
@@ -37,9 +37,7 @@ const main = async () => {
       // Only process if data has truly changed
       detectChanges: true,
       // Group readings coming in bursts (common in IoT)
-      debounce: 150,
-      // Allow at most one reading per 200ms per device
-      throttle: 200
+      debounce: 150
     },
     priority: {level: 'high'}
   })

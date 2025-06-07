@@ -420,3 +420,111 @@ export const stateDataDefinitions = {
     return {ok: true, data: value, talentName: 'required' as const}
   }
 } as const
+
+const isFunction = (value: any): value is Function =>
+  typeof value === 'function'
+const isBoolean = (value: any): value is boolean => typeof value === 'boolean'
+
+// State talents validation definitions
+const stateValidationDefinitions: Record<
+  string,
+  (value: any) => DataDefResult
+> = {
+  schema: (value: any): DataDefResult => {
+    if (!isFunction(value)) {
+      return {
+        ok: false,
+        error: 'Schema must be a validation function',
+        talentName: 'schema',
+        suggestions: [
+          'Use cyre-schema validators: schema.object({...})',
+          'Provide custom validation function: (payload) => ValidationResult'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'schema'}
+  },
+
+  condition: (value: any): DataDefResult => {
+    if (!isFunction(value)) {
+      return {
+        ok: false,
+        error: 'Condition must be a function',
+        talentName: 'condition',
+        suggestions: [
+          'Provide function returning boolean: (payload) => boolean',
+          'Example: (payload) => payload.status === "active"'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'condition'}
+  },
+
+  selector: (value: any): DataDefResult => {
+    if (!isFunction(value)) {
+      return {
+        ok: false,
+        error: 'Selector must be a function',
+        talentName: 'selector',
+        suggestions: [
+          'Provide function to extract data: (payload) => selectedData',
+          'Example: (payload) => payload.user.id'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'selector'}
+  },
+
+  transform: (value: any): DataDefResult => {
+    if (!isFunction(value)) {
+      return {
+        ok: false,
+        error: 'Transform must be a function',
+        talentName: 'transform',
+        suggestions: [
+          'Provide function to transform data: (payload) => transformedData',
+          'Example: (payload) => ({...payload, processed: true})'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'transform'}
+  },
+
+  detectChanges: (value: any): DataDefResult => {
+    if (!isBoolean(value)) {
+      return {
+        ok: false,
+        error: 'DetectChanges must be boolean',
+        talentName: 'detectChanges',
+        suggestions: [
+          'Use true to enable change detection',
+          'Use false to disable change detection',
+          'Change detection compares payload with previous state'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'detectChanges'}
+  },
+
+  required: (value: any): DataDefResult => {
+    if (!isBoolean(value) && value !== 'non-empty') {
+      return {
+        ok: false,
+        error: 'Required must be boolean or "non-empty"',
+        talentName: 'required',
+        suggestions: [
+          'Use true for required payload validation',
+          'Use false for optional payload',
+          'Use "non-empty" to check for non-empty values'
+        ]
+      }
+    }
+    return {ok: true, data: value, talentName: 'required'}
+  }
+}
+
+// Export the plugin
+export const stateValidationPlugin: ValidationPlugin = {
+  name: 'state-talents',
+  definitions: stateValidationDefinitions
+}

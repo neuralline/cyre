@@ -1,20 +1,11 @@
-// example/cyre-compose-demo.ts
-// Location: examples/cyre-compose-demo.ts
-// Comprehensive demonstration of cyreCompose functionality
-import {useCyre, cyreCompose, cyre} from '../src'
+// example/cyre-compose-demo-updated.ts
+// Updated demo compatible with core action/talent pipeline
+// Uses direct properties instead of nested protection object
 
-// Enhanced types with better error handling
-interface ProcessingResult<T = any> {
-  success: boolean
-  data?: T
-  error?: string
-  metadata?: {
-    processingTime: number
-    channelId: string
-    timestamp: number
-  }
-}
+import {useCyre, cyreCompose, cyre, useBranch} from '../src'
+import type {CyreComposedResponse} from '../src/hooks/use-group'
 
+// Enhanced types for demonstration
 interface UserData {
   id: number
   name: string
@@ -22,62 +13,100 @@ interface UserData {
   preferences?: Record<string, any>
 }
 
-interface ValidationResult extends ProcessingResult<UserData> {
-  validationErrors?: string[]
+interface ValidationResult {
+  valid: boolean
+  data?: UserData
+  errors?: string[]
   warnings?: string[]
+  metadata?: {
+    processingTime: number
+    channelId: string
+    timestamp: number
+  }
 }
 
 /**
- * Enhanced demo that demonstrates better error handling and result flow
+ * Updated demo using core system aligned hooks
  */
-async function demonstrateEnhancedCyreCompose() {
-  console.log('🚀 Enhanced Cyre Compose Demonstration\n')
+async function demonstrateUpdatedCyreCompose() {
+  console.log('🚀 Updated Cyre Compose Demonstration (Core System Aligned)\n')
 
   // ========================================
-  // Create Channels with Better Error Handling
+  // Create Channels with Core System Properties
   // ========================================
 
+  console.log('📝 Creating channels with core system configuration...')
+
+  // Validation channel - using direct properties (not nested protection)
   const validationChannel = useCyre<UserData>({
     name: 'validation',
-    debug: false, // Reduce noise
-    protection: {
-      throttle: 100,
-      detectChanges: true
-    },
-    priority: {level: 'high'}
+    debug: true,
+    // Core system properties (direct, not in protection object)
+    throttle: 100, // Direct property, not protection.throttle
+    detectChanges: true, // Direct property, not protection.detectChanges
+    priority: {level: 'high'}, // Direct property
+    required: true // Payload is required
   })
 
+  // Enrichment channel with debounce
   const enrichmentChannel = useCyre<UserData>({
     name: 'enrichment',
-    debug: false,
-    protection: {
-      debounce: 50,
-      detectChanges: true
-    },
-    priority: {level: 'medium'}
+    debug: true,
+    // Core system properties
+    debounce: 150, // Direct property
+    maxWait: 500, // Works with debounce
+    detectChanges: true,
+    priority: {level: 'medium'},
+    // Core system talent functions
+    transform: (userData: UserData) => {
+      console.log(
+        `  🔧 [ENRICHMENT] Transforming user data for: ${userData.name}`
+      )
+      return {
+        ...userData,
+        preferences: {
+          ...userData.preferences,
+          enriched: true,
+          enrichedAt: Date.now()
+        }
+      }
+    }
   })
 
+  // Notification channel with condition talent
   const notificationChannel = useCyre<UserData>({
     name: 'notification',
-    debug: false,
-    protection: {
-      throttle: 200
-    },
-    priority: {level: 'low'}
+    debug: true,
+    throttle: 200,
+    priority: {level: 'low'},
+    // Core system condition talent
+    condition: (userData: UserData) => {
+      const shouldNotify = userData.email && userData.email.includes('@')
+      console.log(
+        `  🔔 [NOTIFICATION] Should notify ${userData.name}: ${shouldNotify}`
+      )
+      return shouldNotify
+    }
   })
 
+  console.log('✅ Channels created with core system configuration')
+
   // ========================================
-  // Set Up Handlers with Proper Error Handling
+  // Set Up Event Handlers
   // ========================================
 
-  // Validation Handler with explicit success/failure
-  validationChannel.on(userData => {
-    console.log(`  🔍 [VALIDATION] Processing: ${userData.name}`)
+  console.log('\n🔧 Setting up event handlers...')
+
+  // Validation handler
+  validationChannel.on((userData: UserData) => {
+    console.log(
+      `  🔍 [VALIDATION] Processing: ${userData.name} (${userData.email})`
+    )
 
     const errors: string[] = []
     const warnings: string[] = []
 
-    // Validation logic with detailed error reporting
+    // Validation logic
     if (!userData.email || !userData.email.includes('@')) {
       errors.push('Invalid email format')
     }
@@ -88,13 +117,12 @@ async function demonstrateEnhancedCyreCompose() {
       warnings.push('Invalid user ID')
     }
 
-    const success = errors.length === 0
+    const isValid = errors.length === 0
     const result: ValidationResult = {
-      success,
-      data: success ? userData : undefined,
-      error: errors.length > 0 ? errors.join(', ') : undefined,
-      validationErrors: errors,
-      warnings,
+      valid: isValid,
+      data: isValid ? userData : undefined,
+      errors: errors.length > 0 ? errors : undefined,
+      warnings: warnings.length > 0 ? warnings : undefined,
       metadata: {
         processingTime: performance.now(),
         channelId: 'validation',
@@ -103,109 +131,101 @@ async function demonstrateEnhancedCyreCompose() {
     }
 
     console.log(
-      `     ${success ? '✅ Valid' : '❌ Invalid'}: ${
-        errors.join(', ') || 'OK'
+      `     ${isValid ? '✅' : '❌'} Validation ${
+        isValid ? 'passed' : 'failed'
       }`
     )
+    if (errors.length > 0) console.log(`     Errors: ${errors.join(', ')}`)
+    if (warnings.length > 0)
+      console.log(`     Warnings: ${warnings.join(', ')}`)
 
-    // IMPORTANT: Return success/failure explicitly
-    // This should influence the composed channel's continueOnError behavior
-    if (!success) {
-      throw new Error(`Validation failed: ${errors.join(', ')}`)
-    }
-
-    return result
-  })
-
-  // Enrichment Handler
-  enrichmentChannel.on(userData => {
-    console.log(`  🌟 [ENRICHMENT] Enriching: ${userData.name}`)
-
-    try {
-      const enrichedData: UserData = {
-        ...userData,
-        preferences: {
-          theme: 'dark',
-          notifications: true,
-          language: 'en',
-          enrichedAt: new Date().toISOString()
-        }
-      }
-
-      console.log(`     ✨ Enrichment completed`)
-
-      return {
-        success: true,
-        data: enrichedData,
-        metadata: {
-          processingTime: performance.now(),
-          channelId: 'enrichment',
-          timestamp: Date.now()
-        }
-      }
-    } catch (error) {
-      console.log(`     ❌ Enrichment failed: ${error}`)
-      throw new Error(`Enrichment failed: ${error}`)
+    return {
+      ok: isValid,
+      payload: result,
+      message: isValid
+        ? 'Validation passed'
+        : `Validation failed: ${errors.join(', ')}`
     }
   })
 
-  // Notification Handler
-  notificationChannel.on(userData => {
-    console.log(`  📢 [NOTIFICATION] Notifying: ${userData.name}`)
+  // Enrichment handler (transform happens in talent pipeline)
+  enrichmentChannel.on((userData: UserData) => {
+    console.log(`  🔧 [ENRICHMENT] Enriching data for: ${userData.name}`)
 
-    try {
-      // Simulate notification logic
-      const channels = ['email']
-      if (userData.preferences?.notifications) {
-        channels.push('push')
+    // Additional enrichment beyond transform talent
+    const enrichedData = {
+      ...userData,
+      preferences: {
+        ...userData.preferences,
+        processingStep: 'enrichment',
+        handlerTimestamp: Date.now()
       }
+    }
 
-      console.log(`     📧 Sent via: ${channels.join(', ')}`)
-
-      return {
-        success: true,
-        data: {
-          messageId: `msg-${Date.now()}`,
-          channels,
-          sentAt: new Date().toISOString()
-        },
-        metadata: {
-          processingTime: performance.now(),
-          channelId: 'notification',
-          timestamp: Date.now()
-        }
-      }
-    } catch (error) {
-      console.log(`     ❌ Notification failed: ${error}`)
-      throw new Error(`Notification failed: ${error}`)
+    return {
+      ok: true,
+      payload: enrichedData,
+      message: `Data enriched for ${userData.name}`
     }
   })
+
+  // Notification handler (condition talent filters execution)
+  notificationChannel.on((userData: UserData) => {
+    console.log(
+      `  🔔 [NOTIFICATION] Sending notification to: ${userData.email}`
+    )
+
+    // Simulate notification sending
+    const notificationId = `notif-${Date.now()}`
+
+    return {
+      ok: true,
+      payload: {
+        notificationId,
+        recipient: userData.email,
+        sentAt: Date.now(),
+        type: 'user_processing_complete'
+      },
+      message: `Notification sent to ${userData.email}`
+    }
+  })
+
+  console.log('✅ Event handlers configured')
 
   // ========================================
-  // Create Composed Channels with Different Error Strategies
+  // Create Compositions
   // ========================================
 
-  console.log(
-    '🔗 Creating composed channels with different error strategies...\n'
-  )
+  console.log('\n🔗 Creating composed channels...')
 
-  // Strict Pipeline (stops on first error)
+  // Strict pipeline - stops on first error
   const strictPipeline = cyreCompose(
     [validationChannel, enrichmentChannel, notificationChannel],
     {
-      id: 'strict-processing',
-      continueOnError: false
+      id: 'strict-user-pipeline',
+      debug: true,
+      strategy: 'sequential', // Execute in order
+      failFast: true, // Stop on first error
+      continueOnError: false, // Don't continue on errors
+      collectDetailedMetrics: true
     }
   )
 
-  // Resilient Pipeline (continues despite errors)
+  // Resilient pipeline - continues despite errors
   const resilientPipeline = cyreCompose(
     [validationChannel, enrichmentChannel, notificationChannel],
     {
-      id: 'resilient-processing',
-      continueOnError: true
+      id: 'resilient-user-pipeline',
+      debug: true,
+      strategy: 'parallel', // Execute in parallel
+      continueOnError: true, // Continue on errors
+      failFast: false, // Don't stop on errors
+      timeout: 5000, // 5 second timeout
+      collectDetailedMetrics: true
     }
   )
+
+  console.log('✅ Composed channels created')
 
   // ========================================
   // Test Data
@@ -214,153 +234,274 @@ async function demonstrateEnhancedCyreCompose() {
   const validUser: UserData = {
     id: 1,
     name: 'Alice Johnson',
-    email: 'alice@example.com'
+    email: 'alice@example.com',
+    preferences: {theme: 'dark', notifications: true}
   }
 
   const invalidUser: UserData = {
     id: -1,
     name: 'B',
-    email: 'invalid-email'
+    email: 'invalid-email',
+    preferences: {}
   }
 
   // ========================================
-  // SCENARIO 1: Strict Pipeline with Valid Data
+  // SCENARIO 1: Strict Pipeline with Valid User
   // ========================================
 
-  console.log('📋 SCENARIO 1: Strict Pipeline with Valid User')
-  console.log('='.repeat(60))
+  console.log('\n📋 SCENARIO 1: Strict Pipeline with Valid User')
+  console.log('============================================================')
 
   try {
-    const results = await strictPipeline.call(validUser)
-
-    // Ensure results is an array
-    const resultsArray = Array.isArray(results) ? results : [results]
+    const result1 = await strictPipeline.call(validUser)
 
     console.log('\n📊 Results Summary:')
-    resultsArray.forEach((result, index) => {
-      const channels = ['Validation', 'Enrichment', 'Notification']
-      const status = result.ok ? '✅ Success' : '❌ Failed'
-      const message = result.message || 'No message'
-      console.log(`  ${index + 1}. ${channels[index]}: ${status}`)
-      console.log(`     Message: ${message}`)
-    })
+
+    if (Array.isArray(result1.payload)) {
+      result1.payload.forEach(
+        (channelResult: CyreComposedResponse, index: number) => {
+          const status = channelResult.ok ? '✅' : '❌'
+          const timing = channelResult.timing
+            ? ` (${channelResult.timing.executionTime.toFixed(2)}ms)`
+            : ''
+
+          console.log(
+            `  ${index + 1}. ${channelResult.channelName}: ${status} ${
+              channelResult.ok ? 'Success' : 'Failed'
+            }${timing}`
+          )
+          console.log(`     Message: ${channelResult.message}`)
+          if (channelResult.skipped) console.log('     Status: Skipped')
+        }
+      )
+    }
+
+    const successCount = Array.isArray(result1.payload)
+      ? result1.payload.filter((r: CyreComposedResponse) => r.ok).length
+      : 0
 
     console.log(
-      `\n✅ Strict pipeline completed successfully with ${results.length} channels`
+      `✅ Strict pipeline completed successfully with ${successCount} channels`
     )
   } catch (error) {
-    console.error('❌ Strict pipeline failed:', error.message)
+    console.log(`❌ Strict pipeline failed: ${error}`)
   }
 
-  await wait(600) // Allow debounce to complete
-
   // ========================================
-  // SCENARIO 2: Strict Pipeline with Invalid Data (Should Stop Early)
+  // SCENARIO 2: Strict Pipeline with Invalid User
   // ========================================
 
   console.log(
     '\n📋 SCENARIO 2: Strict Pipeline with Invalid User (Should Stop Early)'
   )
-  console.log('='.repeat(70))
+  console.log(
+    '======================================================================'
+  )
 
   try {
-    const results = (await strictPipeline.call(validUser)) || 0
-
-    // Ensure results is an array
-    const resultsArray = Array.isArray(results) ? results : [results]
+    const result2 = await strictPipeline.call(invalidUser)
 
     console.log('\n📊 Results Summary:')
-    resultsArray.forEach((result, index) => {
-      const channels = ['Validation', 'Enrichment', 'Notification']
-      const status = result.ok ? '✅ Success' : '❌ Failed'
-      const message = result.message || 'No message'
-      console.log(`  ${index + 1}. ${channels[index]}: ${status}`)
-      console.log(`     Message: ${message}`)
-    })
+
+    if (Array.isArray(result2.payload)) {
+      result2.payload.forEach(
+        (channelResult: CyreComposedResponse, index: number) => {
+          const status = channelResult.ok ? '✅' : '❌'
+          const skipped = channelResult.skipped ? ' (Skipped)' : ''
+          const timing = channelResult.timing
+            ? ` (${channelResult.timing.executionTime.toFixed(2)}ms)`
+            : ''
+
+          console.log(
+            `  ${index + 1}. ${channelResult.channelName}: ${status} ${
+              channelResult.ok ? 'Success' : 'Failed'
+            }${skipped}${timing}`
+          )
+          console.log(`     Message: ${channelResult.message}`)
+        }
+      )
+    }
+
+    const executedCount = Array.isArray(result2.payload)
+      ? result2.payload.filter((r: CyreComposedResponse) => !r.skipped).length
+      : 0
+
     console.log(
-      `\n⚠️  Strict pipeline stopped early: ${results.length} channels executed (expected < 3)`
+      `⚠️  Strict pipeline stopped early: ${executedCount} channels executed (expected < 3)`
     )
   } catch (error) {
-    console.error('❌ Strict pipeline failed as expected:', error.message)
+    console.log(`❌ Strict pipeline error: ${error}`)
   }
 
-  await wait(600) // Allow debounce to complete
-
   // ========================================
-  // SCENARIO 3: Resilient Pipeline with Invalid Data (Should Complete All)
+  // SCENARIO 3: Resilient Pipeline with Invalid User
   // ========================================
 
   console.log(
     '\n📋 SCENARIO 3: Resilient Pipeline with Invalid User (Should Complete All)'
   )
-  console.log('='.repeat(75))
+  console.log(
+    '==========================================================================='
+  )
 
   try {
-    const results = await strictPipeline.call(validUser)
-
-    // Ensure results is an array
-    const resultsArray = Array.isArray(results) ? results : [results]
+    const result3 = await resilientPipeline.call(invalidUser)
 
     console.log('\n📊 Results Summary:')
-    resultsArray.forEach((result, index) => {
-      const channels = ['Validation', 'Enrichment', 'Notification']
-      const status = result.ok ? '✅ Success' : '❌ Failed'
-      const message = result.message || 'No message'
-      console.log(`  ${index + 1}. ${channels[index]}: ${status}`)
-      console.log(`     Message: ${message}`)
-    })
+
+    if (Array.isArray(result3.payload)) {
+      result3.payload.forEach(
+        (channelResult: CyreComposedResponse, index: number) => {
+          const status = channelResult.ok ? '✅' : '❌'
+          const timing = channelResult.timing
+            ? ` (${channelResult.timing.executionTime.toFixed(2)}ms)`
+            : ''
+
+          console.log(
+            `  ${index + 1}. ${channelResult.channelName}: ${status} ${
+              channelResult.ok ? 'Success' : 'Failed'
+            }${timing}`
+          )
+          console.log(`     Message: ${channelResult.message}`)
+          if (channelResult.originalError) {
+            console.log(`     Error: ${channelResult.originalError}`)
+          }
+        }
+      )
+    }
+
+    const completedCount = Array.isArray(result3.payload)
+      ? result3.payload.length
+      : 0
 
     console.log(
-      `\n🔄 Resilient pipeline completed all ${results.length} channels despite errors`
+      `🔄 Resilient pipeline completed all ${completedCount} channels despite errors`
     )
   } catch (error) {
-    console.error('❌ Resilient pipeline failed:', error.message)
+    console.log(`❌ Resilient pipeline error: ${error}`)
   }
 
-  await wait(600) // Allow debounce to complete
-
   // ========================================
-  // SCENARIO 4: Demonstrate Change Detection in Composition
+  // SCENARIO 4: Change Detection Test
   // ========================================
 
   console.log('\n📋 SCENARIO 4: Change Detection in Composition')
-  console.log('='.repeat(50))
-
-  console.log('First call with new data:')
-  const newUser: UserData = {
-    id: 2,
-    name: 'Bob Smith',
-    email: 'bob@example.com'
-  }
+  console.log('==================================================')
 
   try {
-    const results1 = await strictPipeline.call(newUser)
-    console.log(`✅ First call completed: ${results1.length} channels executed`)
+    // First call with new data
+    console.log('First call with new data:')
+    const result4a = await resilientPipeline.call(validUser)
+    const executedCount1 = Array.isArray(result4a.payload)
+      ? result4a.payload.length
+      : 0
+    console.log(`✅ First call completed: ${executedCount1} channels executed`)
+
+    // Second call with same data (should trigger change detection)
+    console.log('\nSecond call with same data (should show change detection):')
+    const result4b = await resilientPipeline.call(validUser)
+    const executedCount2 = Array.isArray(result4b.payload)
+      ? result4b.payload.length
+      : 0
+    console.log(`✅ Second call completed: ${executedCount2} channels executed`)
+
+    // Show change detection effects
+    if (Array.isArray(result4b.payload)) {
+      const throttledChannels = result4b.payload.filter(
+        (r: CyreComposedResponse) =>
+          r.message?.includes('throttle') || r.message?.includes('change')
+      )
+
+      if (throttledChannels.length > 0) {
+        console.log('🔄 Change detection/throttling effects:')
+        throttledChannels.forEach(channel => {
+          console.log(`  - ${channel.channelName}: ${channel.message}`)
+        })
+      }
+    }
   } catch (error) {
-    console.error('❌ First call failed:', error.message)
+    console.log(`❌ Change detection test failed: ${error}`)
   }
 
-  await wait(100)
+  // ========================================
+  // SCENARIO 5: Cross-Branch Composition
+  // ========================================
 
-  console.log('\nSecond call with same data (should show change detection):')
+  console.log('\n📋 SCENARIO 5: Cross-Branch Composition')
+  console.log('==========================================')
+
   try {
-    const results2 = await strictPipeline.call(newUser)
-    console.log(
-      `✅ Second call completed: ${results2.length} channels executed`
+    // Create a processing branch
+    const processingBranch = useBranch(cyre, {
+      id: 'processing-branch',
+      path: 'processing'
+    })
+
+    // Create channel in branch
+    const branchProcessorChannel = useCyre(processingBranch, {
+      name: 'branch-processor',
+      debug: true,
+      priority: {level: 'medium', maxRetries: 3, timeout: 5000},
+      transform: (userData: UserData) => ({
+        ...userData,
+        processedInBranch: true,
+        branchPath: processingBranch.path
+      })
+    })
+
+    // Set up branch channel handler
+    branchProcessorChannel.on((userData: UserData) => {
+      console.log(`  🌳 [BRANCH] Processing in branch: ${userData.name}`)
+      return {
+        ok: true,
+        payload: userData,
+        message: `Processed in branch: ${processingBranch.path}`
+      }
+    })
+
+    // Create cross-branch composition
+    const crossBranchComposition = cyreCompose(
+      [
+        validationChannel, // Main instance
+        branchProcessorChannel, // Branch instance
+        enrichmentChannel // Main instance
+      ],
+      {
+        id: 'cross-branch-pipeline',
+        debug: true,
+        strategy: 'sequential',
+        continueOnError: true,
+        collectDetailedMetrics: true
+      }
     )
 
-    // Check if any channels were skipped due to change detection
-    const skippedChannels = results2.filter(
-      r => r.message && r.message.includes('No changes detected')
-    )
+    console.log('🌳 Executing cross-branch composition...')
+    const result5 = await crossBranchComposition.call(validUser)
 
-    if (skippedChannels.length > 0) {
-      console.log(
-        `🎯 Change detection worked: ${skippedChannels.length} channels skipped`
+    console.log('\n📊 Cross-Branch Results:')
+    if (Array.isArray(result5.payload)) {
+      result5.payload.forEach(
+        (channelResult: CyreComposedResponse, index: number) => {
+          const status = channelResult.ok ? '✅' : '❌'
+          const location = channelResult.channelId.includes('/processing/')
+            ? '🌳 Branch'
+            : '🔧 Main'
+          const timing = channelResult.timing
+            ? ` (${channelResult.timing.executionTime.toFixed(2)}ms)`
+            : ''
+
+          console.log(
+            `  ${index + 1}. ${location} ${
+              channelResult.channelName
+            }: ${status} ${channelResult.ok ? 'Success' : 'Failed'}${timing}`
+          )
+          console.log(`     Channel ID: ${channelResult.channelId}`)
+          console.log(`     Message: ${channelResult.message}`)
+        }
       )
     }
   } catch (error) {
-    console.error('❌ Second call failed:', error.message)
+    console.log(`❌ Cross-branch composition failed: ${error}`)
   }
 
   // ========================================
@@ -368,167 +509,51 @@ async function demonstrateEnhancedCyreCompose() {
   // ========================================
 
   console.log('\n📈 Performance Analysis')
-  console.log('='.repeat(30))
+  console.log('==============================')
 
-  const globalMetrics = cyre.getPerformanceState()
-  console.log(
-    `• Total Processing Time: ${globalMetrics.totalProcessingTime.toFixed(2)}ms`
-  )
-  console.log(`• System Stress: ${(globalMetrics.stress * 100).toFixed(1)}%`)
-  console.log(
-    `• Pipeline Efficiency: ${(globalMetrics.avgEfficiencyRatio * 100).toFixed(
-      1
-    )}%`
-  )
-
-  // Individual channel analysis
-  console.log('\nIndividual Channel Performance:')
-  const channels = [
-    {name: 'Validation', channel: validationChannel},
-    {name: 'Enrichment', channel: enrichmentChannel},
-    {name: 'Notification', channel: notificationChannel}
-  ]
-
-  channels.forEach(({name, channel}) => {
-    const history = channel.getHistory()
-    console.log(`• ${name}: ${history.length} executions`)
-  })
-
-  // ========================================
-  // Cleanup
-  // ========================================
-
-  console.log('\n🧹 Cleanup')
-  strictPipeline.forget()
-  resilientPipeline.forget()
-
-  console.log('\n🎉 Enhanced demonstration completed!')
-
-  console.log('\nKey Improvements Demonstrated:')
-  console.log('• Better error handling with explicit success/failure')
-  console.log('• Reduced debug noise for clearer output')
-  console.log('• Change detection verification in composed channels')
-  console.log('• Different error handling strategies clearly demonstrated')
-  console.log('• Performance analysis with meaningful metrics')
-}
-
-/**
- * Demonstrate middleware in composed channels
- */
-async function demonstrateMiddlewareInComposition() {
-  console.log('\n🔧 Middleware in Composed Channels\n')
-
-  // Create channels with middleware
-  const preprocessChannel = useCyre<{data: any; timestamp?: number}>({
-    name: 'preprocess',
-    debug: false
-  })
-
-  const processChannel = useCyre<any>({
-    name: 'process',
-    debug: false
-  })
-
-  // Add middleware to preprocess channel
-  preprocessChannel.middleware(async (payload, next) => {
-    console.log(`  🔧 [MIDDLEWARE] Adding timestamp to payload`)
-
-    const enhancedPayload = {
-      ...payload,
-      timestamp: Date.now(),
-      processedBy: 'middleware'
-    }
-
-    return next(enhancedPayload)
-  })
-
-  // Set up handlers
-  preprocessChannel.on(payload => {
-    console.log(
-      `  📝 [PREPROCESS] Received payload with timestamp: ${payload.timestamp}`
-    )
-    return {
-      success: true,
-      preprocessed: true,
-      payload
-    }
-  })
-
-  processChannel.on(payload => {
-    console.log(
-      `  ⚙️  [PROCESS] Processing data: ${JSON.stringify(payload.data)}`
-    )
-    return {
-      success: true,
-      processed: true,
-      result: `Processed: ${JSON.stringify(payload)}`
-    }
-  })
-
-  // Create composed channel
-  const middlewarePipeline = cyreCompose([preprocessChannel, processChannel], {
-    id: 'middleware-pipeline',
-    continueOnError: false
-  })
-
-  // Test the pipeline
-  console.log('Testing middleware in composition:')
-  const results = await middlewarePipeline.call({
-    data: {value: 42, type: 'test'}
-  })
-
-  // Ensure results is an array
-  const resultsArray = Array.isArray(results) ? results : [results]
-
-  console.log('\nMiddleware Pipeline Results:')
-  resultsArray.forEach((result, index) => {
-    const channels = ['Preprocess', 'Process']
-    console.log(
-      `  ${index + 1}. ${channels[index]}: ${result.ok ? '✅' : '❌'} - ${
-        result.message
-      }`
-    )
-  })
-
-  // Cleanup
-  middlewarePipeline.forget()
-}
-
-/**
- * Helper function for delays
- */
-const wait = (ms: number): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, ms))
-
-/**
- * Main execution
- */
-async function main() {
   try {
-    await demonstrateEnhancedCyreCompose()
-    await wait(1000)
-    await demonstrateMiddlewareInComposition()
+    // Get system performance stats
+    const systemHealth = cyre.getSystemHealth()
+    const performanceState = cyre.getPerformanceState()
 
-    console.log('\n🎯 Enhanced demonstrations completed successfully!')
+    // Calculate metrics
+    const totalTime = performance.now()
+    const systemStress = performanceState.stress * 100
+
+    console.log(`• Total Processing Time: ${totalTime.toFixed(2)}ms`)
+    console.log(`• System Stress: ${systemStress.toFixed(1)}%`)
+
+    // Get channel stats
+    console.log('\nIndividual Channel Performance:')
+
+    const channels = [validationChannel, enrichmentChannel, notificationChannel]
+    channels.forEach(channel => {
+      try {
+        const stats = channel.getStats()
+        console.log(`• ${channel.name}:`)
+        console.log(`  - Total Calls: ${stats.totalCalls}`)
+        console.log(
+          `  - Avg Execution: ${stats.averageExecutionTime.toFixed(2)}ms`
+        )
+        console.log(
+          `  - Success Rate: ${(stats.successRate * 100).toFixed(1)}%`
+        )
+      } catch (error) {
+        console.log(`• ${channel.name}: Stats unavailable`)
+      }
+    })
+
+    console.log('\n✅ Demonstration completed successfully!')
+    console.log(
+      'Core system integration: ✅ All hooks aligned with action/talent pipeline'
+    )
   } catch (error) {
-    console.error('❌ Demonstration failed:', error)
-    process.exit(1)
+    console.log(`❌ Performance analysis failed: ${error}`)
   }
-
-  // Clean exit
-  setTimeout(() => {
-    console.log('\n👋 Exiting gracefully...')
-    process.exit(0)
-  }, 1000)
 }
 
-// Export for use
-export {
-  demonstrateEnhancedCyreCompose,
-  demonstrateMiddlewareInComposition,
-  main
-}
+// Export for testing
+export {demonstrateUpdatedCyreCompose}
 
-// Run if called directly
-
-main()
+// Run demonstration
+demonstrateUpdatedCyreCompose().catch(console.error)
