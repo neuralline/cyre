@@ -1,5 +1,5 @@
-// src/types/hooks-interface.ts
-// Hooks and Channel related types
+// src/types/hooks.ts
+// Hook types including the missing GroupedChannel and UseGroupConfig
 
 import {
   IO,
@@ -9,9 +9,6 @@ import {
   CyreResponse,
   Priority
 } from './core'
-
-/// src/types/use-cyre.ts
-// Clean types for useCyre hook - simple single channel management
 
 /**
  * Any cyre-like instance that useCyre can work with
@@ -107,7 +104,7 @@ export interface CyreChannel<TPayload = ActionPayload> {
 }
 
 /**
- * Any channel-like object that useCompose can work with
+ * Any channel-like object that useGroup can work with
  */
 export interface ChannelLike<TPayload = ActionPayload> {
   id: string
@@ -119,7 +116,7 @@ export interface ChannelLike<TPayload = ActionPayload> {
 }
 
 /**
- * Execution strategy for composition
+ * Execution strategy for group coordination
  */
 export type ExecutionStrategy = 'parallel' | 'sequential'
 
@@ -129,30 +126,30 @@ export type ExecutionStrategy = 'parallel' | 'sequential'
 export type ErrorStrategy = 'fail-fast' | 'continue' | 'collect'
 
 /**
- * Configuration for useCompose hook
+ * Configuration for useGroup hook
  */
-export interface UseComposeConfig {
-  /** Composition name for debugging */
+export interface UseGroupConfig {
+  /** Group name for debugging */
   name?: string
   /** Execution strategy */
   strategy?: ExecutionStrategy
   /** Error handling strategy */
   errorStrategy?: ErrorStrategy
-  /** Timeout for entire composition (ms) */
+  /** Timeout for entire group execution (ms) */
   timeout?: number
-  /** Priority for composed operations */
+  /** Priority for grouped operations */
   priority?: Priority
 }
 
 /**
- * Result from individual channel execution
+ * Result from individual channel execution in a group
  */
 export interface ChannelExecutionResult extends CyreResponse {
   /** Channel that produced this result */
   channelId: string
   /** Channel name for identification */
   channelName?: string
-  /** Execution order in composition */
+  /** Execution order in group */
   executionOrder: number
   /** Execution time in milliseconds */
   executionTime: number
@@ -163,12 +160,12 @@ export interface ChannelExecutionResult extends CyreResponse {
 }
 
 /**
- * Simple composed channel interface
+ * Grouped channel interface returned by useGroup
  */
-export interface ComposedChannel<TPayload = ActionPayload> {
-  /** Composition ID */
+export interface GroupedChannel<TPayload = ActionPayload> {
+  /** Group ID */
   id: string
-  /** Composition name */
+  /** Group name */
   name: string
   /** Individual channels */
   channels: ChannelLike<TPayload>[]
@@ -181,17 +178,83 @@ export interface ComposedChannel<TPayload = ActionPayload> {
     handler: EventHandler
   ) => SubscriptionResponse & {unsubscribe: () => boolean}
 
-  /** Add channel to composition */
+  /** Add channel to group */
   add: (channel: ChannelLike<TPayload>) => void
 
-  /** Remove channel from composition */
+  /** Remove channel from group */
   forget: (channelId: string) => boolean
 
-  /** Get composition stats */
+  /** Get group stats */
   getStats: () => {
     channelCount: number
     lastExecutionTime: number
     totalExecutions: number
     successRate: number
   }
+}
+
+/**
+ * Branch configuration - minimal like React props
+ */
+export interface BranchConfig {
+  /** Branch identifier (auto-generated if not provided) - must be path-safe */
+  id?: string
+  /** Whether to isolate completely or allow cross-branch calls */
+  isolated?: boolean
+  /** Maximum depth for child branches */
+  maxDepth?: number
+  /** Auto-cleanup when no channels remain */
+  autoCleanup?: boolean
+}
+
+/**
+ * Branch interface - React component-like isolation
+ * - No parent/sibling access
+ * - Only parent → child communication
+ * - Cascade destruction
+ */
+export interface Branch {
+  id: string
+  path: string
+  parent?: Branch
+
+  // Core methods (scoped to branch only)
+  action: (config: IO) => {ok: boolean; message: string}
+  on: (id: string, handler: any) => SubscriptionResponse
+  call: (target: string, payload?: any) => Promise<CyreResponse>
+  get: (id: string) => IO | undefined
+  forget: (id: string) => boolean
+
+  // Branch lifecycle (like React component)
+  destroy: () => boolean
+  isActive: () => boolean
+  getStats: () => BranchStats
+  setup: (config: BranchSetup) => {ok: boolean; message: string}
+}
+
+/**
+ * Branch statistics
+ */
+export interface BranchStats {
+  id: string
+  path: string
+  channelCount: number
+  subscriberCount: number
+  timerCount: number
+  childCount: number
+  depth: number
+  createdAt: number
+  isActive: boolean
+}
+
+/**
+ * Branch setup configuration for component duplication
+ */
+export interface BranchSetup {
+  actions?: Partial<IO>[]
+  subscriptions?: Array<{
+    id: string
+    handler: (...args: any[]) => any
+  }>
+  orchestrations?: any[]
 }

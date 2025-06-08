@@ -1,23 +1,21 @@
-// src/schema/talent-definitions-optimized.ts
-// Runtime optimized talent execution with minimal overhead
+// src/schema/talent-definitions.ts
+// Core talent definitions with fast execution cache
 
 import type {IO} from '../types/core'
 import {sensor} from '../context/metrics-report'
-import {log} from '../components/cyre-log'
 import payloadState from '../context/payload-state'
-import {useDispatch} from '../components/cyre-dispatch'
-import TimeKeeper from '../components/cyre-timekeeper'
+import {io} from '../context/state'
+import {metricsState} from '../context/metrics-state'
 
 /*
 
-      C.Y.R.E - T.A.L.E.N.T - E.X.E.C.U.T.I.O.N - O.P.T.I.M.I.Z.E.D
+      C.Y.R.E - T.A.L.E.N.T - D.E.F.I.N.I.T.I.O.N.S
       
-      Runtime optimized talent execution:
-      - Pre-compiled talent function lookups
-      - Minimal object creation and memory allocation
-      - Fast-fail validation with early returns
-      - Cached function references for hot paths
-      - Reduced logging overhead in production
+      Fast talent execution system with:
+      - Pre-compiled talent functions in cache for performance
+      - Individual talent testing support
+      - Pipeline execution optimization
+      - Three-phase architecture support
 
 */
 
@@ -26,19 +24,101 @@ export interface TalentResult {
   payload?: any
   message?: string
   error?: boolean
-  delay?: number
 }
 
-// Pre-compiled talent function cache for hot paths
-interface TalentFunction {
-  (action: IO, payload: any): TalentResult
-}
+export type TalentFunction = (action: IO, payload: any) => TalentResult
 
+export type TalentName =
+  | 'block'
+  | 'throttle'
+  | 'debounce'
+  | 'schema'
+  | 'condition'
+  | 'selector'
+  | 'transform'
+  | 'detectChanges'
+  | 'required'
+
+// Performance-optimized talent function cache
 const talentFunctionCache = new Map<string, TalentFunction>()
 
-// Initialize common talent functions
+/**
+ * Initialize talent cache with pre-compiled functions
+ */
 const initializeTalentCache = (): void => {
-  // Schema validation (fast path for functions)
+  // Block talent (protection)
+  talentFunctionCache.set('block', (action: IO, payload: any): TalentResult => {
+    if (!action.block) {
+      return {ok: true, payload}
+    }
+
+    if (action.block === true) {
+      return {
+        ok: false,
+        payload,
+        message: 'Action is blocked'
+      }
+    }
+
+    return {ok: true, payload}
+  })
+
+  // Throttle talent (protection)
+  talentFunctionCache.set(
+    'throttle',
+    (action: IO, payload: any): TalentResult => {
+      if (!action.throttle) {
+        return {ok: true, payload}
+      }
+
+      try {
+        const metrics = io.getMetrics(action.id)
+        const now = Date.now()
+        const timeSinceLastExecution = now - (metrics?.lastExecutionTime || 0)
+
+        if (timeSinceLastExecution < action.throttle) {
+          const remaining = action.throttle - timeSinceLastExecution
+          return {
+            ok: false,
+            payload,
+            message: `Throttled - ${remaining}ms remaining`
+          }
+        }
+
+        return {ok: true, payload}
+      } catch (error) {
+        // If throttle check fails, allow execution
+        return {ok: true, payload}
+      }
+    }
+  )
+
+  // Debounce talent (protection)
+  talentFunctionCache.set(
+    'debounce',
+    (action: IO, payload: any): TalentResult => {
+      if (!action.debounce) {
+        return {ok: true, payload}
+      }
+
+      try {
+        const metrics = metricsState.get(action.id)
+        if (metrics?.breathing?.isRecuperating) {
+          return {
+            ok: false,
+            payload,
+            message: 'Debounced - system recuperating'
+          }
+        }
+
+        return {ok: true, payload}
+      } catch (error) {
+        return {ok: true, payload}
+      }
+    }
+  )
+
+  // Schema validation talent
   talentFunctionCache.set(
     'schema',
     (action: IO, payload: any): TalentResult => {
@@ -47,19 +127,26 @@ const initializeTalentCache = (): void => {
       }
 
       try {
-        const result = action.schema(payload)
-        if (result.ok) {
-          return {ok: true, payload: result.data}
-        } else {
+        const validationResult = action.schema(payload)
+
+        if (validationResult && validationResult.ok) {
           return {
-            ok: false,
-            payload,
-            message: `Schema validation failed: ${result.errors.join(', ')}`
+            ok: true,
+            payload: validationResult.data || payload,
+            message: 'Schema validation passed'
           }
+        }
+
+        return {
+          ok: false,
+          error: true,
+          payload,
+          message: 'Schema validation failed'
         }
       } catch (error) {
         return {
           ok: false,
+          error: true,
           payload,
           message: `Schema error: ${
             error instanceof Error ? error.message : String(error)
@@ -69,7 +156,7 @@ const initializeTalentCache = (): void => {
     }
   )
 
-  // Required validation (optimized)
+  // Required validation talent
   talentFunctionCache.set(
     'required',
     (action: IO, payload: any): TalentResult => {
@@ -103,7 +190,7 @@ const initializeTalentCache = (): void => {
     }
   )
 
-  // Selector (fast function execution)
+  // Selector talent (fast function execution)
   talentFunctionCache.set(
     'selector',
     (action: IO, payload: any): TalentResult => {
@@ -117,6 +204,7 @@ const initializeTalentCache = (): void => {
       } catch (error) {
         return {
           ok: false,
+          error: true,
           payload,
           message: `Selector error: ${
             error instanceof Error ? error.message : String(error)
@@ -126,7 +214,7 @@ const initializeTalentCache = (): void => {
     }
   )
 
-  // Condition (fast boolean check)
+  // Condition talent (fast boolean check)
   talentFunctionCache.set(
     'condition',
     (action: IO, payload: any): TalentResult => {
@@ -142,12 +230,13 @@ const initializeTalentCache = (): void => {
           return {
             ok: false,
             payload,
-            message: 'Condition check failed'
+            message: 'Condition not met - execution skipped'
           }
         }
       } catch (error) {
         return {
           ok: false,
+          error: true,
           payload,
           message: `Condition error: ${
             error instanceof Error ? error.message : String(error)
@@ -157,7 +246,7 @@ const initializeTalentCache = (): void => {
     }
   )
 
-  // Transform (fast transformation)
+  // Transform talent (fast transformation)
   talentFunctionCache.set(
     'transform',
     (action: IO, payload: any): TalentResult => {
@@ -171,6 +260,7 @@ const initializeTalentCache = (): void => {
       } catch (error) {
         return {
           ok: false,
+          error: true,
           payload,
           message: `Transform error: ${
             error instanceof Error ? error.message : String(error)
@@ -180,7 +270,7 @@ const initializeTalentCache = (): void => {
     }
   )
 
-  // Change detection (optimized comparison)
+  // Change detection talent (optimized comparison)
   talentFunctionCache.set(
     'detectChanges',
     (action: IO, payload: any): TalentResult => {
@@ -234,7 +324,7 @@ initializeTalentCache()
 /**
  * Fast talent execution with pre-compiled functions
  */
-const executeTalentFast = (
+export const executeTalent = (
   talentName: string,
   action: IO,
   payload: any
@@ -265,28 +355,51 @@ const executeTalentFast = (
 }
 
 /**
+ * Talents object for individual testing and direct access
+ */
+export const talents = {
+  block: (action: IO, payload: any) => executeTalent('block', action, payload),
+  throttle: (action: IO, payload: any) =>
+    executeTalent('throttle', action, payload),
+  debounce: (action: IO, payload: any) =>
+    executeTalent('debounce', action, payload),
+  schema: (action: IO, payload: any) =>
+    executeTalent('schema', action, payload),
+  condition: (action: IO, payload: any) =>
+    executeTalent('condition', action, payload),
+  selector: (action: IO, payload: any) =>
+    executeTalent('selector', action, payload),
+  transform: (action: IO, payload: any) =>
+    executeTalent('transform', action, payload),
+  detectChanges: (action: IO, payload: any) =>
+    executeTalent('detectChanges', action, payload),
+  required: (action: IO, payload: any) =>
+    executeTalent('required', action, payload)
+} as const
+
+/**
  * Optimized pipeline execution with early termination
  */
 export const executePipeline = (action: IO, payload: any): TalentResult => {
   // Pre-check if we have any processing talents
-  if (!action._processingTalents || action._processingTalents.length === 0) {
+  if (!action._processingPipeline || action._processingPipeline.length === 0) {
     return {ok: true, payload}
   }
 
   let currentPayload = payload
-  const talents = action._processingTalents
+  const pipeline = action._processingPipeline
 
   // Execute talents in sequence with early termination
-  for (let i = 0; i < talents.length; i++) {
-    const talentName = talents[i]
-    const result = executeTalentFast(talentName, action, currentPayload)
+  for (let i = 0; i < pipeline.length; i++) {
+    const talentName = pipeline[i]
+    const result = executeTalent(talentName, action, currentPayload)
 
     if (!result.ok) {
       // Log only on failures to reduce overhead
       sensor.log(action.id, 'skip', 'talent-execution-blocked', {
         talentName,
         position: i,
-        totalTalents: talents.length,
+        totalTalents: pipeline.length,
         reason: result.message
       })
 
@@ -301,86 +414,14 @@ export const executePipeline = (action: IO, payload: any): TalentResult => {
 
   // Success - minimal logging
   sensor.log(action.id, 'success', 'pipeline-execution-complete', {
-    talentCount: talents.length,
+    talentCount: pipeline.length,
     payloadTransformed: currentPayload !== payload
   })
 
   return {
     ok: true,
     payload: currentPayload,
-    message: `${talents.length} talents executed successfully`
-  }
-}
-
-/**
- * Optimized scheduling execution (from original talent-definitions)
- */
-export const scheduleExecution = (action: IO, payload: any): TalentResult => {
-  const interval = action.interval
-  const delay = action.delay
-  const repeat = action.repeat
-
-  // Fast path - no scheduling needed
-  if (!interval && !delay && !repeat) {
-    return {ok: true, payload, message: 'No scheduling required'}
-  }
-
-  // Import TimeKeeper lazily to avoid circular dependencies
-
-  const duration = interval || delay || 1000
-  const actualRepeat = repeat ?? (interval ? true : 1)
-
-  try {
-    const result = TimeKeeper.keep(
-      duration,
-      async () => {
-        return await useDispatch(action, payload)
-      },
-      actualRepeat,
-      `${action.id}-scheduled`,
-      delay
-    )
-
-    if (result.kind === 'error') {
-      sensor.error(action.id, result.error.message, 'talent-schedule-error', {
-        interval,
-        delay,
-        repeat: actualRepeat
-      })
-
-      return {
-        ok: false,
-        payload: undefined,
-        message: `Scheduling failed: ${result.error.message}`
-      }
-    }
-
-    sensor.log(action.id, 'info', 'talent-schedule-success', {
-      interval,
-      delay,
-      repeat: actualRepeat,
-      timerId: `${action.id}-scheduled`
-    })
-
-    return {
-      ok: true,
-      payload: undefined,
-      message: 'Scheduled execution'
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-
-    sensor.error(action.id, errorMessage, 'talent-schedule-exception', {
-      interval,
-      delay,
-      repeat: actualRepeat
-    })
-
-    return {
-      ok: false,
-      payload: undefined,
-      message: `Scheduling error: ${errorMessage}`
-    }
+    message: `${pipeline.length} talents executed successfully`
   }
 }
 

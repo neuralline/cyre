@@ -1,7 +1,7 @@
 // test/repeat.test.ts - Updated for new TimeKeeper integration
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src'
 
 /*
  * CYRE Repeat and Timing Behavior Tests

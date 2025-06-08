@@ -122,7 +122,7 @@ export const sensor = {
   /**
    * Core sensor method - validates and logs data
    */
-  record: (event: SensorEvent | any): void => {
+  record: (event: SensorEvent): void => {
     const sanitizedEvent = validateAndSanitize(event)
     if (!sanitizedEvent) {
       return // Skip invalid events
@@ -138,10 +138,10 @@ export const sensor = {
   log: (
     actionId: ActionId,
     eventType: any,
-    location?: any,
-    metadata?: Record<string, unknown>,
     message?: string,
+    location?: any,
     log: boolean = false,
+    metadata?: Record<string, unknown>,
     priority?: Priority
   ): void => {
     sensor.record({

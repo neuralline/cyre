@@ -1,5 +1,5 @@
 // src/hooks/use-group.ts
-// Beautiful simple channel coordination (renamed from useCompose)
+// Beautiful simple channel coordination
 // Works with any channel-like objects - doesn't care where they come from!
 
 import type {EventHandler, ActionPayload} from '../types/core'
@@ -14,18 +14,17 @@ import type {
 import {sensor} from '../metrics'
 
 /**
- * Beautiful simple channel coordination (renamed from useCompose)
+ * Beautiful simple channel coordination
  * Works with ANY channel-like objects - main cyre, branches, anything!
  */
 export function useGroup<TPayload = ActionPayload>(
   channels: ChannelLike<TPayload>[],
-  config: UseComposeConfig = {}
-): ComposedChannel<TPayload> {
+  config: UseGroupConfig = {}
+): GroupedChannel<TPayload> {
   // Simple configuration with defaults
-  const compositionId = `compose-${crypto.randomUUID().slice(0, 8)}`
-  const compositionName =
-    config.name ||
-    `Composition[${channels.map(c => c.name || c.id).join(', ')}]`
+  const groupId = `group-${crypto.randomUUID().slice(0, 8)}`
+  const groupName =
+    config.name || `Group[${channels.map(c => c.name || c.id).join(', ')}]`
   const strategy: ExecutionStrategy = config.strategy || 'parallel'
   const errorStrategy: ErrorStrategy = config.errorStrategy || 'continue'
   const timeout = config.timeout || 10000 // 10 second default
@@ -51,8 +50,8 @@ export function useGroup<TPayload = ActionPayload>(
     )
   }
 
-  sensor.log(compositionId, 'success', 'use-group-created', {
-    compositionName,
+  sensor.log(groupId, 'success', 'use-group-created', {
+    groupName,
     channelCount: channels.length,
     channelIds: channels.map(c => c.id),
     strategy,
@@ -70,7 +69,7 @@ export function useGroup<TPayload = ActionPayload>(
     const startTime = performance.now()
 
     try {
-      sensor.log(compositionId, 'call', 'channel-execution-start', {
+      sensor.log(groupId, 'call', 'channel-execution-start', {
         channelId: channel.id,
         executionOrder,
         strategy
@@ -81,14 +80,15 @@ export function useGroup<TPayload = ActionPayload>(
       const executionTime = performance.now() - startTime
 
       sensor.log(
-        compositionId,
+        groupId,
         result.ok ? 'success' : 'error',
         'channel-execution-complete',
         {
           channelId: channel.id,
           executionOrder,
+          success: result.ok,
           executionTime,
-          success: result.ok
+          message: result.message
         }
       )
 
@@ -104,7 +104,7 @@ export function useGroup<TPayload = ActionPayload>(
       const errorMessage =
         error instanceof Error ? error.message : String(error)
 
-      sensor.error(compositionId, errorMessage, 'channel-execution-error', {
+      sensor.error(groupId, errorMessage, 'channel-execution-error', {
         channelId: channel.id,
         executionOrder,
         executionTime
@@ -130,111 +130,53 @@ export function useGroup<TPayload = ActionPayload>(
   async function executeChannels(
     payload?: TPayload
   ): Promise<ChannelExecutionResult[]> {
-    const compositionStart = performance.now()
-
-    sensor.log(compositionId, 'call', 'composition-execution-start', {
-      strategy,
-      channelCount: channels.length,
-      hasPayload: payload !== undefined
-    })
-
     try {
+      totalExecutions++
+      const startTime = performance.now()
+
       let results: ChannelExecutionResult[]
 
-      if (strategy === 'sequential') {
-        // Sequential: execute one by one
+      if (strategy === 'parallel') {
+        // Execute all channels in parallel
+        const promises = activeChannels.map((channel, index) =>
+          executeChannel(channel, payload, index)
+        )
+        results = await Promise.all(promises)
+      } else {
+        // Execute channels sequentially
         results = []
-
-        for (let i = 0; i < channels.length; i++) {
-          const result = await executeChannel(channels[i], payload, i)
+        for (let i = 0; i < activeChannels.length; i++) {
+          const result = await executeChannel(activeChannels[i], payload, i)
           results.push(result)
 
-          // Handle fail-fast for sequential
-          if (errorStrategy === 'fail-fast' && !result.ok) {
-            sensor.log(compositionId, 'info', 'fail-fast-triggered', {
-              failedChannel: result.channelId,
-              executedChannels: i + 1
-            })
-
-            // Mark remaining channels as skipped
-            for (let j = i + 1; j < channels.length; j++) {
-              results.push({
-                ok: false,
-                payload: null,
-                message: 'Skipped due to fail-fast',
-                channelId: channels[j].id,
-                channelName: channels[j].name || channels[j].id,
-                executionOrder: j,
-                executionTime: 0,
-                skipped: true
-              })
-            }
+          // Stop on first failure if fail-fast strategy
+          if (!result.ok && errorStrategy === 'fail-fast') {
             break
           }
         }
-      } else {
-        // Parallel: execute all at once
-        const executePromises = channels.map((channel, index) =>
-          executeChannel(channel, payload, index)
-        )
-
-        if (errorStrategy === 'fail-fast') {
-          // Fail fast: if any fails, all fail
-          results = await Promise.all(executePromises)
-        } else {
-          // Continue/collect: wait for all, handle errors gracefully
-          const settledResults = await Promise.allSettled(executePromises)
-          results = settledResults.map((result, index) => {
-            if (result.status === 'fulfilled') {
-              return result.value
-            } else {
-              // Promise itself failed (shouldn't happen since we catch in executeChannel)
-              return {
-                ok: false,
-                payload: null,
-                message: `Promise failed: ${result.reason}`,
-                error: String(result.reason),
-                channelId: channels[index].id,
-                channelName: channels[index].name || channels[index].id,
-                executionOrder: index,
-                executionTime: 0,
-                originalError: result.reason
-              }
-            }
-          })
-        }
       }
 
-      const compositionTime = performance.now() - compositionStart
-      const successful = results.filter(r => r.ok && !r.skipped).length
-      const failed = results.filter(r => !r.ok && !r.skipped).length
-      const skipped = results.filter(r => r.skipped).length
+      lastExecutionTime = performance.now() - startTime
+      successfulExecutions += results.every(r => r.ok) ? 1 : 0
 
-      sensor.log(compositionId, 'success', 'composition-execution-complete', {
-        strategy,
-        totalChannels: channels.length,
-        successful,
-        failed,
-        skipped,
-        compositionTime
+      sensor.log(groupId, 'success', 'group-execution-complete', {
+        channelCount: activeChannels.length,
+        successful: results.filter(r => r.ok).length,
+        failed: results.filter(r => !r.ok).length,
+        executionTime: lastExecutionTime
       })
-
-      // Update stats
-      totalExecutions++
-      if (failed === 0) successfulExecutions++
-      lastExecutionTime = compositionTime
 
       return results
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      sensor.error(compositionId, errorMessage, 'composition-execution-error')
+      sensor.error(groupId, errorMessage, 'group-execution-error')
 
       // Return error results for all channels
       return channels.map((channel, index) => ({
         ok: false,
         payload: null,
-        message: `Composition failed: ${errorMessage}`,
+        message: `Group failed: ${errorMessage}`,
         error: errorMessage,
         channelId: channel.id,
         channelName: channel.name || channel.id,
@@ -250,8 +192,8 @@ export function useGroup<TPayload = ActionPayload>(
 
   // Build simple grouped channel interface
   const groupedChannel: GroupedChannel<TPayload> = {
-    id: compositionId,
-    name: compositionName,
+    id: groupId,
+    name: groupName,
     channels: activeChannels,
 
     call: async (payload?: TPayload) => {
@@ -263,10 +205,7 @@ export function useGroup<TPayload = ActionPayload>(
                 executeChannels(payload),
                 new Promise<never>((_, reject) =>
                   setTimeout(
-                    () =>
-                      reject(
-                        new Error(`Composition timeout after ${timeout}ms`)
-                      ),
+                    () => reject(new Error(`Group timeout after ${timeout}ms`)),
                     timeout
                   )
                 )
@@ -302,7 +241,7 @@ export function useGroup<TPayload = ActionPayload>(
           message,
           metadata: {
             source: 'useGroup',
-            compositionId,
+            groupId,
             strategy,
             errorStrategy,
             channelCount: activeChannels.length,
@@ -315,12 +254,12 @@ export function useGroup<TPayload = ActionPayload>(
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
-        sensor.error(compositionId, errorMessage, 'composition-call-error')
+        sensor.error(groupId, errorMessage, 'group-call-error')
 
         return {
           ok: false,
           payload: null,
-          message: `Composition call failed: ${errorMessage}`,
+          message: `Group call failed: ${errorMessage}`,
           error: errorMessage
         }
       }
@@ -334,14 +273,9 @@ export function useGroup<TPayload = ActionPayload>(
           try {
             return channel.on!(handler)
           } catch (error) {
-            sensor.error(
-              compositionId,
-              String(error),
-              'composition-subscription-error',
-              {
-                channelId: channel.id
-              }
-            )
+            sensor.error(groupId, String(error), 'group-subscription-error', {
+              channelId: channel.id
+            })
             return {
               ok: false,
               message: `Subscription failed for ${channel.id}`,
@@ -352,7 +286,7 @@ export function useGroup<TPayload = ActionPayload>(
 
       const successful = subscriptions.filter(sub => sub.ok)
 
-      sensor.log(compositionId, 'success', 'composition-subscription', {
+      sensor.log(groupId, 'success', 'group-subscription', {
         totalChannels: activeChannels.length,
         subscriptionsAttempted: subscriptions.length,
         subscriptionsSuccessful: successful.length
@@ -368,7 +302,7 @@ export function useGroup<TPayload = ActionPayload>(
           const successfulUnsubscribes =
             unsubscribeResults.filter(Boolean).length
 
-          sensor.log(compositionId, 'info', 'composition-unsubscribe', {
+          sensor.log(groupId, 'info', 'group-unsubscribe', {
             successful: successfulUnsubscribes,
             total: subscriptions.length
           })
@@ -380,23 +314,23 @@ export function useGroup<TPayload = ActionPayload>(
 
     add: (channel: ChannelLike<TPayload>) => {
       if (!channel || typeof channel.call !== 'function' || !channel.id) {
-        throw new Error('Invalid channel provided to composition')
+        throw new Error('Invalid channel provided to group')
       }
 
       activeChannels.push(channel)
 
-      sensor.log(compositionId, 'info', 'channel-added', {
+      sensor.log(groupId, 'info', 'channel-added', {
         channelId: channel.id,
         totalChannels: activeChannels.length
       })
     },
 
-    remove: (channelId: string) => {
+    forget: (channelId: string) => {
       const index = activeChannels.findIndex(c => c.id === channelId)
       if (index !== -1) {
         activeChannels.splice(index, 1)
 
-        sensor.log(compositionId, 'info', 'channel-removed', {
+        sensor.log(groupId, 'info', 'channel-removed', {
           channelId,
           totalChannels: activeChannels.length
         })

@@ -115,33 +115,33 @@ const initialize = async (
     TimeKeeper.resume()
 
     // Register standardized system intelligence
-    try {
-      const intelligenceResults = await registerSystemIntelligence(
-        orchestration
-      )
-      systemOrchestrationIds.push(...intelligenceResults.registered)
+    // try {
+    //   const intelligenceResults = await registerSystemIntelligence(
+    //     orchestration
+    //   )
+    //   systemOrchestrationIds.push(...intelligenceResults.registered)
 
-      if (intelligenceResults.failed.length > 0) {
-        sensor.debug(
-          'initialize',
-          `System intelligence: ${intelligenceResults.registered.length} registered, ${intelligenceResults.failed.length} failed`,
-          {
-            registered: intelligenceResults.registered,
-            failed: intelligenceResults.failed
-          }
-        )
-      } else {
-        sensor.success(
-          'initialize',
-          `Registered ${intelligenceResults.registered.length} system intelligence orchestrations`
-        )
-      }
-    } catch (error) {
-      sensor.debug(
-        'initialize',
-        'System intelligence registration deferred - will be available after system setup'
-      )
-    }
+    //   if (intelligenceResults.failed.length > 0) {
+    //     sensor.debug(
+    //       'initialize',
+    //       `System intelligence: ${intelligenceResults.registered.length} registered, ${intelligenceResults.failed.length} failed`,
+    //       {
+    //         registered: intelligenceResults.registered,
+    //         failed: intelligenceResults.failed
+    //       }
+    //     )
+    //   } else {
+    //     sensor.success(
+    //       'initialize',
+    //       `Registered ${intelligenceResults.registered.length} system intelligence orchestrations`
+    //     )
+    //   }
+    // } catch (error) {
+    //   sensor.debug(
+    //     'initialize',
+    //     'System intelligence registration deferred - will be available after system setup'
+    //   )
+    // }
 
     // // Register system diagnostics for comprehensive testing
     // try {

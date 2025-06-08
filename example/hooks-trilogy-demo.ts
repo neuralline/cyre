@@ -1,4 +1,4 @@
-// example/complete-beautiful-trilogy-demo.ts
+// example/hooks-trilogy-demo.ts
 // The Complete Beautiful Trilogy: useCyre + useBranch + useCompose
 // Shows the difference between cyre.group (management) vs useCompose (execution)
 
