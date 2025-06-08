@@ -102,7 +102,7 @@ const initialize = async (
 ): Promise<{ok: boolean; payload: number; message: string}> => {
   try {
     if (sysInitialize || metricsState._init) {
-      log.critical('system already initialized' + metricsState._init)
+      log.sys('System already initialized')
       return {ok: true, payload: Date.now(), message: MSG.ONLINE}
     }
 
@@ -473,15 +473,18 @@ export const call = async (
                   payloadState.get(action.id) || originalPayload
 
                 // Clear timer reference since we're executing now
-                action._debounceTimer = undefined
-                action._firstDebounceCall = undefined
+                const currentAction = io.get(action.id)
+                if (currentAction) {
+                  currentAction._debounceTimer = undefined
+                  currentAction._firstDebounceCall = undefined
 
-                // Update action state
-                io.set({
-                  ...action,
-                  _debounceTimer: undefined,
-                  _firstDebounceCall: undefined
-                })
+                  // Update action state
+                  io.set({
+                    ...currentAction,
+                    _debounceTimer: undefined,
+                    _firstDebounceCall: undefined
+                  })
+                }
 
                 sensor.log(action.id, 'info', 'debounce-delayed-execution', {
                   executedAfterDelay: true,
@@ -490,7 +493,10 @@ export const call = async (
                 })
 
                 // Execute with the latest payload
-                const result = await processCall(action, latestPayload)
+                const result = await processCall(
+                  currentAction || action,
+                  latestPayload
+                )
 
                 sensor.log(
                   action.id,
@@ -507,38 +513,32 @@ export const call = async (
                 const errorMessage =
                   error instanceof Error ? error.message : String(error)
 
-                // Clean up on error
-                action._debounceTimer = undefined
-                action._firstDebounceCall = undefined
-
-                io.set({
-                  ...action,
-                  _debounceTimer: undefined,
-                  _firstDebounceCall: undefined
-                })
-
                 sensor.error(
                   action.id,
                   errorMessage,
-                  'debounce-execution-error'
-                )
-                log.error(
-                  `Debounce execution failed for ${action.id}: ${errorMessage}`
+                  'debounce-delayed-execution-error'
                 )
 
                 return {
                   ok: false,
-                  payload: undefined,
-                  message: `Debounce execution failed: ${errorMessage}`
+                  payload: null,
+                  message: `Debounce execution failed: ${errorMessage}`,
+                  error: errorMessage
                 }
               }
             },
-            1, // Execute once
+            1, // Execute only once
             timerId
           )
 
           if (timerResult.kind === 'error') {
-            // Clean up on timer creation error
+            sensor.error(
+              action.id,
+              timerResult.error,
+              'debounce-timer-creation-failed'
+            )
+
+            // Clear debounce state on timer creation failure
             action._debounceTimer = undefined
             action._firstDebounceCall = undefined
 
@@ -548,34 +548,30 @@ export const call = async (
               _firstDebounceCall: undefined
             })
 
-            sensor.error(
-              action.id,
-              timerResult.error.message,
-              'debounce-timer-creation'
-            )
             return {
               ok: false,
-              payload: undefined,
-              message: `Debounce timer creation failed: ${timerResult.error.message}`
+              payload: null,
+              message: `Debounce timer creation failed: ${timerResult.error}`,
+              error: timerResult.error
             }
           }
 
-          sensor.log(action.id, 'debounce', 'talent-debounce', {
+          sensor.log(action.id, 'info', 'debounce-delayed-scheduled', {
             debounceMs: action.debounce,
-            maxWait: action.maxWait,
-            firstCallTime: firstCallTime,
             timerId: timerId.slice(-8),
-            subsequentCall: true
+            payloadUpdated: true
           })
 
+          // Return debounced response
           return {
-            ok: false,
-            payload: undefined,
-            message: `Debounced - will execute in ${action.debounce}ms`,
+            ok: true,
+            payload: originalPayload,
+            message: `Debounced - will execute in ${action.debounce}ms with latest payload`,
             metadata: {
               debounced: true,
               delay: action.debounce,
-              isSubsequentCall: true
+              timerId: timerId.slice(-8),
+              executionPath: 'debounce-delayed'
             }
           }
         }
@@ -627,7 +623,10 @@ export const call = async (
 /**
  * Subscription with auto-save
  */
-const on = (actionId: string, handler: (...args: any[]) => any): any => {
+const on = (
+  actionId: string,
+  handler: (...args: any[]) => any
+): CyreResponse | any => {
   const result = subscribe(actionId, handler)
   if (result.ok) {
     sensor.info(actionId, 'Subscription successful', {

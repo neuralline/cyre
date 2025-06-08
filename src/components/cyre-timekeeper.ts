@@ -90,11 +90,11 @@ const createTimerState = (timer: Timer, updates: Partial<Timer>): Timer => ({
 // Duration conversion utility
 const convertDurationToMs = (duration: TimerDuration): number => {
   return (
-    (duration.days || 0) * 24 * 60 * 60 * 1000 +
-    (duration.hours || 0) * 60 * 60 * 1000 +
-    (duration.minutes || 0) * 60 * 1000 +
-    (duration.seconds || 0) * 1000 +
-    (duration.milliseconds || 0)
+    (duration.days ?? 0) * 24 * 60 * 60 * 1000 +
+    (duration.hours ?? 0) * 60 * 60 * 1000 +
+    (duration.minutes ?? 0) * 60 * 1000 +
+    (duration.seconds ?? 0) * 1000 +
+    (duration.milliseconds ?? 0)
   )
 }
 
@@ -510,7 +510,7 @@ export const TimeKeeper = {
       const intervalMs =
         typeof interval === 'number' ? interval : convertDurationToMs(interval)
 
-      if (intervalMs < 0) {
+      if (interval !== undefined && intervalMs < 0) {
         throw new Error('Interval cannot be negative')
       }
       if (delay !== undefined && delay < 0) {
@@ -541,7 +541,7 @@ export const TimeKeeper = {
 
       return {kind: 'ok', value: formation}
     } catch (error) {
-      sensor.error(id, String(error), 'timer-creation')
+      sensor.error(id, String(error), 'TimeKeeper/Keep')
       return {
         kind: 'error',
         error: error instanceof Error ? error : new Error(String(error))

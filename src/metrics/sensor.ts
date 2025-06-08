@@ -137,7 +137,7 @@ export const sensor = {
    */
   log: (
     actionId: ActionId,
-    eventType: any,
+    eventType: MetricEvent,
     message?: string,
     location?: any,
     log: boolean = false,

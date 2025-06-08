@@ -69,10 +69,17 @@ export const useDispatch = async (
         console.log('🔍 NO SUBSCRIBER FOUND:', error)
       }
 
-      sensor.log(action.id, 'no subscriber', 'dispatch-validation', {
-        subscriberFound: false,
-        actionExists: !!io.get(action.id)
-      })
+      sensor.log(
+        action.id,
+        'dispatch',
+        'NO SUBSCRIBER FOUND',
+        'dispatch',
+        true,
+        {
+          subscriberFound: false,
+          actionExists: !!io.get(action.id)
+        }
+      )
 
       return {ok: false, payload: null, message: error}
     }
