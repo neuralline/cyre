@@ -1,11 +1,7 @@
-// demo/test-with-dashboard.ts - UPDATED TEST FILE
+// demo/test-with-dashboard.ts
 // Test file that includes metrics writer
 
 import {cyre, metrics} from '../src/'
-import {
-  startMetricsWriter,
-  stopMetricsWriter
-} from '../src/dev/cyre-metrics-writer'
 
 async function testCyreWithDashboard() {
   console.log('🧪 Testing Cyre with Dashboard Integration')
@@ -16,7 +12,7 @@ async function testCyreWithDashboard() {
     console.log('✅ Cyre initialized:', result.ok)
 
     // Start metrics writer for dashboard
-    await startMetricsWriter(2000) // Update every 2 seconds
+    // Update every 2 seconds
     console.log('📊 Metrics writer started')
 
     // Create test channels
@@ -71,7 +67,6 @@ async function testCyreWithDashboard() {
 process.on('SIGINT', async () => {
   console.log('\n⏹️  Shutting down...')
   try {
-    stopMetricsWriter()
     await cyre.shutdown()
     console.log('✅ Clean shutdown')
     process.exit(0)

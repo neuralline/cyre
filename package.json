@@ -35,7 +35,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "bun run build --watch",
     "build": "bun run clean && bun run build:types && bun run build:esm && bun run build:cjs",
     "build:vite": " bun run clean &&  vite build &&  vite build:types ",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
@@ -51,9 +50,7 @@
     "prepublishOnly": "bun run build && bun run test",
     "size": "bun run build && bundlesize",
     "benchmark": "bun run example/industry-standard-tests.ts",
-    "dashboard": "tsx scripts/dashboard.ts",
-    "dashboard:cli": "tsx src/dev/dashboard-cli.ts",
-    "test-with-dashboard": "concurrently \"npm run dev\" \"sleep 3 && npm run dashboard\""
+    "dev": "tsx scripts/cyre-app-with-metrics.ts"
   },
   "keywords": [
     "reactive",

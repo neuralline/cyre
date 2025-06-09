@@ -32,7 +32,10 @@ import {dev} from './dev/dev'
 import {metrics} from './metrics'
 
 import {registerSystemIntelligence} from './intelligence/system-intelligence'
-import {runDiagnostics} from './intelligence/system-diagnostics'
+import {
+  registerSystemDiagnostics,
+  runDiagnostics
+} from './intelligence/system-diagnostics'
 
 /* 
     Neural Line
@@ -191,6 +194,7 @@ const initialize = async (
 
     log.success('Cyre initialized with system intelligence')
     sensor.success('initialize', 'Cyre initialized with system intelligence')
+    log.debug('System online!')
 
     return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   } catch (error) {
@@ -273,7 +277,7 @@ export const call = async (
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   if (!id || typeof id !== 'string') {
-    sensor.log('unknown', 'error', 'call-validation', {
+    sensor.log('unknown caller', 'call', 'call-validation', 'app/call', true, {
       invalidId: true,
       providedId: id
     })
@@ -286,7 +290,7 @@ export const call = async (
 
   const action = io.get(id)
   if (!action) {
-    sensor.log(id, 'error', 'call-validation', {
+    sensor.debug(id, 'error', 'call-validation', {
       actionNotFound: true,
       actionId: id
     })
@@ -338,13 +342,13 @@ export const call = async (
       sensor.log(
         action.id,
         'blocked',
-        'call/recuperation',
+        'System is recuperating - only critical actions allowed',
+        'app/call/recuperation',
+        true,
         {
           stress: breathing.stress,
           priority: action.priority?.level || 'medium'
-        },
-        'System is recuperating - only critical actions allowed',
-        true
+        }
       )
       return {
         ok: false,
@@ -403,10 +407,17 @@ export const call = async (
         // Execute immediately for first call
         const result = await processCall(action, originalPayload)
 
-        sensor.log(action.id, 'success', 'debounce-first-execution-complete', {
-          success: result.ok,
-          finalMessage: result.message
-        })
+        sensor.log(
+          action.id,
+          'success',
+          'debounce-first-execution-complete',
+          'app/call/debounce',
+          false,
+          {
+            success: result.ok,
+            finalMessage: result.message
+          }
+        )
 
         return result
       } else {
@@ -556,11 +567,18 @@ export const call = async (
             }
           }
 
-          sensor.log(action.id, 'info', 'debounce-delayed-scheduled', {
-            debounceMs: action.debounce,
-            timerId: timerId.slice(-8),
-            payloadUpdated: true
-          })
+          sensor.log(
+            action.id,
+            'info',
+            'debounce-delayed-scheduled',
+            'app/call/debounce',
+            false,
+            {
+              debounceMs: action.debounce,
+              timerId: timerId.slice(-8),
+              payloadUpdated: true
+            }
+          )
 
           // Return debounced response
           return {
@@ -621,28 +639,6 @@ export const call = async (
 }
 
 /**
- * Subscription with auto-save
- */
-const on = (
-  actionId: string,
-  handler: (...args: any[]) => any
-): CyreResponse | any => {
-  const result = subscribe(actionId, handler)
-  if (result.ok) {
-    sensor.info(actionId, 'Subscription successful', {
-      subscriptionSuccess: true,
-      timestamp: Date.now()
-    })
-  } else {
-    sensor.error(actionId, result.message, 'subscription-failed', {
-      subscriptionFailed: true,
-      reason: result.message
-    })
-  }
-  return result
-}
-
-/**
  * Forget action with group and orchestration cleanup
  */
 const forget = (id: string): boolean => {
@@ -684,7 +680,7 @@ const shutdown = (): void => {
     sensor.log('system', 'critical', 'system-shutdown', {
       timestamp: Date.now()
     })
-    log.critical('initiating system shutdown')
+    log.sys('Initiating system shutdown')
 
     // Stop system orchestrations
     systemOrchestrationIds.forEach(id => {
@@ -692,13 +688,13 @@ const shutdown = (): void => {
     })
 
     clear()
-
+    log.debug('System offline!')
     if (typeof process !== 'undefined' && process.exit) {
       process.exit(0)
     }
   } catch (error) {
     log.critical(`Shutdown failed: ${error}`)
-    sensor.critical('system', String(error), 'system-shutdown')
+    sensor.critical('shutdown', 'System-shutdown failed')
   }
 }
 
@@ -753,7 +749,7 @@ export const cyre = Object.freeze({
   // Core methods
   initialize,
   action,
-  on,
+  on: subscribe,
   call,
   forget,
   clear,

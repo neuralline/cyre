@@ -64,7 +64,7 @@ export type MiddlewareFunction = (...args: any[]) => any
 
 export interface ISubscriber {
   id: string
-  fn: any
+  handler: (payload: any) => CyreResponse
 }
 
 export interface IMiddleware {

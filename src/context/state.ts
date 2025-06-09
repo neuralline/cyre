@@ -23,7 +23,7 @@ import {createStore} from './create-store'
 export type MiddlewareFunction = (action: IO) => Promise<void>
 
 export interface IMiddleware extends ISubscriber {
-  fn: MiddlewareFunction
+  handler: MiddlewareFunction
 }
 
 export interface StateActionMetrics {
@@ -279,7 +279,7 @@ export const io = {
 // Keep existing subscribers and timeline exports (unchanged)
 export const subscribers = {
   add: (subscriber: ISubscriber): void => {
-    if (!subscriber?.id || !subscriber?.fn) {
+    if (!subscriber?.id || !subscriber?.handler) {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
@@ -297,7 +297,7 @@ export const subscribers = {
 
 export const middlewares = {
   add: (middleware: IMiddleware): void => {
-    if (!middleware?.id || typeof middleware.fn !== 'function') {
+    if (!middleware?.id || typeof middleware.handler !== 'function') {
       throw new Error('Invalid middleware format')
     }
 

@@ -63,7 +63,7 @@ export const cyreExecute = async (
         payload: result.payload
       }
 
-      sensor.log(action.id, result.id, 'intralink')
+      sensor.log(action.id, 'execution', result.id, 'intralink')
     }
 
     return {

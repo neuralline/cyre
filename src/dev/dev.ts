@@ -1,7 +1,7 @@
 // src/dev/dev.ts
 // Development utilities and debugging tools
 
-import {metrics} from '../metrics/integration'
+import {metrics} from '../metrics/'
 import {orchestration} from '../orchestration/orchestration-engine'
 import {metricsState} from '../context/metrics-state'
 import {call} from '../app'

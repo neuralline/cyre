@@ -58,7 +58,7 @@ export const useDispatch = async (
       console.log('🔍 SUBSCRIBER CHECK:', {
         subscriberFound: !!subscriber,
         subscriberId: subscriber?.id,
-        hasFunction: typeof subscriber?.fn === 'function'
+        hasFunction: typeof subscriber?.handler === 'function'
       })
     }
 
@@ -97,7 +97,7 @@ export const useDispatch = async (
         payload: currentPayload, // Pass exact value, including falsy values
         timeOfCreation: startTime
       },
-      subscriber.fn
+      subscriber.handler
     )
 
     if (isTestAction) {

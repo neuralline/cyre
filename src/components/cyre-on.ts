@@ -3,8 +3,13 @@
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers} from '../context/state'
-import type {EventHandler, SubscriptionResponse} from '../types/core'
+import type {
+  EventHandler,
+  ISubscriber,
+  SubscriptionResponse
+} from '../types/core'
 import {log} from './cyre-log'
+import {sensor} from '../metrics'
 
 /* 
 
@@ -17,11 +22,6 @@ import {log} from './cyre-log'
       4. Multiple subscription handling
 
 */
-
-interface Subscriber {
-  id: string
-  fn: EventHandler
-}
 
 interface SubscriptionError {
   code: string
@@ -40,21 +40,21 @@ type SubscriptionResult = {
  * Validate subscriber configuration
  */
 const validateSubscriber = (
-  actionId: string,
-  fn: EventHandler
+  id: string,
+  handler: EventHandler
 ): SubscriptionResult => {
-  if (!actionId || typeof actionId !== 'string') {
+  if (!id || typeof id !== 'string') {
     return {
       ok: false,
       message: MSG.CHANNEL_INVALID_TYPE,
       error: {
         code: 'INVALID_ACTION_ID',
-        message: `Action ID must be a non-empty string, received: ${actionId}`
+        message: `Action ID must be a non-empty string, received: ${id}`
       }
     }
   }
 
-  if (typeof fn !== 'function') {
+  if (typeof handler !== 'function') {
     return {
       ok: false,
       message: MSG.SUBSCRIPTION_INVALID_HANDLER,
@@ -68,7 +68,7 @@ const validateSubscriber = (
   return {
     ok: true,
     message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
-    subscriber: {id: actionId.trim(), fn}
+    subscriber: {id: id.trim(), handler: handler}
   }
 }
 
@@ -76,11 +76,11 @@ const validateSubscriber = (
  * Add single subscriber with proper validation
  */
 const addSingleSubscriber = (
-  actionId: string,
-  fn: EventHandler
+  id: string,
+  handler: EventHandler
 ): SubscriptionResponse => {
   try {
-    const validation = validateSubscriber(actionId, fn)
+    const validation = validateSubscriber(id, handler)
     if (!validation.ok || !validation.subscriber) {
       log.error(validation.error || validation.message)
       return {
@@ -133,11 +133,11 @@ const addSingleSubscriber = (
  * Add multiple subscribers
  */
 const addMultipleSubscribers = (
-  subscriberList: Subscriber[]
+  subscriberList: ISubscriber[]
 ): SubscriptionResponse => {
   try {
     const results = subscriberList.map(subscriber => {
-      if (!subscriber.id || !subscriber.fn) {
+      if (!subscriber.id || !subscriber.handler) {
         log.error(`Invalid subscriber format: ${JSON.stringify(subscriber)}`)
         return false
       }
@@ -189,8 +189,8 @@ const addMultipleSubscribers = (
  * FIXED: Enhanced subscribe function with better integration
  */
 export const subscribe = (
-  actionIdOrList: string | Subscriber[],
-  fn?: EventHandler
+  id: string | ISubscriber[],
+  handler?: EventHandler
 ): SubscriptionResponse => {
   // Check if system is locked
   if (metricsState.isLocked()) {
@@ -202,18 +202,54 @@ export const subscribe = (
   }
 
   // Handle array of subscribers
-  if (Array.isArray(actionIdOrList)) {
-    const result = addMultipleSubscribers(actionIdOrList)
+  if (Array.isArray(id)) {
+    const result = addMultipleSubscribers(id)
+    if (result.ok) {
+      sensor.debug('addMultipleSubscribers', 'Subscription successful', {
+        subscriptionSuccess: true,
+        timestamp: Date.now()
+      })
+    } else {
+      sensor.error(
+        'addMultipleSubscribers',
+        result.message,
+        'subscription-failed',
+        {
+          subscriptionFailed: true,
+          reason: result
+        }
+      )
+    }
     return result
   }
 
   // Handle single subscriber - CRITICAL: Use action ID, not type
-  if (typeof actionIdOrList === 'string' && fn) {
-    const result = addSingleSubscriber(actionIdOrList, fn)
+  if (typeof id === 'string' && handler) {
+    const result = addSingleSubscriber(id, handler)
+    if (result.ok) {
+      sensor.debug('addSingleSubscriber', 'Subscription successful', {
+        subscriptionSuccess: true,
+        timestamp: Date.now()
+      })
+    } else {
+      sensor.error(
+        'addSingleSubscriber',
+        result.message,
+        'subscription-failed',
+        {
+          subscriptionFailed: true,
+          reason: result
+        }
+      )
+    }
     return result
   }
 
   // Invalid parameters
+  sensor.error(id, MSG.SUBSCRIPTION_INVALID_PARAMS, '.on/subscribe', {
+    subscriptionFailed: true,
+    reason: 'unknown fields'
+  })
   log.error(MSG.SUBSCRIPTION_INVALID_PARAMS)
   return {
     ok: false,
@@ -224,7 +260,7 @@ export const subscribe = (
 /**
  * Get subscriber by action ID (for pipeline integration)
  */
-export const getSubscriber = (actionId: string): Subscriber | undefined => {
+export const getSubscriber = (actionId: string): ISubscriber | undefined => {
   return subscribers.get(actionId)
 }
 
@@ -249,7 +285,7 @@ export const removeSubscriber = (actionId: string): boolean => {
 /**
  * Get all active subscribers
  */
-export const getAllSubscribers = (): Subscriber[] => {
+export const getAllSubscribers = (): ISubscriber[] => {
   return subscribers.getAll()
 }
 

@@ -86,7 +86,7 @@ const setupGroupMiddleware = (
 
   middlewareFns.forEach((fn, index) => {
     const middlewareId = `${groupId}-middleware-${index}`
-    middlewares.add({id: middlewareId, fn})
+    middlewares.add({id: middlewareId, handler: fn})
     middlewareIds.push(middlewareId)
   })
 

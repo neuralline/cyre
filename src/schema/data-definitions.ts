@@ -291,15 +291,64 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   repeat: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (!isNumber(value) || value < 1) {
+    // Handle boolean values for infinite repeat control
+    if (isBoolean(value)) {
+      if (value === true) {
+        return {ok: true, data: value, talentName: 'interval'}
+      }
+      // false disables repeat
+      return {ok: true, data: false}
+    }
+
+    // Handle number values
+    if (!isNumber(value)) {
       return {
         ok: false,
-        error: 'Repeat must be positive number',
-        suggestions: ['Use 5 to repeat 5 times']
+        error: 'Repeat must be number greater than 1 or boolean',
+        suggestions: [
+          'Use number > 1 for specific repeat count: repeat: 5',
+          'Use true for infinite repeats: repeat: true',
+          'Use false to disable repeats: repeat: false',
+          'Examples: repeat: 3 (runs 3 times), repeat: 10 (runs 10 times)',
+          'For scheduling: combine with interval for timed repeats',
+          'For infinite: repeat: true with interval: 5000 (every 5 seconds)',
+          'Note: repeat: 1 means run once (same as no repeat)',
+          'Note: repeat: 0 is invalid and will block execution'
+        ]
       }
     }
 
-    return {ok: true, data: value}
+    // Numbers must be greater than 1 (reject 0 and 1)
+    if (value < 1) {
+      return {
+        ok: false,
+        error: 'Repeat cannot be negative or zero',
+        suggestions: [
+          'Use number greater than 1: repeat: 2, repeat: 5, repeat: 10',
+          'Use true for infinite repeats: repeat: true',
+          'Use false to disable: repeat: false',
+          'Zero repeats block execution - use false instead',
+          'Negative numbers are invalid for repeat counts'
+        ]
+      }
+    }
+
+    if (value === 1) {
+      return {
+        ok: false,
+        error: 'Repeat value of 1 is redundant',
+        suggestions: [
+          'Remove repeat property - actions run once by default',
+          'Use repeat: 2 or higher for multiple executions',
+          'Use repeat: true for infinite repeats with interval',
+          'Use repeat: false to explicitly disable repeats',
+          'Combine with interval for timed execution: {repeat: 5, interval: 1000}'
+        ]
+      }
+    }
+
+    // Valid number greater than 1
+    return {ok: true, data: value, talentName: 'interval'}
   },
 
   // Additional fields (pass-through)
