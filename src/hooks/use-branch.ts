@@ -3,7 +3,7 @@
 // No parent/sibling access, strict hierarchy, cascade destruction
 
 import type {Branch, BranchConfig, BranchSetup} from '../types/hooks'
-import type {IO, ActionPayload} from '../types/core'
+import type {IO} from '../types/core'
 import {cyre} from '../app'
 import {sensor} from '../metrics'
 
@@ -24,27 +24,29 @@ export interface UseBranchConfig extends BranchConfig {
  * - Cascade destruction when parent destroyed
  */
 export function useBranch(
-  configOrCyre: UseBranchConfig | typeof cyre = {},
+  instance: UseBranchConfig | typeof cyre = {},
   config: UseBranchConfig = {}
 ): Branch {
   let finalConfig: UseBranchConfig
   let targetCyre: typeof cyre
 
   // Handle overloaded parameters
-  if (
-    typeof configOrCyre === 'function' ||
-    (configOrCyre && 'action' in configOrCyre)
-  ) {
-    targetCyre = configOrCyre as typeof cyre
+  if (typeof instance === 'function' || (instance && 'action' in instance)) {
+    targetCyre = instance as typeof cyre
     finalConfig = config
   } else {
     targetCyre = cyre // Default to main cyre
-    finalConfig = configOrCyre as UseBranchConfig
+    finalConfig = instance as UseBranchConfig
   }
 
   // Generate branch identifiers
   const branchId = finalConfig.id || `branch-${crypto.randomUUID().slice(0, 8)}`
 
+  if (branchId.includes('/') || branchId.includes('\\')) {
+    throw new Error(
+      `Branch ID "${branchId}" cannot contain path separators. Use clean IDs like "sensor" or "user-validator"`
+    )
+  }
   // Build path from parent instance + branch ID only (never uses name)
   const path = finalConfig.parent
     ? `${finalConfig.parent.path}/${branchId}`
@@ -135,11 +137,6 @@ export function useBranch(
     action: (actionConfig: IO) => {
       try {
         // Validate clean ID (no slashes)
-        if (actionConfig.id.includes('/') || actionConfig.id.includes('\\')) {
-          throw new Error(
-            `Channel ID "${actionConfig.id}" cannot contain path separators. Use clean IDs like "sensor" or "user-validator"`
-          )
-        }
 
         // Enhanced config with branch context
         const enhancedConfig: IO = {
@@ -222,11 +219,7 @@ export function useBranch(
         // Only allow parent → child calls
         if (target.includes('/')) {
           // Ensure it's a child path
-          if (!target.startsWith(path + '/')) {
-            throw new Error(
-              'Cross-branch communication not allowed. Only parent → child calls permitted.'
-            )
-          }
+
           targetPath = target
         } else {
           // Local channel call
@@ -235,17 +228,24 @@ export function useBranch(
 
         const result = await targetCyre.call(targetPath, payload)
 
-        sensor.log(branchId, 'success', 'branch-call', {
-          target,
-          targetPath,
-          branchPath: path
-        })
+        sensor.log(
+          branchId,
+          'success',
+          'call from a branch',
+          'use-branch',
+          false,
+          {
+            target,
+            targetPath,
+            branchPath: path
+          }
+        )
 
         return result
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
-        sensor.error(branchId, errorMessage, 'branch-call-error')
+        sensor.error(branchId, errorMessage, 'use-branch')
         return {
           ok: false,
           payload: null,
@@ -260,7 +260,7 @@ export function useBranch(
       try {
         return getBranchAction(channelId)
       } catch (error) {
-        sensor.error(branchId, 'Get failed', {channelId, error})
+        sensor.error(branchId, 'Instance get failed', 'use-branch')
         return undefined
       }
     },

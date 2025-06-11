@@ -17,6 +17,8 @@ interface AdvancedBenchmarkResults {
   }
 }
 
+await cyre.initialize()
+
 // Memory measurement helper
 const measureMemory = (): number => {
   if (typeof process !== 'undefined' && process.memoryUsage) {

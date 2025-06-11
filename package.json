@@ -50,7 +50,7 @@
     "prepublishOnly": "bun run build && bun run test",
     "size": "bun run build && bundlesize",
     "benchmark": "bun run example/industry-standard-tests.ts",
-    "dev": "tsx scripts/cyre-app-with-metrics.ts"
+    "dev": "tsx scripts/cyre-server.ts"
   },
   "keywords": [
     "reactive",

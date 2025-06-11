@@ -94,6 +94,28 @@ export type ProtectionFn = (ctx: {
   | {pass: true; payload?: ActionPayload}
   | {pass: false; reason: string; delayed?: boolean; duration?: number}
 
+export interface StateActionMetrics {
+  lastExecutionTime: number
+  executionCount: number
+  intervalId?: NodeJS.Timeout
+  errors: Array<{
+    timestamp: number
+    message: string
+  }>
+}
+
+export interface BranchStore {
+  id: string // Clean branch ID
+  path: string // Full hierarchical path
+  parentPath?: string // Foreign key to parent branch
+  depth: number // Hierarchy depth for optimization
+  createdAt: number
+  isActive: boolean
+
+  // Metadata for optimization
+  channelCount: number // Cache for quick stats
+  childCount: number // Cache for quick stats
+}
 /**
  * IO interface - Enhanced action configuration with channel organization fields
  */

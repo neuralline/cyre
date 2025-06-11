@@ -1,5 +1,5 @@
-// src/types/metrics-server.ts
-// Type definitions for metrics server
+// src/dev/server-types.ts
+// Type interface for metrics server
 
 /*
 
@@ -173,4 +173,222 @@ export interface SystemAnalysis {
     powered_by: string
     connections: number
   }
+}
+
+// src/types/dashboard.ts
+// Live dashboard data structure - only real metrics from Cyre
+
+export interface SystemAnalysis {
+  readonly timestamp: number
+  readonly timeWindow: number
+  readonly system: SystemMetrics
+  readonly pipeline: PipelineAnalysis
+  readonly performance: PerformanceAnalysis
+  readonly health: HealthAnalysis
+  readonly channels: ChannelAnalysis[]
+  readonly events: RecentEvents
+  readonly anomalies: AnomalyAnalysis
+  readonly insights: InsightAnalysis
+  readonly recommendations: string[]
+}
+
+export interface SystemMetrics {
+  readonly totalCalls: number
+  readonly totalExecutions: number
+  readonly totalErrors: number
+  readonly callRate: number
+  readonly lastCallTime: number
+  readonly startTime: number
+  readonly uptime: number
+  readonly activeChannels: number
+  readonly memory: MemoryMetrics
+  readonly performance: SystemPerformance
+}
+
+export interface MemoryMetrics {
+  readonly eventCount: number
+  readonly channelCount: number
+  readonly maxEvents: number
+  readonly memoryUsage: number // bytes
+}
+
+export interface SystemPerformance {
+  readonly avgCallRate: number // calls per second over time window
+  readonly peakCallRate: number
+  readonly systemLoad: number // 0-1 based on call rate vs capacity
+}
+
+export interface PipelineAnalysis {
+  readonly totalCalls: number
+  readonly completedCalls: number
+  readonly failedCalls: number
+  readonly stuckCalls: number
+  readonly avgDuration: number
+  readonly efficiency: number
+  readonly bottlenecks: Bottleneck[]
+  readonly flowHealth: 'healthy' | 'degraded' | 'critical'
+  readonly throughputTrend: 'improving' | 'stable' | 'degrading'
+}
+
+export interface Bottleneck {
+  readonly channelId: string
+  readonly count: number
+  readonly avgDuration: number
+  readonly impactScore: number
+}
+
+export interface PerformanceAnalysis {
+  readonly avgLatency: number
+  readonly p95Latency: number
+  readonly p99Latency: number
+  readonly throughput: number
+  readonly successRate: number
+  readonly errorRate: number
+  readonly degradations: PerformanceDegradation[]
+  readonly trends: 'improving' | 'stable' | 'degrading'
+  readonly latencyDistribution: LatencyBucket[]
+}
+
+export interface PerformanceDegradation {
+  readonly channelId: string
+  readonly type: 'latency' | 'throughput' | 'errors'
+  readonly severity: 'minor' | 'major' | 'critical'
+  readonly current: number
+  readonly expected: number
+  readonly impact: number
+}
+
+export interface LatencyBucket {
+  readonly range: string // "0-10ms", "10-50ms", etc
+  readonly count: number
+  readonly percentage: number
+}
+
+export interface HealthAnalysis {
+  readonly overall: 'healthy' | 'degraded' | 'critical'
+  readonly score: number // 0-100
+  readonly factors: HealthFactors
+  readonly issues: string[]
+  readonly criticalAlerts: number
+  readonly trends: HealthTrend[]
+}
+
+export interface HealthFactors {
+  readonly availability: number // 0-1
+  readonly performance: number // 0-1
+  readonly reliability: number // 0-1
+  readonly efficiency: number // 0-1
+}
+
+export interface HealthTrend {
+  readonly factor: keyof HealthFactors
+  readonly trend: 'improving' | 'stable' | 'degrading'
+  readonly changeRate: number
+}
+
+export interface ChannelAnalysis {
+  readonly id: string
+  readonly metrics: ChannelMetrics
+  readonly status: 'healthy' | 'warning' | 'critical' | 'inactive'
+  readonly issues: string[]
+  readonly latencyTrend: 'improving' | 'degrading' | 'stable'
+  readonly protectionStats: ProtectionStats
+  readonly recommendations: string[]
+}
+
+export interface ChannelMetrics {
+  readonly id: string
+  readonly calls: number
+  readonly executions: number
+  readonly errors: number
+  readonly lastExecution: number
+  readonly averageLatency: number
+  readonly successRate: number
+  readonly errorRate: number
+  readonly protectionEvents: ProtectionEvents
+}
+
+export interface ProtectionEvents {
+  readonly throttled: number
+  readonly debounced: number
+  readonly blocked: number
+  readonly skipped: number
+}
+
+export interface ProtectionStats {
+  readonly protectionRatio: number // protections / total calls
+  readonly executionRatio: number // executions / total calls
+  readonly effectiveness: number // 0-1
+  readonly status:
+    | 'optimal'
+    | 'over_protected'
+    | 'under_protected'
+    | 'problematic'
+}
+
+export interface RecentEvents {
+  readonly events: EventSummary[]
+  readonly patterns: EventPattern[]
+  readonly eventRate: number // events per minute
+  readonly errorEventRate: number
+}
+
+export interface EventSummary {
+  readonly id: string
+  readonly timestamp: number
+  readonly channelId: string
+  readonly type: string
+  readonly duration?: number
+  readonly status: 'success' | 'error' | 'timeout'
+}
+
+export interface EventPattern {
+  readonly pattern: string
+  readonly frequency: number
+  readonly channels: string[]
+  readonly avgDuration: number
+  readonly successRate: number
+}
+
+export interface AnomalyAnalysis {
+  readonly detected: boolean
+  readonly anomalies: Anomaly[]
+  readonly patterns: AnomalyPattern[]
+  readonly confidence: number
+}
+
+export interface Anomaly {
+  readonly type: 'statistical' | 'pattern' | 'sequence' | 'timing'
+  readonly channelId: string
+  readonly severity: 'low' | 'medium' | 'high'
+  readonly description: string
+  readonly confidence: number
+  readonly timestamp: number
+}
+
+export interface AnomalyPattern {
+  readonly name: string
+  readonly channels: string[]
+  readonly frequency: number
+  readonly severity: 'low' | 'medium' | 'high'
+}
+
+export interface InsightAnalysis {
+  readonly totalActivity: number
+  readonly activeChannels: number
+  readonly peakThroughput: number
+  readonly systemEfficiency: number
+  readonly topPerformers: string[]
+  readonly problemChannels: string[]
+  readonly unusedChannels: string[]
+  readonly resourceUtilization: number
+  readonly optimizationOpportunities: OptimizationOpportunity[]
+}
+
+export interface OptimizationOpportunity {
+  readonly type: 'performance' | 'reliability' | 'efficiency'
+  readonly channelId: string
+  readonly description: string
+  readonly estimatedImpact: string
+  readonly priority: 'low' | 'medium' | 'high'
 }

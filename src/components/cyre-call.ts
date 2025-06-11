@@ -18,47 +18,12 @@ import type {IO, ActionPayload, CyreResponse} from '../types/core'
 
 */
 
-interface CachedActionData {
-  _hasFastPath: boolean
-  _hasProcessing: boolean
-  _hasScheduling: boolean
-  _processingTalents: string[]
-  isTestAction: boolean
-}
-
-/**
- * Cache action data for performance
- */
-const getCachedActionData = (action: IO): CachedActionData => {
-  return {
-    _hasFastPath: action._hasFastPath ?? false,
-    _hasProcessing: action._hasProcessing ?? false,
-    _hasScheduling: action._hasScheduling ?? false,
-    _processingTalents: action._processingTalents ?? [],
-    isTestAction: action.id.includes('test') || action.id.includes('Test')
-  }
-}
-
-/**
- * Fast path execution (no protections, processing, or scheduling)
- */
-const executeFastPath = async (
-  action: IO,
-  payload: ActionPayload | undefined,
-  cachedData: CachedActionData
-): Promise<CyreResponse> => {
-  const result = await useDispatch(action, payload)
-
-  return result
-}
-
 /**
  * Processing pipeline execution with optimizations
  */
 const executeProcessingPath = async (
   action: IO,
-  payload: ActionPayload | undefined,
-  cachedData: CachedActionData
+  payload: ActionPayload | undefined
 ): Promise<CyreResponse> => {
   const currentPayload = payload ?? action.payload
 
@@ -68,7 +33,7 @@ const executeProcessingPath = async (
   if (!pipelineResult.ok) {
     sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
       reason: pipelineResult.message,
-      talents: cachedData._processingTalents
+      talents: action._processingTalents
     })
 
     return {
@@ -85,10 +50,9 @@ const executeProcessingPath = async (
 /**
  * Scheduling path execution with proper infinite repeats handling
  */
-const executeSchedulingPath = async (
+const processSchedule = async (
   action: IO,
-  payload: ActionPayload | undefined,
-  cachedData: CachedActionData
+  payload: ActionPayload | undefined
 ): Promise<CyreResponse> => {
   const currentPayload = payload ?? action.payload
 
@@ -116,15 +80,10 @@ const executeSchedulingPath = async (
     // Create execution callback that dispatches the action directly
     const executeCallback = async () => {
       try {
-        sensor.log(action.id, 'info', 'scheduled-execution', {
-          timerId: timerId,
-          timestamp: Date.now()
-        })
-
         // Execute through dispatch to trigger the registered handler
         const result = await useDispatch(action, currentPayload)
 
-        if (!result.ok && cachedData.isTestAction) {
+        if (!result.ok && action.isTestAction) {
           log.error(
             `🔍 Scheduled execution failed for ${action.id}: ${result.message}`
           )
@@ -151,11 +110,11 @@ const executeSchedulingPath = async (
 
     // Schedule with TimeKeeper - key fix for infinite repeats
     const timerResult = TimeKeeper.keep(
-      duration,
+      action.duration,
       executeCallback,
-      repeat, // This is the key - pass actualRepeat correctly
+      action.repeat, // This is the key - pass actualRepeat correctly
       timerId,
-      delay
+      action.delay
     )
 
     if (timerResult.kind === 'error') {
@@ -215,33 +174,32 @@ export async function processCall(
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
   // Get cached action data to avoid repeated property access
-  const cachedData = getCachedActionData(action)
 
   // Minimal sensor logging for performance
   sensor.log(action.id, 'call', 'call-processing', {
     timestamp: Date.now(),
     hasPayload: payload !== undefined,
-    path: cachedData._hasFastPath
+    path: action._hasFastPath
       ? 'fast'
-      : cachedData._hasScheduling
+      : action._hasScheduling
       ? 'scheduling'
       : 'processing'
   })
 
   try {
     // Execution path selection with proper priority
-    if (cachedData._hasScheduling) {
+    if (action._hasScheduling) {
       // Scheduling path has highest priority for timing-based actions
 
-      return await executeSchedulingPath(action, payload, cachedData)
-    } else if (cachedData._hasProcessing) {
+      return await processSchedule(action, payload)
+    } else if (action._hasProcessing) {
       // Processing path for talent pipeline
 
-      return await executeProcessingPath(action, payload, cachedData)
+      return await executeProcessingPath(action, payload)
     } else {
       // Fast path for simple actions
 
-      return await executeFastPath(action, payload, cachedData)
+      return await useDispatch(action, payload)
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)

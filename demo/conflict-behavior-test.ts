@@ -377,6 +377,7 @@ const testScheduledConflicts = async () => {
   // Action with interval (known to cause conflicts)
   cyre.action({
     id: 'scheduled-conflict-test',
+    repeat: 6,
     interval: 500 // Every 500ms
   })
 

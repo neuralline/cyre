@@ -13,9 +13,8 @@ import {sensor} from '../metrics'
  */
 
 export function useCyre<TPayload = ActionPayload>(
-  configOrId: string | UseCyreConfig<TPayload>,
-  configOrInstance?: UseCyreConfig<TPayload> | CyreInstance,
-  instance?: CyreInstance
+  instance?: CyreInstance,
+  configOrId: string | UseCyreConfig<TPayload>
 ): CyreChannel<TPayload> {
   let finalConfig: UseCyreConfig<TPayload>
   let targetInstance: CyreInstance
@@ -25,25 +24,25 @@ export function useCyre<TPayload = ActionPayload>(
   if (typeof configOrId === 'string') {
     channelId = configOrId
 
-    if (configOrInstance && 'action' in configOrInstance) {
+    if (instance && 'action' in instance) {
       // useCyre(id, instance) - config is empty
       finalConfig = {}
-      targetInstance = configOrInstance as CyreInstance
+      targetInstance = instance as CyreInstance
     } else {
       // useCyre(id, config) or useCyre(id, config, instance)
-      finalConfig = (configOrInstance as UseCyreConfig<TPayload>) || {}
+      finalConfig = (instance as UseCyreConfig<TPayload>) || {}
       targetInstance = instance || cyre
     }
   } else {
     // useCyre(config) or useCyre(config, instance)
     finalConfig = configOrId
     channelId =
-      finalConfig.channelId ||
+      finalConfig.id ||
       finalConfig.name ||
       `channel-${crypto.randomUUID().slice(0, 8)}`
 
-    if (configOrInstance && 'action' in configOrInstance) {
-      targetInstance = configOrInstance as CyreInstance
+    if (instance && 'action' in instance) {
+      targetInstance = instance as CyreInstance
     } else {
       targetInstance = cyre // Default to main cyre
     }
@@ -101,7 +100,6 @@ export function useCyre<TPayload = ActionPayload>(
   if (!registrationResult.ok) {
     const error = `Failed to create channel: ${registrationResult.message}`
     sensor.error(channelId, error, 'useCyre-registration-failed')
-    throw new Error(error)
   }
 
   sensor.log(channelId, 'success', 'useCyre-created', {

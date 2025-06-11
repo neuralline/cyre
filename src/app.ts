@@ -719,6 +719,7 @@ const clear = (): void => {
     timeline.clear()
     metrics.reset()
     metricsState.reset()
+    payloadState.clear()
 
     // Clear all groups
     groupOperations.getAll().forEach(group => {
@@ -773,8 +774,9 @@ export const cyre = Object.freeze({
 
   // State methods
   hasChanged: (id: string, payload: ActionPayload): boolean =>
-    io.hasChanged(id, payload),
-  getPrevious: (id: string): ActionPayload | undefined => io.getPrevious(id),
+    payloadState.hasChanged(id, payload),
+  getPrevious: (id: string): ActionPayload | undefined =>
+    payloadState.getPrevious(id),
   updatePayload: (id: string, payload: ActionPayload): void =>
     payloadState.set(id, payload),
 
@@ -899,32 +901,6 @@ export const cyre = Object.freeze({
       successRate: analysis.health.factors.successRate,
       errorRate: analysis.health.factors.errorRate,
       averageLatency: analysis.health.factors.latency
-    }
-  },
-  // Timer utilities
-  setTimer: (
-    duration: number,
-    callback: () => void,
-    timerId: string
-  ): {ok: boolean; message?: string} => {
-    try {
-      const result = TimeKeeper.keep(duration, callback, 1, timerId)
-      return result.kind === 'ok'
-        ? {ok: true, message: 'TimeKeeper'}
-        : {ok: false, message: 'Forget'}
-    } catch (error) {
-      log.error(`Failed to set timer: ${error}`)
-      return {ok: false, message: String(error)}
-    }
-  },
-
-  clearTimer: (timerId: string): boolean => {
-    try {
-      TimeKeeper.forget(timerId)
-      return true
-    } catch (error) {
-      log.error(`Failed to clear timer ${timerId}: ${error}`)
-      return false
     }
   },
 

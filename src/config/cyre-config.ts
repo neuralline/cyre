@@ -90,74 +90,179 @@ export const PERFORMANCE = {
 } as const
 
 export const MSG = {
-  // System Status
-  OFFLINE: '@cyre: System is offline',
-  ONLINE: '@cyre: System is online',
-  WELCOME: '@cyre: Welcome! How can I assist you?',
-  SYSTEM_LOCKED: 'System is locked: cannot add new channels or subscribers',
-  SYSTEM_LOCKED_CHANNELS: 'Cannot add new channels: system is locked',
-  SYSTEM_LOCKED_SUBSCRIBERS: 'Cannot add new subscribers: system is locked',
+  // System Status - British AI Assistant Style
+  OFFLINE: 'Cyre offline - systems temporarily unavailable',
+  ONLINE: 'Cyre online! at your service',
+  WELCOME: 'Cyre ready! how may I assist you today?',
+  SYSTEM_LOCKED:
+    'System temporarily locked - please wait a moment while I reorganize',
+  SYSTEM_LOCKED_CHANNELS:
+    'Unable to create new channels at the moment - system is reorganizing',
+  SYSTEM_LOCKED_SUBSCRIBERS:
+    'Unable to add new subscriptions currently - please try again shortly',
 
-  // Performance warnings with action pipeline terminology
-  SLOW_LISTENER_DETECTED: 'Slow listener detected',
-  SLOW_ACTION_PIPELINE: 'Slow action pipeline detected',
-  HIGH_PIPELINE_OVERHEAD: 'High action pipeline overhead detected',
-  INEFFICIENT_PIPELINE_RATIO: 'Inefficient action pipeline ratio detected',
-  PERFORMANCE_DEGRADATION: 'Performance degradation detected',
-  AUTO_OPTIMIZATION_SUGGESTION: 'Consider optimizing this action pipeline',
+  // Performance Messages - Polite but Informative
+  SLOW_LISTENER_DETECTED:
+    'Performance notice - a task is taking longer than expected',
+  SLOW_ACTION_PIPELINE:
+    'Processing notice - workflow is running slower than usual',
+  HIGH_PIPELINE_OVERHEAD:
+    'Efficiency notice - system overhead detected, optimizing...',
+  INEFFICIENT_PIPELINE_RATIO:
+    'Performance advisory - task coordination could be improved',
+  PERFORMANCE_DEGRADATION: 'System notice - performance adjustment in progress',
+  AUTO_OPTIMIZATION_SUGGESTION:
+    'Recommendation - this process could benefit from optimization',
 
-  // Action Related
-  ACTION_PREPARE_FAILED: 'Failed to prepare action: invalid configuration',
-  ACTION_EMIT_FAILED: 'Failed to emit action: communication error',
-  ACTION_EXECUTE_FAILED: 'Failed to execute action: runtime error',
-  ACTION_SKIPPED: 'Action skipped: no payload changes detected',
-  ACTION_ID_REQUIRED: 'Action ID is required',
+  // Action Related - Professional & Clear
+  ACTION_PREPARE_FAILED:
+    'Unable to prepare task - please check your configuration',
+  ACTION_EMIT_FAILED: 'Communication error - unable to send task',
+  ACTION_EXECUTE_FAILED: 'Task execution failed - runtime error encountered',
+  ACTION_SKIPPED: 'Task skipped - no changes detected from previous request',
+  ACTION_ID_REQUIRED: 'Task identifier required - please provide a channel ID',
 
-  // Channel Related
-  CHANNEL_VALIDATION_FAILED: 'Channel validation failed: invalid configuration',
-  CHANNEL_CREATION_FAILED: 'Failed to create channel: configuration error',
-  CHANNEL_UPDATE_FAILED: 'Failed to update channel: validation error',
-  CHANNEL_CREATED: 'Channel created',
-  CHANNEL_UPDATED: 'Channel updated',
-  CHANNEL_INVALID_DEFINITION: 'Invalid channel data definition',
-  CHANNEL_MISSING_ID: 'Channel ID is required',
-  CHANNEL_MISSING_TYPE: 'Channel type is required',
-  CHANNEL_INVALID_TYPE: 'Invalid channel type specified',
-  CHANNEL_INVALID_PAYLOAD: 'Invalid channel payload format',
-  CHANNEL_INVALID_STRUCTURE: 'Invalid channel structure: check configuration',
+  // Channel Related - Helpful & Specific
+  CHANNEL_VALIDATION_FAILED:
+    'Channel setup declined - configuration requirements not met',
+  CHANNEL_CREATION_FAILED:
+    'Unable to create channel - please verify your configuration',
+  CHANNEL_UPDATE_FAILED:
+    'Channel update unsuccessful - validation requirements not satisfied',
+  CHANNEL_CREATED: 'Channel established - ready for operation',
+  CHANNEL_UPDATED: 'Channel configuration updated successfully',
+  CHANNEL_INVALID_DEFINITION:
+    'Channel definition invalid - please review your setup',
+  CHANNEL_MISSING_ID:
+    'Channel identifier required - please provide a unique ID',
+  CHANNEL_MISSING_TYPE: 'Channel type specification required',
+  CHANNEL_INVALID_TYPE:
+    'Channel type not recognized - please specify a valid type',
+  CHANNEL_INVALID_PAYLOAD:
+    'Payload format not accepted - please check your data structure',
+  CHANNEL_INVALID_STRUCTURE:
+    'Channel structure invalid - please review configuration requirements',
 
-  // Subscription Related
-  SUBSCRIPTION_INVALID_PARAMS: 'Invalid subscription parameters provided',
-  SUBSCRIPTION_EXISTS: 'Subscriber exists - updating configuration',
-  SUBSCRIPTION_SUCCESS_SINGLE: 'Subscribed to channel',
-  SUBSCRIPTION_SUCCESS_MULTIPLE: 'Subscribed to multiple channels',
-  SUBSCRIPTION_INVALID_TYPE: 'Invalid subscriber type specified',
-  SUBSCRIPTION_INVALID_HANDLER: 'Invalid channel handler provided',
-  SUBSCRIPTION_FAILED: 'Subscription failed: check configuration',
+  // Subscription Related - Courteous & Informative
+  SUBSCRIPTION_INVALID_PARAMS:
+    'Subscription parameters not accepted - please verify your settings',
+  SUBSCRIPTION_EXISTS:
+    'Subscription already exists - updating configuration as requested',
+  SUBSCRIPTION_SUCCESS_SINGLE: 'Successfully subscribed to channel',
+  SUBSCRIPTION_SUCCESS_MULTIPLE: 'Successfully subscribed to multiple channels',
+  SUBSCRIPTION_INVALID_TYPE:
+    'Subscription type not recognized - please specify a valid type',
+  SUBSCRIPTION_INVALID_HANDLER:
+    'Handler function not accepted - please provide a valid function',
+  SUBSCRIPTION_FAILED:
+    'Subscription unsuccessful - please check your configuration',
 
-  // Call Related
-  CALL_OFFLINE: 'Call failed: system is offline',
-  CALL_INVALID_ID: 'Call failed: invalid action ID',
-  CALL_NOT_RESPONDING: 'Call failed: action not responding',
-  CALL_NO_SUBSCRIBER: 'Call failed: no subscriber found for this type',
+  // Call Related - Clear Error Communication
+  CALL_OFFLINE: 'Call unsuccessful - system is currently offline',
+  CALL_INVALID_ID: 'Call failed - channel identifier not recognized',
+  CALL_NOT_RESPONDING: 'Call timeout - channel is not responding',
+  CALL_NO_SUBSCRIBER: 'Call unsuccessful - no handler found for this channel',
 
-  // Dispatch Related
-  DISPATCH_NO_SUBSCRIBER: 'Dispatch failed: no subscriber found for this type',
-  TIMELINE_NO_SUBSCRIBER: 'Timeline error: no subscriber found for this type',
+  // Dispatch Related - Professional Error Handling
+  DISPATCH_NO_SUBSCRIBER:
+    'Dispatch failed - no subscriber registered for channel',
+  TIMELINE_NO_SUBSCRIBER:
+    'Timeline error - no handler registered for scheduled task',
 
-  // System Headers
+  // System Headers - Maintained Original Style
   QUANTUM_HEADER:
     'Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0-- ',
 
-  // Add timing related messages
-  TIMING_WARNING: 'Timer duration below UI update threshold.',
+  // Timing Related - Helpful Advisories
+  TIMING_WARNING:
+    'Timing advisory - duration below recommended UI update threshold',
   TIMING_ANIMATION_WARNING:
-    'Consider using requestAnimationFrame for high-frequency updates.',
-  TIMING_INVALID: 'Invalid timer duration.',
-  TIMING_RECUPERATION: 'Entering recuperation mode for long duration timer.',
+    'Performance suggestion - consider requestAnimationFrame for smooth animations',
+  TIMING_INVALID:
+    'Timer duration not accepted - please specify a valid timeframe',
+  TIMING_RECUPERATION:
+    'System rest mode - conserving resources for optimal performance',
   RATE_LIMITED: (delay: number) =>
-    `Rate limited. Request delayed by ${delay}ms.`
+    `Request queued - processing will resume in ${delay}ms`,
+
+  // Additional British AI Assistant Messages
+  TASK_UNDERSTOOD: 'Task understood - proceeding with your request',
+  TASK_COMPLETED:
+    'Task completed successfully - anything else I can help with?',
+  CONFIGURATION_ACCEPTED: 'Configuration accepted - settings applied',
+  OPERATION_SUCCESSFUL: 'Operation completed as requested',
+  REQUEST_ACKNOWLEDGED: 'Request acknowledged - processing now',
+  SYSTEM_READY: 'All systems ready - standing by for instructions',
+  MAINTENANCE_MODE: 'Maintenance mode active - optimizing system performance',
+  COORDINATION_ACTIVE: 'Task coordination active - managing your requests',
+  INTELLIGENCE_ENGAGED:
+    'Processing intelligence engaged - analyzing your requirements',
+
+  // Polite Error Variations
+  UNABLE_TO_COMPLY:
+    "I'm unable to comply with that request - please check the requirements",
+  TEMPORARILY_UNAVAILABLE:
+    'Service temporarily unavailable - please try again in a moment',
+  ACCESS_PERMISSIONS:
+    'Access permissions required - please verify your credentials',
+  RESOURCE_UNAVAILABLE:
+    'Requested resource currently unavailable - shall I suggest alternatives?',
+  VALIDATION_REQUIREMENTS:
+    'Validation requirements not met - please review your input',
+
+  // Success Confirmations
+  ACKNOWLEDGED_AND_PROCESSED: 'Request acknowledged and processed successfully',
+  CONFIGURATION_APPLIED: 'Configuration applied - system updated as requested',
+  SUBSCRIPTION_ESTABLISHED:
+    "Subscription established - you'll receive updates as they occur",
+  CHANNEL_OPERATIONAL: 'Channel operational - ready to handle your requests',
+  SYSTEM_OPTIMIZED: 'System optimization complete - performance improved'
 } as const
+
+// Helper function to create contextual messages with British politeness
+export const createPoliteMessage = (
+  operation: 'success' | 'error' | 'info' | 'warning',
+  context: string,
+  details?: string
+): string => {
+  const templates = {
+    success: {
+      base: 'Operation completed successfully',
+      withDetails: (details: string) =>
+        `Operation completed successfully - ${details}`,
+      polite: 'Task accomplished as requested'
+    },
+    error: {
+      base: "I'm afraid there was an issue",
+      withDetails: (details: string) => `I\'m unable to proceed - ${details}`,
+      polite: 'I apologize, but I cannot complete that request'
+    },
+    info: {
+      base: 'Status update',
+      withDetails: (details: string) => `Information: ${details}`,
+      polite: 'Keeping you informed'
+    },
+    warning: {
+      base: 'Advisory notice',
+      withDetails: (details: string) => `Please note: ${details}`,
+      polite: 'I should mention'
+    }
+  }
+
+  const template = templates[operation]
+  if (details) {
+    return template.withDetails(details)
+  }
+  return template.base
+}
+
+// Export type for message tone consistency
+export type MessageTone =
+  | 'formal'
+  | 'polite'
+  | 'neutral'
+  | 'helpful'
+  | 'assertive'
 
 // Protection thresholds (keeping existing structure)
 export const PROTECTION = {

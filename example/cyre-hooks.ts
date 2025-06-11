@@ -30,7 +30,7 @@ const main = async () => {
   const database: ProcessedReading[] = []
 
   // Create a Cyre hook for sensor data processing
-  const sensorChannel = useCyre<SensorReading>({
+  const sensorChannel = useCyre<SensorReading>(cyre, {
     name: 'sensorProcessor',
     debug: true,
     protection: {
@@ -45,44 +45,6 @@ const main = async () => {
   console.log(`Sensor processing channel created: ${sensorChannel.id}`)
 
   // Add data validation and enrichment middleware
-  sensorChannel.middleware(async (reading, next) => {
-    console.log(`Validating reading from device ${reading.deviceId}`)
-
-    // Validate readings
-    if (
-      !reading.deviceId ||
-      reading.temperature === undefined ||
-      reading.humidity === undefined
-    ) {
-      return {
-        ok: false,
-        payload: null,
-        message: 'Invalid reading: Missing required fields'
-      }
-    }
-
-    // Check for physically impossible values
-    if (
-      reading.temperature < -100 ||
-      reading.temperature > 100 ||
-      reading.humidity < 0 ||
-      reading.humidity > 100
-    ) {
-      return {
-        ok: false,
-        payload: null,
-        message: 'Invalid reading: Values out of physical bounds'
-      }
-    }
-
-    // Add timestamp if missing
-    const processedReading = {
-      ...reading,
-      timestamp: reading.timestamp || Date.now()
-    }
-
-    return next(processedReading)
-  })
 
   // Subscribe to sensor data processing
   sensorChannel.on(reading => {
@@ -214,21 +176,6 @@ const main = async () => {
 
   // Example 5: Check metrics
   console.log('\n--- Example 5: Channel Metrics ---')
-
-  const metrics = sensorChannel.metrics()
-  console.log(`Channel active formations: ${metrics.activeFormations}`)
-  console.log(`System stress: ${metrics.breathing.stress.toFixed(2)}`)
-
-  const history = sensorChannel.getHistory()
-  console.log(`Processing history: ${history.length} entries`)
-  console.log('Last 3 operations:')
-  history.slice(0, 3).forEach((entry, i) => {
-    console.log(
-      `${i + 1}. Device: ${entry.payload.deviceId}, Success: ${
-        entry.response.ok
-      }, ` + `Message: ${entry.response.message || 'OK'}`
-    )
-  })
 
   // Clean up
   console.log('\n--- Cleaning up ---')

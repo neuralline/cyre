@@ -2,7 +2,13 @@
 // Refactored state management with payload separation
 
 import {log} from '../components/cyre-log'
-import type {IO, ISubscriber, Timer} from '../types/core'
+import type {
+  BranchStore,
+  IO,
+  ISubscriber,
+  StateActionMetrics,
+  Timer
+} from '../types/core'
 import {metricsState, type MetricsState} from './metrics-state'
 import {payloadState} from './payload-state'
 import type {StateKey} from '../types/core'
@@ -20,28 +26,12 @@ import {createStore} from './create-store'
 
 */
 
-export type MiddlewareFunction = (action: IO) => Promise<void>
-
-export interface IMiddleware extends ISubscriber {
-  handler: MiddlewareFunction
-}
-
-export interface StateActionMetrics {
-  lastExecutionTime: number
-  executionCount: number
-  intervalId?: NodeJS.Timeout
-  errors: Array<{
-    timestamp: number
-    message: string
-  }>
-}
-
 // Create stores with proper typing
-const ioStore = createStore<IO>()
-const subscriberStore = createStore<ISubscriber>()
-const middlewareStore = createStore<IMiddleware>()
-const timelineStore = createStore<Timer>()
+const ioStore = createStore<IO>() // Channels
+const subscriberStore = createStore<ISubscriber>() // .on subscribers/listeners
+const timelineStore = createStore<Timer>() // schedules and queued tasks
 const actionMetrics = createStore<StateActionMetrics>()
+const branchStore = createStore<BranchStore>()
 
 // Utility functions for state management
 const cleanupAction = (id: StateKey): void => {
@@ -55,8 +45,9 @@ const cleanupAction = (id: StateKey): void => {
 
 /**
  * IO operations - configuration only, no payload data
+ * // channel information store
  */
-export const io = {
+export const io = Object.freeze({
   /**
    * Set action configuration (no payload)
    */
@@ -85,12 +76,6 @@ export const io = {
           executionCount: 0,
           errors: []
         })
-      }
-
-      // Handle payload separately if provided in legacy format
-      if ('payload' in action && action.payload !== undefined) {
-        payloadState.set(action.id, action.payload, 'initial')
-        //log.debug(`Migrated payload for ${action.id} to payload state`)
       }
     } catch (error) {
       log.critical(
@@ -179,27 +164,6 @@ export const io = {
   getAll: (): IO[] => ioStore.getAll(),
 
   /**
-   * Check if payload has changed (delegated to payload state)
-   */
-  hasChanged: (id: StateKey, newPayload: any): boolean => {
-    return payloadState.hasChanged(id, newPayload)
-  },
-
-  /**
-   * Get previous payload (delegated to payload state)
-   */
-  getPrevious: (id: StateKey): any | undefined => {
-    return payloadState.getPrevious(id)
-  },
-
-  /**
-   * Update payload (delegated to payload state)
-   */
-  updatePayload: (id: StateKey, payload: any): void => {
-    payloadState.set(id, payload, 'pipeline')
-  },
-
-  /**
    * Get action metrics
    */
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
@@ -243,38 +207,8 @@ export const io = {
     } catch (error) {
       log.error(`Failed to track execution for ${id}: ${error}`)
     }
-  },
-
-  /**
-   * Create action with initial payload (backward compatibility)
-   */
-  createWithPayload: (action: IO & {payload?: any}): void => {
-    const {payload, ...config} = action
-
-    // Set configuration
-    io.set(config)
-
-    // Set payload separately if provided
-    if (payload !== undefined) {
-      payloadState.set(action.id, payload, 'initial')
-    }
-  },
-
-  /**
-   * Get action with current payload (backward compatibility)
-   */
-  getWithPayload: (id: StateKey): (IO & {payload?: any}) | undefined => {
-    const config = io.get(id)
-    if (!config) return undefined
-
-    const currentPayload = payloadState.get(id)
-
-    return {
-      ...config,
-      payload: currentPayload
-    }
   }
-}
+})
 
 // Keep existing subscribers and timeline exports (unchanged)
 export const subscribers = {
@@ -295,29 +229,7 @@ export const subscribers = {
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
 
-export const middlewares = {
-  add: (middleware: IMiddleware): void => {
-    if (!middleware?.id || typeof middleware.handler !== 'function') {
-      throw new Error('Invalid middleware format')
-    }
-
-    middlewareStore.set(middleware.id, middleware)
-  },
-  get: (id: StateKey): IMiddleware | undefined => {
-    return middlewareStore.get(id)
-  },
-  forget: (id: StateKey): boolean => {
-    const result = middlewareStore.forget(id)
-    return result
-  },
-  clear: (): void => {
-    middlewareStore.clear()
-  },
-  getAll: (): IMiddleware[] => {
-    return middlewareStore.getAll()
-  }
-}
-
+// scheduled task store
 export const timeline = {
   add: (timer: Timer): void => {
     if (!timer.id) return
@@ -366,101 +278,13 @@ export const timeline = {
   }
 }
 
-/**
- * Migration utilities for smooth transition
- */
-export const migrationUtils = {
-  /**
-   * Migrate existing actions with payload to new structure
-   */
-  migrateActions: (): {migrated: number; errors: string[]} => {
-    const errors: string[] = []
-    let migrated = 0
-
-    try {
-      const allActions = ioStore.getAll()
-
-      allActions.forEach(action => {
-        try {
-          if ('payload' in action) {
-            const {payload, ...config} = action as any
-
-            // Update action without payload
-            ioStore.set(action.id, config)
-
-            // Set payload in payload state
-            if (payload !== undefined) {
-              payloadState.set(action.id, payload, 'initial')
-              migrated++
-            }
-          }
-        } catch (error) {
-          errors.push(`Failed to migrate ${action.id}: ${error}`)
-        }
-      })
-    } catch (error) {
-      errors.push(`Migration failed: ${error}`)
-    }
-
-    log.info(
-      `Migration completed: ${migrated} actions migrated, ${errors.length} errors`
-    )
-    return {migrated, errors}
-  },
-
-  /**
-   * Validate separation - ensure no payload in IO store
-   */
-  validateSeparation: (): {valid: boolean; violations: string[]} => {
-    const violations: string[] = []
-
-    try {
-      const allActions = ioStore.getAll()
-
-      allActions.forEach(action => {
-        if ('payload' in action && (action as any).payload !== undefined) {
-          violations.push(`Action ${action.id} still contains payload data`)
-        }
-      })
-    } catch (error) {
-      violations.push(`Validation failed: ${error}`)
-    }
-
-    return {
-      valid: violations.length === 0,
-      violations
-    }
-  },
-
-  /**
-   * Get migration statistics
-   */
-  getStats: () => {
-    const ioStats = {
-      totalActions: ioStore.getAll().length,
-      withPayloadViolations: ioStore.getAll().filter(a => 'payload' in a).length
-    }
-
-    const payloadStats = payloadState.getStats()
-
-    return {
-      io: ioStats,
-      payload: payloadStats,
-      separationIntegrity: {
-        clean: ioStats.withPayloadViolations === 0,
-        violations: ioStats.withPayloadViolations
-      }
-    }
-  }
-}
-
 // Export readonly stores
 export const stores = Object.freeze({
   io: ioStore,
   subscribers: subscriberStore,
   timeline: timelineStore,
   quantum: metricsState,
-  middleware: middlewareStore
+  branch: branchStore
 })
 
 // Export types

@@ -29,34 +29,34 @@ export const createContentProcessingInfrastructure = () => {
 
   // Content type processing branches
   const contentTypes = {
-    text: moderationSystem.createChild({
+    text: useBranch(moderationSystem, {
       id: 'text-processing',
       name: 'Text Content Processing'
     }),
-    image: moderationSystem.createChild({
+    image: useBranch(moderationSystem, {
       id: 'image-processing',
       name: 'Image Content Processing'
     }),
-    video: moderationSystem.createChild({
+    video: useBranch(moderationSystem, {
       id: 'video-processing',
       name: 'Video Content Processing'
     }),
-    audio: moderationSystem.createChild({
+    audio: useBranch(moderationSystem, {
       id: 'audio-processing',
       name: 'Audio Content Processing'
     })
   }
 
   // AI model services
-  const aiServices = moderationSystem.createChild({
+  const aiServices = useBranch(moderationSystem, {
     id: 'ai-services',
     name: 'AI Model Services'
   })
-  const humanReview = moderationSystem.createChild({
+  const humanReview = useBranch(moderationSystem, {
     id: 'human-review',
     name: 'Human Review System'
   })
-  const appeals = moderationSystem.createChild({
+  const appeals = useBranch(moderationSystem, {
     id: 'appeals',
     name: 'Appeals Processing'
   })
@@ -77,68 +77,64 @@ export const createContentProcessingInfrastructure = () => {
 export const createAIAnalysisServices = (infrastructure: any) => {
   const {aiServices} = infrastructure
 
+  const appeals = useBranch(cyre, {
+    id: 'appeals',
+    name: 'Appeals Processing'
+  })
+
   // Text analysis services
   const textAnalyzers = {
-    toxicity: useCyre(
-      {channelId: 'toxicity-detector', name: 'Toxicity Detection'},
-      aiServices
-    ),
-    spam: useCyre(
-      {channelId: 'spam-detector', name: 'Spam Detection'},
-      aiServices
-    ),
-    sentiment: useCyre(
-      {channelId: 'sentiment-analyzer', name: 'Sentiment Analysis'},
-      aiServices
-    ),
-    language: useCyre(
-      {channelId: 'language-detector', name: 'Language Detection'},
-      aiServices
-    ),
-    profanity: useCyre(
-      {channelId: 'profanity-filter', name: 'Profanity Filter'},
-      aiServices
-    )
+    toxicity: useCyre(appeals, {id: '', name: 'Toxicity Detection'}),
+    spam: useCyre(appeals, {id: 'spam-detector', name: 'Spam Detection'}),
+    sentiment: useCyre(aiServices, {
+      id: 'sentiment-analyzer',
+      name: 'Sentiment Analysis'
+    }),
+    language: useCyre(appeals, {
+      id: 'language-detector',
+      name: 'Language Detection'
+    }),
+    profanity: useCyre(appeals, {
+      id: 'profanity-filter',
+      name: 'Profanity Filter'
+    })
   }
 
   // Image analysis services
   const imageAnalyzers = {
-    nsfw: useCyre(
-      {channelId: 'nsfw-detector', name: 'NSFW Content Detection'},
-      aiServices
-    ),
-    violence: useCyre(
-      {channelId: 'violence-detector', name: 'Violence Detection'},
-      aiServices
-    ),
-    faces: useCyre(
-      {channelId: 'face-detector', name: 'Face Detection'},
-      aiServices
-    ),
-    objects: useCyre(
-      {channelId: 'object-detector', name: 'Object Detection'},
-      aiServices
-    ),
-    text_in_image: useCyre(
-      {channelId: 'ocr-analyzer', name: 'Text in Image Analysis'},
-      aiServices
-    )
+    nsfw: useCyre(aiServices, {
+      id: 'nsfw-detector',
+      name: 'NSFW Content Detection'
+    }),
+    violence: useCyre(aiServices, {
+      id: 'violence-detector',
+      name: 'Violence Detection'
+    }),
+    faces: useCyre(aiServices, {id: 'face-detector', name: 'Face Detection'}),
+    objects: useCyre(aiServices, {
+      id: 'object-detector',
+      name: 'Object Detection'
+    }),
+    text_in_image: useCyre(appeals, {
+      id: 'ocr-analyzer',
+      name: 'Text in Image Analysis'
+    })
   }
 
   // Video analysis services
   const videoAnalyzers = {
-    content_classification: useCyre(
-      {channelId: 'video-classifier', name: 'Video Content Classification'},
-      aiServices
-    ),
-    audio_extraction: useCyre(
-      {channelId: 'audio-extractor', name: 'Audio Track Extraction'},
-      aiServices
-    ),
-    scene_detection: useCyre(
-      {channelId: 'scene-detector', name: 'Scene Change Detection'},
-      aiServices
-    )
+    content_classification: useCyre(aiServices, {
+      id: 'video-classifier',
+      name: 'Video Content Classification'
+    }),
+    audio_extraction: useCyre(aiServices, {
+      id: 'audio-extractor',
+      name: 'Audio Track Extraction'
+    }),
+    scene_detection: useCyre(aiServices, {
+      id: 'scene-detector',
+      name: 'Scene Change Detection'
+    })
   }
 
   // Set up text analyzers
@@ -380,13 +376,10 @@ export const createContentPipeline = (infrastructure: any, aiServices: any) => {
   })
 
   // Image content pipeline
-  const imagePipeline = useCyre(
-    {
-      channelId: 'image-pipeline',
-      name: 'Image Content Processing Pipeline'
-    },
-    contentTypes.image
-  )
+  const imagePipeline = useCyre(contentTypes.image, {
+    id: 'image-pipeline',
+    name: 'Image Content Processing Pipeline'
+  })
 
   imagePipeline.on(async content => {
     try {
@@ -465,13 +458,10 @@ export const createContentPipeline = (infrastructure: any, aiServices: any) => {
   })
 
   // Video content pipeline
-  const videoPipeline = useCyre(
-    {
-      channelId: 'video-pipeline',
-      name: 'Video Content Processing Pipeline'
-    },
-    contentTypes.video
-  )
+  const videoPipeline = useCyre(contentTypes.video, {
+    id: 'video-pipeline',
+    name: 'Video Content Processing Pipeline'
+  })
 
   videoPipeline.on(async content => {
     try {
@@ -554,31 +544,22 @@ export const createHumanReviewSystem = (infrastructure: any) => {
   const {humanReview} = infrastructure
 
   // Human moderator workqueue
-  const moderatorQueue = useCyre(
-    {
-      channelId: 'moderator-queue',
-      name: 'Human Moderator Work Queue'
-    },
-    humanReview
-  )
+  const moderatorQueue = useCyre(humanReview, {
+    id: 'moderator-queue',
+    name: 'Human Moderator Work Queue'
+  })
 
   // Review assignment system
-  const reviewAssigner = useCyre(
-    {
-      channelId: 'review-assigner',
-      name: 'Review Assignment System'
-    },
-    humanReview
-  )
+  const reviewAssigner = useCyre(humanReview, {
+    id: 'review-assigner',
+    name: 'Review Assignment System'
+  })
 
   // Quality assurance system
-  const qualityAssurance = useCyre(
-    {
-      channelId: 'quality-assurance',
-      name: 'Moderation Quality Assurance'
-    },
-    humanReview
-  )
+  const qualityAssurance = useCyre(humanReview, {
+    id: 'quality-assurance',
+    name: 'Moderation Quality Assurance'
+  })
 
   moderatorQueue.on(queueRequest => {
     switch (queueRequest.type) {
@@ -717,13 +698,10 @@ export const createContentModerationOrchestrator = () => {
   const humanReview = createHumanReviewSystem(infrastructure)
 
   // Master content coordinator
-  const contentCoordinator = useCyre(
-    {
-      channelId: 'content-coordinator',
-      name: 'Content Moderation Coordinator'
-    },
-    infrastructure.moderationSystem
-  )
+  const contentCoordinator = useCyre(infrastructure.moderationSystem, {
+    id: 'content-coordinator',
+    name: 'Content Moderation Coordinator'
+  })
 
   contentCoordinator.on(async request => {
     try {

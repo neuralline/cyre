@@ -102,7 +102,7 @@ const convertDurationToMs = (duration: TimerDuration): number => {
 const getPrecisionTier = (
   interval: number
 ): 'high' | 'standard' | 'chunked' => {
-  if (interval < 50) return 'high'
+  if (interval < 1016) return 'high'
   if (interval > TIMING.MAX_TIMEOUT) return 'chunked'
   return 'standard'
 }

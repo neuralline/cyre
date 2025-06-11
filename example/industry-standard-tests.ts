@@ -1,8 +1,7 @@
 // example/industry-standard-tests.ts
 // Industry-standard performance benchmarks for CYRE
 
-import {cyre} from '../src'
-import {metrics} from '../src/metrics'
+import {cyre, log} from '../src'
 
 /*
     CYRE Industry-Standard Performance Test Suite
@@ -62,7 +61,6 @@ async function benchmarkBasicPerformance(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 1: Basic Action/Call Performance')
 
   // Setup
-  metrics.reset()
   const iterations = 10000
   const warmupIterations = 1000
 
@@ -118,7 +116,7 @@ async function benchmarkBasicPerformance(): Promise<BenchmarkResult> {
     iterations
   }
 
-  console.log(
+  log.debug(
     `  ✅ ${opsPerSecond.toFixed(0)} ops/sec, ${avgLatency.toFixed(
       3
     )}ms avg latency`
@@ -133,7 +131,6 @@ async function benchmarkBasicPerformance(): Promise<BenchmarkResult> {
 async function benchmarkSubscriptionPerformance(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 2: Multi-Subscriber Performance')
 
-  metrics.reset()
   const iterations = 5000
   const subscriberCount = 10
 
@@ -205,7 +202,6 @@ async function benchmarkSubscriptionPerformance(): Promise<BenchmarkResult> {
 async function benchmarkProtectionPerformance(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 3: Protection Mechanism Performance')
 
-  metrics.reset()
   const iterations = 2000
 
   // Test throttle protection
@@ -274,7 +270,6 @@ async function benchmarkProtectionPerformance(): Promise<BenchmarkResult> {
 async function benchmarkMemoryStress(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 4: Memory Stress Test')
 
-  metrics.reset()
   const cycles = 100
   const actionsPerCycle = 50
 
@@ -350,7 +345,6 @@ async function benchmarkMemoryStress(): Promise<BenchmarkResult> {
 async function benchmarkConcurrentLoad(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 5: Concurrent Load Test')
 
-  metrics.reset()
   const concurrency = 10
   const iterationsPerWorker = 500
 
@@ -433,7 +427,6 @@ async function benchmarkConcurrentLoad(): Promise<BenchmarkResult> {
 async function benchmarkRealWorldSimulation(): Promise<BenchmarkResult> {
   console.log('\n🔥 BENCHMARK 6: Real-World Application Simulation')
 
-  metrics.reset()
   const iterations = 1000
 
   // Setup realistic application actions

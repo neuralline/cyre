@@ -5,7 +5,7 @@ import {createStore} from './create-store'
 import {isEqual} from '../libs/utils'
 import {log} from '../components/cyre-log'
 import {sensor} from './metrics-report'
-import type {ActionPayload, StateKey} from '../types/core'
+import type {ActionPayload} from '../types/core'
 
 /*
 
@@ -21,7 +21,7 @@ import type {ActionPayload, StateKey} from '../types/core'
 
 */
 
-interface PayloadEntry {
+export interface PayloadEntry {
   current: ActionPayload
   previous?: ActionPayload
   history: PayloadHistoryEntry[]
@@ -49,8 +49,8 @@ const PAYLOAD_CONFIG = {
   SUBSCRIPTION_TIMEOUT: 5000
 }
 
-// Storage
-const payloadStore = createStore<PayloadEntry>()
+export const peqStore = createStore<PayloadEntry>() // Storage
+export const resStore = createStore<PayloadEntry>() // Storage
 
 /**
  * Core payload operations
@@ -66,7 +66,7 @@ export const payloadState = {
   ): void => {
     try {
       const now = Date.now()
-      const existing = payloadStore.get(channelId)
+      const existing = peqStore.get(channelId)
 
       // Create history entry
       const historyEntry: PayloadHistoryEntry = {
@@ -103,7 +103,7 @@ export const payloadState = {
         return
       }
 
-      payloadStore.set(channelId, entry)
+      peqStore.set(channelId, entry)
       sensor.log(channelId, 'info', 'payload-updated', {
         source,
         updateCount: entry.metadata.updateCount,
@@ -119,14 +119,14 @@ export const payloadState = {
    * Get current payload for channel
    */
   get: (channelId: string): ActionPayload | undefined => {
-    return payloadStore.get(channelId)?.current
+    return peqStore.get(channelId)?.current
   },
 
   /**
    * Get previous payload for channel
    */
   getPrevious: (channelId: string): ActionPayload | undefined => {
-    return payloadStore.get(channelId)?.previous
+    return peqStore.get(channelId)?.previous
   },
 
   /**
@@ -134,7 +134,7 @@ export const payloadState = {
    */
   hasChanged: (channelId: string, newPayload: ActionPayload): boolean => {
     try {
-      const entry = payloadStore.get(channelId)
+      const entry = peqStore.get(channelId)
       if (!entry) return true
       const hasChanged = !isEqual(newPayload, entry.current)
       sensor.log(channelId, 'info', 'change-detection', {
@@ -154,7 +154,7 @@ export const payloadState = {
    */
   forget: (channelId: string): boolean => {
     try {
-      const result = payloadStore.forget(channelId)
+      const result = peqStore.forget(channelId)
       sensor.log(channelId, 'info', 'payload-forgotten')
       return result
     } catch (error) {
@@ -168,7 +168,7 @@ export const payloadState = {
    */
   clear: (): void => {
     try {
-      payloadStore.clear()
+      peqStore.clear()
       sensor.log('system', 'info', 'payload-state-cleared')
       //log.debug('Payload state cleared')
     } catch (error) {
@@ -180,7 +180,7 @@ export const payloadState = {
    * Get payload metadata
    */
   getMetadata: (channelId: string) => {
-    const entry = payloadStore.get(channelId)
+    const entry = peqStore.get(channelId)
     return entry?.metadata
   },
 
@@ -188,7 +188,7 @@ export const payloadState = {
    * Get payload history
    */
   getHistory: (channelId: string, limit?: number): PayloadHistoryEntry[] => {
-    const entry = payloadStore.get(channelId)
+    const entry = peqStore.get(channelId)
     if (!entry) return []
 
     const history = entry.history
@@ -203,7 +203,7 @@ export const payloadState = {
     transformFn: (payload: ActionPayload) => ActionPayload
   ): ActionPayload | undefined => {
     try {
-      const entry = payloadStore.get(channelId)
+      const entry = peqStore.get(channelId)
       if (!entry) return undefined
 
       const transformed = transformFn(entry.current)
@@ -226,7 +226,7 @@ export const payloadState = {
     partialPayload: Partial<ActionPayload>
   ): ActionPayload | undefined => {
     try {
-      const entry = payloadStore.get(channelId)
+      const entry = peqStore.get(channelId)
       if (!entry) {
         payloadState.set(channelId, partialPayload, 'external')
         return partialPayload
@@ -252,11 +252,11 @@ export const payloadState = {
    */
   freeze: (channelId: string): boolean => {
     try {
-      const entry = payloadStore.get(channelId)
+      const entry = peqStore.get(channelId)
       if (!entry) return false
 
       entry.metadata.frozen = true
-      payloadStore.set(channelId, entry)
+      peqStore.set(channelId, entry)
 
       sensor.log(channelId, 'info', 'payload-frozen')
       return true
@@ -271,11 +271,11 @@ export const payloadState = {
    */
   unfreeze: (channelId: string): boolean => {
     try {
-      const entry = payloadStore.get(channelId)
+      const entry = peqStore.get(channelId)
       if (!entry) return false
 
       entry.metadata.frozen = false
-      payloadStore.set(channelId, entry)
+      peqStore.set(channelId, entry)
 
       sensor.log(channelId, 'info', 'payload-unfrozen')
       return true
@@ -289,7 +289,7 @@ export const payloadState = {
    * Get all channel IDs with payloads
    */
   getChannels: (): string[] => {
-    return payloadStore.getAll().map((_, index) => {
+    return peqStore.getAll().map((_, index) => {
       // We need to get the keys from the store
       // This is a limitation of the current store implementation
       // In practice, we'd need to modify createStore to expose keys
@@ -301,7 +301,7 @@ export const payloadState = {
    * Get payload statistics
    */
   getStats: () => {
-    const entries = payloadStore.getAll()
+    const entries = peqStore.getAll()
     const totalUpdates = entries.reduce(
       (sum, entry) => sum + entry.metadata.updateCount,
       0

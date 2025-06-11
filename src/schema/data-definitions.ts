@@ -1,5 +1,5 @@
 // src/schema/data-definitions.ts
-// Action compilation with talent discovery and pipeline building
+// Action compilation with talent discovery and improved validation messages
 
 import type {IO} from '../types/core'
 import type {TalentName} from './talent-definitions'
@@ -9,11 +9,12 @@ import {log} from '../components/cyre-log'
 
       C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S
       
-      Action compilation system with:
+      Action compilation system with improved validation messages:
+      - Clear, helpful error messages in British AI assistant style
+      - Detailed suggestions for fixing configuration issues
       - Talent discovery and validation
       - Pipeline building in user-defined order
       - Fast path optimization
-      - Three-phase architecture flagging
 
 */
 
@@ -41,15 +42,26 @@ const createCacheKey = (fieldName: string, value: any): string => {
   }
   return '' // Don't cache complex values
 }
+// Helper to describe the actual value received
+const describeValue = (value: any): string => {
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  if (Array.isArray(value)) return `array with ${value.length} items`
+  if (typeof value === 'object')
+    return `object with keys: ${Object.keys(value).join(', ')}`
+  if (typeof value === 'string') return `string "${value}"`
+  if (typeof value === 'number') return `number ${value}`
+  if (typeof value === 'boolean') return `boolean ${value}`
+  return `${typeof value}: ${String(value)}`
+}
 
 // Fast validation helpers
 const isString = (value: any): value is string => typeof value === 'string'
 const isNumber = (value: any): value is number =>
   typeof value === 'number' && !isNaN(value)
 const isBoolean = (value: any): value is boolean => typeof value === 'boolean'
-const isArray = (value: any): value is any[] => Array.isArray(value)
-const isObject = (value: any): value is object =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
+const isFunction = (value: any): value is Function =>
+  typeof value === 'function'
 
 // Talent categories for optimization flags
 const PROTECTION_TALENTS = ['block', 'throttle', 'debounce'] as const
@@ -64,23 +76,28 @@ const PROCESSING_TALENTS = [
 ] as const
 
 const SCHEDULING_TALENTS = ['interval', 'delay', 'repeat'] as const
-
-// Main data definitions with performance optimization
+// Main data definitions with improved error messages
 export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
-  // Core required - can block (fast validation)
+  // Core required fields
   id: (value: any): DataDefResult => {
     if (!isString(value) || value.length === 0) {
       return {
         ok: false,
-        error: 'ID must be non-empty string',
+        error: `Channel ID must be a non-empty text value, but received ${describeValue(
+          value
+        )}`,
         blocking: true,
-        suggestions: ['Provide a unique string identifier for this action']
+        suggestions: [
+          'Provide a unique text identifier for this channel',
+          'Example: "user-validator" or "sensor-IUG576&$"',
+          'Avoid spaces - use hyphens or underscores instead'
+        ]
       }
     }
     return {ok: true, data: value}
   },
 
-  // Path validation with caching
+  // Path validation
   path: (value: any): DataDefResult => {
     if (value === undefined) {
       return {ok: true, data: undefined}
@@ -89,8 +106,12 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     if (!isString(value)) {
       return {
         ok: false,
-        error: 'Path must be a string',
-        suggestions: ['Use format: "app/users/profile"']
+        error: `Path must be text, but received ${describeValue(value)}`,
+        suggestions: [
+          'Use hierarchical format like "app/users/profile"',
+          'Separate levels with forward slashes',
+          'Example: "sensors/temperature/room1"'
+        ]
       }
     }
 
@@ -136,22 +157,40 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     if (!isBoolean(value)) {
       return {
         ok: false,
-        error: 'Block must be boolean',
-        suggestions: ['Use true to block, false to allow']
+        error: `Block must be true or false, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'block',
+        suggestions: [
+          'Remove repeat property - actions run once by default',
+          'Use repeat: 2 or higher for multiple executions',
+          'Use repeat: true for infinite repeats with interval',
+          'Use repeat: false to explicitly disable repeats',
+          'Combine with interval for timed execution: {repeat: 5, interval: 1000}'
+        ]
       }
     }
 
+    // Valid number greater than 1
     return {ok: true, data: value, talentName: 'block'}
   },
 
+  // Timing validations
   throttle: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
     if (!isNumber(value) || value < 0) {
       return {
         ok: false,
-        error: 'Throttle must be positive number (milliseconds)',
-        suggestions: ['Use 1000 for 1 second throttle']
+        error: `Throttle must be a positive number (milliseconds), but received ${describeValue(
+          value
+        )}`,
+        talentName: 'throttle',
+        suggestions: [
+          'Specify time in milliseconds to limit execution frequency',
+          'Example: 1000 for maximum once per second',
+          'Use 0 to disable throttling'
+        ]
       }
     }
 
@@ -164,8 +203,15 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     if (!isNumber(value) || value < 0) {
       return {
         ok: false,
-        error: 'Debounce must be positive number (milliseconds)',
-        suggestions: ['Use 300 for 300ms debounce']
+        error: `Debounce must be a positive number (milliseconds), but received ${describeValue(
+          value
+        )}`,
+        talentName: 'debounce',
+        suggestions: [
+          'Specify delay in milliseconds to wait for rapid calls to settle',
+          'Example: 300 to wait 300ms after last call before executing',
+          'Use 0 to disable debouncing'
+        ]
       }
     }
 
@@ -176,102 +222,132 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   schema: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (typeof value !== 'function') {
+    if (!isFunction(value)) {
       return {
         ok: false,
-        error: 'Schema must be a validation function',
-        suggestions: ['Provide function that returns {ok: boolean, data?: any}']
+        error: `Schema must be a validation function, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'schema',
+        suggestions: [
+          'Use cyre-schema builders: schema.object({ name: schema.string() })',
+          'Or provide custom function: (data) => ({ ok: true, data })',
+          'Function should return { ok: boolean, data?: any, errors?: string[] }'
+        ]
       }
     }
 
     return {ok: true, data: value, talentName: 'schema'}
   },
 
+  // Condition validation (functions)
   condition: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (typeof value !== 'function') {
+    if (!isFunction(value)) {
       return {
         ok: false,
-        error: 'Condition must be a function',
-        suggestions: ['Provide function that returns boolean']
+        error: `Condition must be a function that returns true or false, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'condition',
+        suggestions: [
+          'Function should return boolean: (payload) => boolean',
+          'Return true to allow execution, false to skip',
+          'Example: (payload) => payload.status === "active"'
+        ]
       }
     }
 
     return {ok: true, data: value, talentName: 'condition'}
   },
 
+  // Selector validation (functions)
   selector: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (typeof value !== 'function') {
+    if (!isFunction(value)) {
       return {
         ok: false,
-        error: 'Selector must be a function',
-        suggestions: ['Provide function to extract data from payload']
+        error: `Selector must be a function that extracts data, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'selector',
+        suggestions: [
+          'Function should extract part of your data: (payload) => any',
+          'Return the specific data you want to use',
+          'Example: (payload) => payload.user.email'
+        ]
       }
     }
 
     return {ok: true, data: value, talentName: 'selector'}
   },
 
+  // Transform validation (functions)
   transform: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (typeof value !== 'function') {
+    if (!isFunction(value)) {
       return {
         ok: false,
-        error: 'Transform must be a function',
-        suggestions: ['Provide function to transform payload']
+        error: `Transform must be a function that modifies data, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'transform',
+        suggestions: [
+          'Function should return modified data: (payload) => any',
+          'Transform and return your data as needed',
+          'Example: (payload) => ({ ...payload, processed: true })'
+        ]
       }
     }
 
     return {ok: true, data: value, talentName: 'transform'}
   },
 
+  // Boolean validations with clear explanations
   detectChanges: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
     if (!isBoolean(value)) {
       return {
         ok: false,
-        error: 'DetectChanges must be boolean',
-        suggestions: ['Use true to enable change detection']
+        error: `DetectChanges must be true or false, but received ${describeValue(
+          value
+        )}`,
+        talentName: 'detectChanges',
+        suggestions: [
+          'Use true to only execute when data changes from previous call',
+          'Use false to execute every time regardless of changes',
+          'This helps prevent unnecessary processing of duplicate data'
+        ]
       }
     }
 
     return {ok: true, data: value, talentName: 'detectChanges'}
   },
 
+  // Required validation
   required: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
     if (!isBoolean(value) && value !== 'non-empty') {
       return {
         ok: false,
-        error: 'Required must be boolean or "non-empty"',
+        error: `Required must be true, false, or "non-empty", but received ${describeValue(
+          value
+        )}`,
+        talentName: 'required',
         suggestions: [
-          'Use true for required, "non-empty" for non-empty validation'
+          'Use true to require any value (including empty strings and zero)',
+          'Use "non-empty" to require non-empty values (excludes "", [], {})',
+          'Use false to make the field optional'
         ]
       }
     }
 
     return {ok: true, data: value, talentName: 'required'}
-  },
-
-  // Scheduling talents
-  interval: (value: any): DataDefResult => {
-    if (value === undefined) return {ok: true, data: undefined}
-
-    if (!isNumber(value) || value < 0) {
-      return {
-        ok: false,
-        error: 'Interval must be positive number (milliseconds)',
-        suggestions: ['Use 1000 for 1 second interval']
-      }
-    }
-
-    return {ok: true, data: value}
   },
 
   delay: (value: any): DataDefResult => {
@@ -280,75 +356,74 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     if (!isNumber(value) || value < 0) {
       return {
         ok: false,
-        error: 'Delay must be positive number (milliseconds)',
-        suggestions: ['Use 1000 for 1 second delay']
+        error: `Delay must be a positive number (milliseconds), but received ${describeValue(
+          value
+        )}`,
+        talentName: 'delay',
+        suggestions: [
+          'Specify initial delay in milliseconds before first execution',
+          'Example: 1000 to wait 1 second before executing',
+          'Use 0 for immediate execution'
+        ]
       }
     }
 
-    return {ok: true, data: value}
+    return {ok: true, data: value, talentName: 'schedule'}
+  },
+
+  interval: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (!isNumber(value) || value <= 0) {
+      return {
+        ok: false,
+        error: `Interval must be a positive number (milliseconds), but received ${describeValue(
+          value
+        )}`,
+
+        suggestions: [
+          'Specify time in milliseconds between repeated executions',
+          'Example: 5000 to execute every 5 seconds',
+          'Must be greater than 0 for repeated execution'
+        ]
+      }
+    }
+
+    return {ok: true, data: value, talentName: 'schedule'}
   },
 
   repeat: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    // Handle boolean values for infinite repeat control
-    if (isBoolean(value)) {
-      if (value === true) {
-        return {ok: true, data: value, talentName: 'interval'}
-      }
-      // false disables repeat
-      return {ok: true, data: false}
-    }
-
-    // Handle number values
-    if (!isNumber(value)) {
+    if (!isNumber(value) && value !== true && value !== false) {
       return {
         ok: false,
-        error: 'Repeat must be number greater than 1 or boolean',
+        error: `Repeat must be a number, true, or false, but received ${describeValue(
+          value
+        )}`,
+
         suggestions: [
-          'Use number > 1 for specific repeat count: repeat: 5',
-          'Use true for infinite repeats: repeat: true',
-          'Use false to disable repeats: repeat: false',
-          'Examples: repeat: 3 (runs 3 times), repeat: 10 (runs 10 times)',
-          'For scheduling: combine with interval for timed repeats',
-          'For infinite: repeat: true with interval: 5000 (every 5 seconds)',
-          'Note: repeat: 1 means run once (same as no repeat)',
-          'Note: repeat: 0 is invalid and will block execution'
+          'Use a number to specify exact repetitions (e.g., 5)',
+          'Use true for infinite repetitions',
+          'Use false or omit to execute only once'
         ]
       }
     }
 
-    // Numbers must be greater than 1 (reject 0 and 1)
-    if (value < 1) {
+    if (isNumber(value) && (value < 0 || !Number.isInteger(value))) {
       return {
         ok: false,
-        error: 'Repeat cannot be negative or zero',
+        error: `Repeat count must be a positive whole number, but received ${value}`,
+
         suggestions: [
-          'Use number greater than 1: repeat: 2, repeat: 5, repeat: 10',
-          'Use true for infinite repeats: repeat: true',
-          'Use false to disable: repeat: false',
-          'Zero repeats block execution - use false instead',
-          'Negative numbers are invalid for repeat counts'
+          'Use positive integers: 1, 2, 3, etc.',
+          'Use true for infinite repetitions',
+          'Decimals are not allowed for repeat counts'
         ]
       }
     }
 
-    if (value === 1) {
-      return {
-        ok: false,
-        error: 'Repeat value of 1 is redundant',
-        suggestions: [
-          'Remove repeat property - actions run once by default',
-          'Use repeat: 2 or higher for multiple executions',
-          'Use repeat: true for infinite repeats with interval',
-          'Use repeat: false to explicitly disable repeats',
-          'Combine with interval for timed execution: {repeat: 5, interval: 1000}'
-        ]
-      }
-    }
-
-    // Valid number greater than 1
-    return {ok: true, data: value, talentName: 'interval'}
+    return {ok: true, data: value, talentName: 'schedule'}
   },
 
   // Additional fields (pass-through)

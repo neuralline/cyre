@@ -176,25 +176,21 @@ const updateMetrics = (event: RawEvent): void => {
  * Update channel metrics with proper initialization
  */
 const updateChannelMetrics = (event: RawEvent): void => {
-  let metrics = channelStore.get(event.actionId)
-
-  if (!metrics) {
-    metrics = {
-      id: event.actionId,
-      calls: 0,
-      executions: 0,
-      errors: 0,
-      actualErrors: 0,
-      lastExecution: 0,
-      averageLatency: 0,
-      successRate: 1,
-      errorRate: 0,
-      protectionEvents: {
-        throttled: 0,
-        debounced: 0,
-        blocked: 0,
-        skipped: 0
-      }
+  let metrics = channelStore.get(event.actionId) || {
+    id: event.actionId,
+    calls: 0,
+    executions: 0,
+    errors: 0,
+    actualErrors: 0,
+    lastExecution: 0,
+    averageLatency: 0,
+    successRate: 1,
+    errorRate: 0,
+    protectionEvents: {
+      throttled: 0,
+      debounced: 0,
+      blocked: 0,
+      skipped: 0
     }
   }
 

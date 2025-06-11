@@ -28,7 +28,7 @@ export interface UseCyreConfig<TPayload = ActionPayload> {
   /** Channel name (used as ID if channelId not provided) */
   name?: string
   /** Explicit channel ID (overrides name) */
-  channelId?: string
+  id?: string
 
   // Core system properties (direct, not nested)
   /** Throttle time in milliseconds */
@@ -199,6 +199,8 @@ export interface GroupedChannel<TPayload = ActionPayload> {
 export interface BranchConfig {
   /** Branch identifier (auto-generated if not provided) - must be path-safe */
   id?: string
+  //optional branch name
+  name?: string
   /** Whether to isolate completely or allow cross-branch calls */
   isolated?: boolean
   /** Maximum depth for child branches */
