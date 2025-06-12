@@ -57,20 +57,20 @@ export const metricsCore = {
     }
 
     // Store event
-    eventStore.set(rawEvent.id, rawEvent)
+    //eventStore.set(rawEvent.id, rawEvent)
 
     // Update metrics efficiently
-    updateMetrics(rawEvent)
+    //updateMetrics(rawEvent)
 
     // Terminal output if requested
     if (event.log) {
-      sendToLog(event.logLevel || 'DEBUG', formatMessage(event))
+      sendToLog(event.logLevel || 'DEBUG', event)
     }
 
-    // Periodic cleanup
-    if (eventSequence % 100 === 0) {
-      scheduleCleanup()
-    }
+    // // Periodic cleanup
+    // if (eventSequence % 100 === 0) {
+    //   scheduleCleanup()
+    // }
   },
 
   // Query interfaces
@@ -400,24 +400,24 @@ const formatMessage = (event: SensorEvent): string => {
 const sendToLog = (logLevel: LogLevel, message: string): void => {
   switch (logLevel) {
     case LogLevel.ERROR:
-      log.error(message, false)
+      log.error(message)
       break
     case LogLevel.WARN:
-      log.warn(message, false)
+      log.warn(message)
       break
     case LogLevel.SUCCESS:
-      log.success(message, false)
+      log.success(message)
       break
     case LogLevel.CRITICAL:
-      log.critical(message, false)
+      log.critical(message)
       break
     case LogLevel.SYS:
-      log.sys(message, false)
+      log.sys(message)
       break
     case LogLevel.DEBUG:
-      log.debug(message, false)
+      log.debug(message)
       break
     default:
-      log.info(message, false)
+      log.info(message)
   }
 }

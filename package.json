@@ -91,7 +91,9 @@
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vitest": "^3.2.2"
+    "vitest": "^3.2.2",
+    "concurrently": "^9.1.2",
+    "ws": "^8.18.2"
   },
   "bundlesize": [
     {
@@ -103,9 +105,5 @@
     "node": ">=18.0.0",
     "bun": ">=1.0.0"
   },
-  "sideEffects": false,
-  "dependencies": {
-    "concurrently": "^9.1.2",
-    "ws": "^8.18.2"
-  }
+  "sideEffects": false
 }

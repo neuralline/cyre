@@ -78,8 +78,8 @@ export const cyreExecute = async (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    sensor.error(action.id, errorMessage, 'handler-error')
-    log.error(`Execution error: ${errorMessage}`)
+    sensor.error(action.id, errorMessage, 'cyre-execute')
+    //log.error(`Execution error: ${errorMessage}`)
     io.updateMetrics(action.id, {
       lastExecutionTime: Date.now(),
       errors: [{timestamp: Date.now(), message: errorMessage}]

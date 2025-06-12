@@ -34,15 +34,6 @@ export const useDispatch = async (
   // Preserve falsy values like 0, undefined, false, ''
   const currentPayload = payload !== undefined ? payload : action.payload
 
-  if (isTestAction) {
-    console.log('🔍 USE_DISPATCH START:', {
-      actionId: action.id,
-      hasPayload: payload !== undefined,
-      currentPayload: currentPayload,
-      payloadType: typeof currentPayload
-    })
-  }
-
   try {
     sensor.callToDispatch(action.id, {
       timestamp: Date.now(),
@@ -54,14 +45,6 @@ export const useDispatch = async (
     // Get subscriber
     const subscriber = subscribers.get(action.id)
 
-    if (isTestAction) {
-      console.log('🔍 SUBSCRIBER CHECK:', {
-        subscriberFound: !!subscriber,
-        subscriberId: subscriber?.id,
-        hasFunction: typeof subscriber?.handler === 'function'
-      })
-    }
-
     if (!subscriber) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
 
@@ -69,12 +52,11 @@ export const useDispatch = async (
         console.log('🔍 NO SUBSCRIBER FOUND:', error)
       }
 
-      sensor.log(
+      sensor.error(
         action.id,
-        'dispatch',
         'NO SUBSCRIBER FOUND',
         'dispatch',
-        true,
+
         {
           subscriberFound: false,
           actionExists: !!io.get(action.id)
@@ -88,8 +70,6 @@ export const useDispatch = async (
       console.log('🔍 CALLING cyreExecute with subscriber function')
     }
 
-    sensor.log(action.id, 'dispatch', 'dispatch-to-execute')
-
     // Execute through cyreExecute with EXACT payload value
     const result = await cyreExecute(
       {
@@ -100,44 +80,17 @@ export const useDispatch = async (
       subscriber.handler
     )
 
-    if (isTestAction) {
-      console.log('🔍 cyreExecute RESULT:', {
-        ok: result.ok,
-        payload: result.payload,
-        message: result.message,
-        error: result.error,
-        intraLink: result.intraLink
-      })
-    }
-
     const totalTime = performance.now() - startTime
-
-    // Record execution metrics
-    sensor.dispatchToExecute(action.id, totalTime, {
-      success: result.ok,
-      executionPath: 'direct-dispatch',
-      payloadPreserved: true,
-      schemaValidated: !!action.schema
-    })
 
     // Update payload history after successful execution for change detection
     if (result.ok) {
-      if (action.detectChanges) {
-        // Store exact payload value for change detection
-        payloadState.set(action.id, action.payload, 'call')
-      }
+      // Store exact payload value for change detection
+      payloadState.set(action.id, action.payload, 'call')
 
       // Track execution in metrics
       io.trackExecution(action.id, totalTime)
     } else {
-      if (isTestAction) {
-        console.log('🔍 EXECUTION FAILED:', {
-          message: result.message,
-          error: result.error
-        })
-      }
-
-      sensor.log(action.id, 'error', 'execution-failure', {
+      sensor.error(action.id, 'error', 'execution-failure', {
         errorMessage: result.message,
         executionTime: totalTime
       })

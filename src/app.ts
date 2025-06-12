@@ -112,7 +112,7 @@ const initialize = async (
     log.sys(MSG.QUANTUM_HEADER)
 
     // Initialize advanced systems
-    initializeQuerySystem()
+    //initializeQuerySystem()
 
     initializeBreathing()
     TimeKeeper.resume()
@@ -276,89 +276,45 @@ export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
-  if (!id || typeof id !== 'string') {
-    sensor.log('unknown caller', 'call', 'call-validation', 'app/call', true, {
-      invalidId: true,
-      providedId: id
-    })
-    return {
-      ok: false,
-      payload: null,
-      message: MSG.CALL_INVALID_ID
-    }
-  }
-
-  const action = io.get(id)
-  if (!action) {
-    sensor.debug(id, 'error', 'call-validation', {
-      actionNotFound: true,
-      actionId: id
-    })
-    return {
-      ok: false,
-      payload: null,
-      message: `Channel not found: ${id}`
-    }
-  }
-
-  const callStartTime = Date.now()
-  const originalPayload = payload ?? action.payload
-
   try {
-    sensor.log(id, 'call', 'call-entry', {
-      timestamp: callStartTime,
-      hasPayload: payload !== undefined,
-      payloadType: typeof payload,
-      actionType: action.type || 'unknown'
-    })
+    const action = io.get(id)
+    if (!action || action._isBlocked) {
+      log.critical(`call-validation: ${id}`)
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.CALL_INVALID_ID}: ${id} `
+      }
+    }
+    // log.debug(action)
+
+    const originalPayload = payload ?? action.payload
 
     // PRE-PIPELINE PROTECTIONS (Block, Throttle, Debounce, Recuperation)
 
-    // STEP 1: Pre-computed blocking check (immediate exit)
-    if (action._isBlocked) {
-      sensor.log(action.id, 'blocked', 'pre-computed-block', {
-        reason: action._blockReason
-      })
-      return {
-        ok: false,
-        payload: undefined,
-        message: action._blockReason || 'Action blocked'
-      }
-    }
-
-    // STEP 2: Block talent check
-    if (action.block === true) {
-      sensor.log(action.id, 'blocked', 'talent-block')
-      return {
-        ok: false,
-        payload: undefined,
-        message: 'Action is blocked'
-      }
-    }
-
     // STEP 3: Recuperation check
-    const breathing = metricsState.get().breathing
-    if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-      sensor.log(
-        action.id,
-        'blocked',
-        'System is recuperating - only critical actions allowed',
-        'app/call/recuperation',
-        true,
-        {
-          stress: breathing.stress,
-          priority: action.priority?.level || 'medium'
-        }
-      )
-      return {
-        ok: false,
-        payload: undefined,
-        message: 'System is recuperating - only critical actions allowed'
-      }
-    }
+    // const breathing = metricsState.get().breathing
+    // if (breathing.isRecuperating && action.priority?.level !== 'critical') {
+    //   sensor.log(
+    //     action.id,
+    //     'blocked',
+    //     'System is recuperating - only critical actions allowed',
+    //     'app/call/recuperation',
+    //     true,
+    //     {
+    //       stress: breathing.stress,
+    //       priority: action.priority?.level || 'medium'
+    //     }
+    //   )
+    //   return {
+    //     ok: false,
+    //     payload: undefined,
+    //     message: 'System is recuperating - only critical actions allowed'
+    //   }
+    // }
 
     // STEP 4: Throttle check
-    if (action.throttle && action.throttle > 0) {
+    if (action._hasProtections && action.throttle && action.throttle > 0) {
       const metrics = io.getMetrics(action.id)
       const lastExecTime = metrics?.lastExecutionTime || 0
 
@@ -379,9 +335,12 @@ export const call = async (
         }
       }
     }
-
     // STEP 5: Debounce check (most complex protection)
-    if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
+    else if (
+      action.debounce &&
+      action.debounce > 0 &&
+      !action._bypassDebounce
+    ) {
       const timerId = `${action.id}-debounce-${Date.now()}`
 
       if (!action._debounceTimer) {
@@ -399,27 +358,7 @@ export const call = async (
           _firstDebounceCall: action._firstDebounceCall
         })
 
-        sensor.log(action.id, 'info', 'debounce-first-execution', {
-          debounceMs: action.debounce,
-          timerId: timerId.slice(-8)
-        })
-
-        // Execute immediately for first call
-        const result = await processCall(action, originalPayload)
-
-        sensor.log(
-          action.id,
-          'success',
-          'debounce-first-execution-complete',
-          'app/call/debounce',
-          false,
-          {
-            success: result.ok,
-            finalMessage: result.message
-          }
-        )
-
-        return result
+        return await processCall(action, originalPayload)
       } else {
         // Subsequent calls within debounce window
 
@@ -440,26 +379,9 @@ export const call = async (
             _firstDebounceCall: undefined
           })
 
-          sensor.log(action.id, 'info', 'debounce-maxwait-exceeded', {
-            maxWait: action.maxWait,
-            firstCallTime: firstCallTime,
-            elapsed: Date.now() - firstCallTime
-          })
-
           // Execute immediately due to maxWait
-          const result = await processCall(action, originalPayload)
 
-          sensor.log(
-            action.id,
-            'success',
-            'debounce-maxwait-execution-complete',
-            {
-              success: result.ok,
-              finalMessage: result.message
-            }
-          )
-
-          return result
+          return await processCall(action, originalPayload)
         } else {
           // Set up new debounce delay with latest payload
           action._debounceTimer = timerId
@@ -497,26 +419,10 @@ export const call = async (
                   })
                 }
 
-                sensor.log(action.id, 'info', 'debounce-delayed-execution', {
-                  executedAfterDelay: true,
-                  timestamp: Date.now(),
-                  timerId: timerId.slice(-8)
-                })
-
                 // Execute with the latest payload
                 const result = await processCall(
                   currentAction || action,
                   latestPayload
-                )
-
-                sensor.log(
-                  action.id,
-                  'success',
-                  'debounce-delayed-execution-complete',
-                  {
-                    success: result.ok,
-                    finalMessage: result.message
-                  }
                 )
 
                 return result
@@ -567,19 +473,6 @@ export const call = async (
             }
           }
 
-          sensor.log(
-            action.id,
-            'info',
-            'debounce-delayed-scheduled',
-            'app/call/debounce',
-            false,
-            {
-              debounceMs: action.debounce,
-              timerId: timerId.slice(-8),
-              payloadUpdated: true
-            }
-          )
-
           // Return debounced response
           return {
             ok: true,
@@ -598,25 +491,8 @@ export const call = async (
 
     // ALL PRE-PIPELINE PROTECTIONS PASSED - Continue to pipeline
 
-    sensor.log(action.id, 'info', 'pre-pipeline-passed', {
-      protections: {
-        block: !!action.block,
-        throttle: !!(action.throttle && action.throttle > 0),
-        debounce: !!(action.debounce && action.debounce > 0),
-        recuperation: breathing.isRecuperating
-      }
-    })
-
     // Execute the processing pipeline
     const result = await processCall(action, originalPayload)
-
-    const totalCallTime = Date.now() - callStartTime
-
-    sensor.log(id, 'info', 'call-completion', {
-      success: result.ok,
-      totalCallTime,
-      callPath: result.metadata?.executionPath || 'unknown'
-    })
 
     return result
   } catch (error) {

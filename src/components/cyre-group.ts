@@ -1,5 +1,5 @@
 // src/components/cyre-group.ts
-// Channel grouping with shared configuration and middleware
+// Channel grouping with shared configuration
 
 import type {
   IO,
@@ -8,7 +8,7 @@ import type {
   GroupState,
   GroupResult
 } from '../types/core'
-import {io, subscribers, middlewares} from '../context/state'
+import {io, subscribers} from '../context/state'
 import {sensor} from '../context/metrics-report'
 import {log} from './cyre-log'
 import {createStore} from '../context/create-store'
@@ -19,7 +19,7 @@ import {createStore} from '../context/create-store'
       
       Channel grouping system:
       - Pattern-based channel matching
-      - Shared middleware and configuration
+      - Shared   configuration
       - Group-level operations
       - Simple alert management
 
@@ -62,35 +62,16 @@ const applySharedConfig = (channelId: string, shared: Partial<IO>): void => {
   const existing = io.get(channelId)
   if (!existing) return
 
-  const {middleware: sharedMiddleware, alerts, ...safeShared} = shared
+  const {alerts, ...safeShared} = shared
 
   const updated: IO = {
     ...existing,
     ...safeShared,
-    id: channelId,
-    middleware: [...(existing.middleware || []), ...(sharedMiddleware || [])]
+    id: channelId
   }
 
   io.set(updated)
   sensor.log(channelId, 'info', 'group-config-applied')
-}
-
-/**
- * Setup group middleware chain
- */
-const setupGroupMiddleware = (
-  groupId: string,
-  middlewareFns: any[]
-): string[] => {
-  const middlewareIds: string[] = []
-
-  middlewareFns.forEach((fn, index) => {
-    const middlewareId = `${groupId}-middleware-${index}`
-    middlewares.add({id: middlewareId, handler: fn})
-    middlewareIds.push(middlewareId)
-  })
-
-  return middlewareIds
 }
 
 /**
@@ -114,15 +95,12 @@ export const createGroup = (
     }
 
     const matchedChannels = findMatchingChannels(config.channels)
-    const middlewareIds = config.shared.middleware
-      ? setupGroupMiddleware(groupId, config.shared.middleware)
-      : []
 
     const groupState: GroupState = {
       id: groupId,
       config,
       matchedChannels: new Set(matchedChannels),
-      middlewareIds,
+
       alertStates: new Map(),
       isActive: true,
       createdAt: Date.now()
@@ -135,8 +113,7 @@ export const createGroup = (
     groupStore.set(groupId, groupState)
 
     sensor.log(groupId, 'success', 'group-created', {
-      matchedChannels: matchedChannels.length,
-      middlewareCount: middlewareIds.length
+      matchedChannels: matchedChannels.length
     })
 
     return {
@@ -256,16 +233,11 @@ export const removeGroup = (groupId: string): boolean => {
   const group = groupStore.get(groupId)
   if (!group) return false
 
-  group.middlewareIds.forEach(middlewareId => {
-    middlewares.forget(middlewareId)
-  })
-
   group.isActive = false
   const removed = groupStore.forget(groupId)
 
   sensor.log(groupId, 'info', 'group-removed', {
-    channelCount: group.matchedChannels.size,
-    middlewareCount: group.middlewareIds.length
+    channelCount: group.matchedChannels.size
   })
 
   return removed

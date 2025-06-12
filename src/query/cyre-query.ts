@@ -293,26 +293,25 @@ const querySubscriptions = new QuerySubscription()
 // Hook into data changes to invalidate cache and update subscriptions
 const setupChangeListeners = (): void => {
   // Monitor channel changes
-  const originalSetAction = io.set
-  io.set = (action: IO) => {
-    originalSetAction.call(io, action)
-    queryIndexes.markDirty()
-    queryCache.clear()
-    process.nextTick(() => querySubscriptions.triggerAll())
-  }
-
-  // Monitor payload changes
-  const originalSetPayload = payloadState.set
-  payloadState.set = (
-    channelId: string,
-    payload: ActionPayload,
-    source: any
-  ) => {
-    originalSetPayload.call(payloadState, channelId, payload, source)
-    queryIndexes.markDirty()
-    queryCache.clear()
-    process.nextTick(() => querySubscriptions.triggerAll())
-  }
+  // const originalSetAction = io.getAll()
+  //   io.set = (action: IO) => {
+  //     originalSetAction.call(io, action)
+  //     queryIndexes.markDirty()
+  //     queryCache.clear()
+  //     process.nextTick(() => querySubscriptions.triggerAll())
+  //   }
+  //   // Monitor payload changes
+  //   const originalSetPayload = payloadState.set
+  //   payloadState.set = (
+  //     channelId: string,
+  //     payload: ActionPayload,
+  //     source: any
+  //   ) => {
+  //     originalSetPayload.call(payloadState, channelId, payload, source)
+  //     queryIndexes.markDirty()
+  //     queryCache.clear()
+  //     process.nextTick(() => querySubscriptions.triggerAll())
+  //   }
 }
 
 /**

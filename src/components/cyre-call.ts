@@ -2,10 +2,9 @@
 
 import {useDispatch} from './cyre-dispatch'
 import {TimeKeeper} from './cyre-timekeeper'
-import {executePipeline} from '../schema/talent-definitions'
 import {sensor} from '../context/metrics-report'
-import {log} from './cyre-log'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
+import {executePipeline} from '../schema/channel-operators'
 
 /*
 
@@ -19,193 +18,63 @@ import type {IO, ActionPayload, CyreResponse} from '../types/core'
 */
 
 /**
- * Processing pipeline execution with optimizations
- */
-const executeProcessingPath = async (
-  action: IO,
-  payload: ActionPayload | undefined
-): Promise<CyreResponse> => {
-  const currentPayload = payload ?? action.payload
-
-  // Use optimized pipeline execution
-  const pipelineResult = executePipeline(action, currentPayload)
-
-  if (!pipelineResult.ok) {
-    sensor.log(action.id, 'skip', 'processing-pipeline-blocked', {
-      reason: pipelineResult.message,
-      talents: action._processingTalents
-    })
-
-    return {
-      ok: false,
-      payload: pipelineResult.payload,
-      message: pipelineResult.message || 'Pipeline blocked execution'
-    }
-  }
-
-  // Continue to dispatch with processed payload
-  return await useDispatch(action, pipelineResult.payload)
-}
-
-/**
- * Scheduling path execution with proper infinite repeats handling
- */
-const processSchedule = async (
-  action: IO,
-  payload: ActionPayload | undefined
-): Promise<CyreResponse> => {
-  const currentPayload = payload ?? action.payload
-
-  // Determine timing parameters
-  const interval = action.interval ?? 0
-  const delay = action.delay || undefined
-  const repeat = action.repeat || 1
-
-  // Use the interval as the duration, fall back to delay if no interval
-  const duration = interval > 0 ? interval : delay
-
-  // Generate unique timer ID for this scheduling request
-  const timerId = action.id
-
-  sensor.log(action.id, 'info', 'scheduling-action', {
-    delay,
-    interval,
-    repeat,
-    duration,
-    timerId: timerId,
-    hasPayload: currentPayload !== undefined
-  })
-
-  try {
-    // Create execution callback that dispatches the action directly
-    const executeCallback = async () => {
-      try {
-        // Execute through dispatch to trigger the registered handler
-        const result = await useDispatch(action, currentPayload)
-
-        if (!result.ok && action.isTestAction) {
-          log.error(
-            `🔍 Scheduled execution failed for ${action.id}: ${result.message}`
-          )
-          sensor.error(
-            action.id,
-            'schedule execution fail',
-            'scheduled-execution-error'
-          )
-        }
-
-        return result
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        sensor.error(action.id, errorMessage, 'scheduled-execution-error')
-        log.error(`Scheduled execution error for ${action.id}: ${errorMessage}`)
-        return {
-          ok: false,
-          payload: undefined,
-          message: `Scheduled execution error: ${errorMessage}`
-        }
-      }
-    }
-
-    // Schedule with TimeKeeper - key fix for infinite repeats
-    const timerResult = TimeKeeper.keep(
-      action.duration,
-      executeCallback,
-      action.repeat, // This is the key - pass actualRepeat correctly
-      timerId,
-      action.delay
-    )
-
-    if (timerResult.kind === 'error') {
-      sensor.error(
-        action.id,
-        timerResult.error.message,
-        'scheduling-timer-error'
-      )
-      return {
-        ok: false,
-        payload: undefined,
-        message: `Scheduling failed: ${timerResult.error.message}`
-      }
-    }
-
-    sensor.log(action.id, 'success', 'action-scheduled', {
-      delay,
-      interval,
-      duration,
-      timerId,
-      timeKeeperResponse: timerResult.kind
-    })
-
-    return {
-      ok: true,
-      payload: currentPayload,
-      message: `Action scheduled successfully`,
-      metadata: {
-        scheduled: true,
-        timerId,
-        delay,
-        interval,
-        repeat,
-        duration,
-        executionPath: 'scheduling'
-      }
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-
-    sensor.error(action.id, errorMessage, 'scheduling-exception')
-    log.error(`Scheduling exception for ${action.id}: ${errorMessage}`)
-
-    return {
-      ok: false,
-      payload: undefined,
-      message: `Scheduling exception: ${errorMessage}`
-    }
-  }
-}
-
-/**
  * Main optimized process call function
  */
 export async function processCall(
   action: IO,
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
-  // Get cached action data to avoid repeated property access
-
-  // Minimal sensor logging for performance
-  sensor.log(action.id, 'call', 'call-processing', {
-    timestamp: Date.now(),
-    hasPayload: payload !== undefined,
-    path: action._hasFastPath
-      ? 'fast'
-      : action._hasScheduling
-      ? 'scheduling'
-      : 'processing'
-  })
-
   try {
-    // Execution path selection with proper priority
-    if (action._hasScheduling) {
-      // Scheduling path has highest priority for timing-based actions
+    let finalPayload = payload ?? action.payload
 
-      return await processSchedule(action, payload)
-    } else if (action._hasProcessing) {
-      // Processing path for talent pipeline
-
-      return await executeProcessingPath(action, payload)
-    } else {
-      // Fast path for simple actions
-
-      return await useDispatch(action, payload)
+    // INLINE PROCESSING PIPELINE
+    if (action._hasProcessing && action._processingTalents?.length) {
+      for (const talentName of action._processingTalents) {
+        // Use optimized pipeline execution
+        const talentResult = executePipeline(action, finalPayload)
+        if (!talentResult.ok) {
+          return {
+            ok: false,
+            payload: talentResult.payload,
+            message: talentResult.message || 'Pipeline blocked execution'
+          }
+        }
+        if (talentResult.payload !== undefined) {
+          finalPayload = talentResult.payload
+        }
+      }
     }
+
+    // INLINE SCHEDULING LOGIC
+    if (action._hasScheduling) {
+      const result = TimeKeeper.keep(
+        action.interval || 0,
+        async () => await useDispatch(action, finalPayload),
+        action.repeat || 1,
+        action.id,
+        action.delay
+      )
+
+      if (result.kind === 'error') {
+        return {
+          ok: false,
+          payload: undefined,
+          message: `Scheduling failed: ${result.error.message}`
+        }
+      }
+
+      return {
+        ok: true,
+        payload: undefined,
+        message: 'Scheduled execution'
+      }
+    }
+
+    // DIRECT DISPATCH (fastest path)
+    return await useDispatch(action, finalPayload)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-
     sensor.error(action.id, errorMessage, 'process-call-exception')
-
     return {
       ok: false,
       payload: undefined,

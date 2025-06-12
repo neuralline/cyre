@@ -1,4 +1,4 @@
-// intelligence-tests.ts
+// demo/intelligence-tests.ts
 // Complete test examples for the Cyre intelligence system
 
 import {cyre} from '../src'

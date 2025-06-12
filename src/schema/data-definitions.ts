@@ -442,114 +442,15 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   timeOfCreation: (value: any): DataDefResult => ({ok: true, data: value})
 }
 
-/**
- * Compile action with talent discovery, pipeline building, and path indexing
- */
-export const compileAction = (
-  action: Partial<IO>
-): {
-  compiledAction: IO
-  errors: string[]
-  warnings: string[]
-  hasFastPath: boolean
-} => {
-  const errors: string[] = []
-  const warnings: string[] = []
-  const compiledAction: Partial<IO> = {...action}
-  const processingPipeline: TalentName[] = []
-
-  // Track talent categories
-  let hasProtections = false
-  let hasScheduling = false
-  let hasProcessing = false
-
-  // Process fields in order to preserve user-defined execution sequence
-  const actionKeys = Object.keys(action)
-
-  for (const key of actionKeys) {
-    const value = action[key as keyof typeof action]
-    const definition = dataDefinitions[key as keyof typeof dataDefinitions]
-
-    if (definition) {
-      const result = definition(value)
-
-      if (!result.ok) {
-        if (result.blocking) {
-          // Early return for blocking conditions
-          return {
-            compiledAction: {
-              ...action,
-              _isBlocked: true,
-              _blockReason: result.error!
-            } as IO,
-            errors: [result.error!],
-            warnings,
-            hasFastPath: false
-          }
-        } else {
-          errors.push(result.error || 'Validation failed')
-        }
-      } else {
-        // Store validated value
-        compiledAction[key as keyof IO] = result.data
-
-        // Track talent categories and build pipeline
-        if (result.talentName) {
-          // Check if it's a processing talent and add to pipeline
-          if (PROCESSING_TALENTS.includes(result.talentName as any)) {
-            processingPipeline.push(result.talentName)
-            hasProcessing = true
-          }
-
-          // Check protection talents (validated but not in pipeline)
-          if (PROTECTION_TALENTS.includes(result.talentName as any)) {
-            hasProtections = true
-          }
-        }
-
-        // Check scheduling talents
-        if (SCHEDULING_TALENTS.includes(key as any)) {
-          hasScheduling = true
-        }
-      }
-    } else {
-      // Unknown field - pass through with warning
-      warnings.push(`Unknown field: ${key}`)
-      compiledAction[key as keyof IO] = value
-    }
-  }
-
-  // Determine fast path eligibility
-  const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
-
-  // Set compilation flags
-  compiledAction._hasFastPath = hasFastPath
-  compiledAction._hasProtections = hasProtections
-  compiledAction._hasProcessing = hasProcessing
-  compiledAction._hasScheduling = hasScheduling
-
-  // Set processing pipeline if we have processing talents
-  if (processingPipeline.length > 0) {
-    compiledAction._processingPipeline = processingPipeline
-  }
-
-  return {
-    compiledAction: compiledAction as IO,
-    errors,
-    warnings,
-    hasFastPath
-  }
-}
-
 // Plugin architecture for extensible validation
-export interface ValidationPlugin {
+interface ValidationPlugin {
   name: string
   definitions: Record<string, (value: any) => DataDefResult>
 }
 
 const registeredPlugins: ValidationPlugin[] = []
 
-export const registerValidationPlugin = (plugin: ValidationPlugin): void => {
+const registerValidationPlugin = (plugin: ValidationPlugin): void => {
   registeredPlugins.push(plugin)
 
   // Merge plugin definitions into main definitions
@@ -561,11 +462,11 @@ export const registerValidationPlugin = (plugin: ValidationPlugin): void => {
 /**
  * Cache management
  */
-export const clearValidationCache = (): void => {
+const clearValidationCache = (): void => {
   validationCache.clear()
 }
 
-export const getValidationCacheStats = (): {
+const getValidationCacheStats = (): {
   size: number
   limit: number
 } => {

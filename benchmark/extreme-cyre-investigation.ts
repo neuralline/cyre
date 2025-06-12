@@ -1,7 +1,7 @@
 // benchmark/extreme-cyre-investigation.ts
 // Push Cyre to its absolute limits and investigate performance mysteries
 
-import {cyre, schema, createBranch} from '../src'
+import {cyre, schema, useBranch} from '../src'
 
 const colors = {
   red: '\x1b[31m',
@@ -380,7 +380,7 @@ async function branchSystemStress() {
 
   // Create branches and channels
   for (let b = 0; b < branchCount; b++) {
-    const branch = createBranch(undefined, {id: `stress-branch-${b}`})
+    const branch = useBranch(undefined, {id: `stress-branch-${b}`})
     branches.push(branch)
 
     for (let c = 0; c < channelsPerBranch; c++) {

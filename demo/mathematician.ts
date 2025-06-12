@@ -1,6 +1,8 @@
+// demo/mathematician.ts
+
 // Set up matrix getters
 /**
- * src/benchmarks/mathematician-benchmark.ts
+ *
  * Channel lifecycle performance testing - The Mathematician Module
  * Tests Cyre's ability to create, process, and destroy channels like mathematical equations
  */

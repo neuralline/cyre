@@ -75,7 +75,7 @@ export async function runAdvancedBenchmarks(): Promise<AdvancedBenchmarkResults>
       cyre.action({
         id: `protected-action-${i}`,
         throttle: 100,
-        debounce: 50,
+        // debounce: 50,
         detectChanges: true,
         schema: cyre.schema.object({
           value: cyre.schema.number(),
@@ -431,16 +431,8 @@ export async function runCompleteAdvancedBenchmark(): Promise<void> {
 
     // System health check
     console.log('\n🏥 System Health Check:')
-    const metrics = cyre.getMetricsReport()
-    const breathingState = cyre.getBreathingState()
-
-    console.log(`Total Operations: ${metrics.global.totalCalls}`)
-    console.log(
-      `Error Rate: ${(
-        (metrics.global.totalErrors / metrics.global.totalCalls) *
-        100
-      ).toFixed(2)}%`
-    )
+    //const metrics = cyre.getMetricsReport()
+    //
     console.log(`System Stress: ${(breathingState.stress * 100).toFixed(1)}%`)
     console.log(`Breathing Rate: ${breathingState.currentRate}ms`)
   } catch (error) {

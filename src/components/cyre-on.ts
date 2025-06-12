@@ -33,7 +33,7 @@ type SubscriptionResult = {
   ok: boolean
   message: string
   error?: SubscriptionError
-  subscriber?: Subscriber
+  subscriber?: ISubscriber
 }
 
 /**

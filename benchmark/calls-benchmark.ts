@@ -1,8 +1,8 @@
 // benchmark/calls-benchmark.ts
 // Comprehensive benchmark testing for Cyre performance validation
 
-import {compileActionWithStats} from '../src/schema/compilation-integration'
 import {processCall} from '../src/components/cyre-call'
+import {compileAction} from '../src/schema/data-definitions'
 import {executePipeline} from '../src/schema/talent-definitions'
 import type {IO, ActionPayload, CyreResponse} from '../src/types/core'
 
@@ -237,10 +237,10 @@ export const testChannelIsolation = async (
 
   // Compile all actions first
   const compiledFast = testActions.fastActions.map(
-    action => compileActionWithStats(action).compiledAction
+    action => compileAction(action).compiledAction
   )
   const compiledSlow = testActions.slowActions.map(
-    action => compileActionWithStats(action).compiledAction
+    action => compileAction(action).compiledAction
   )
 
   // Baseline: Fast channels alone
@@ -317,7 +317,7 @@ export const testConcurrency = async (
 
   const testActions = createTestActions()
   const compiledComplex = testActions.complexActions.map(
-    action => compileActionWithStats(action).compiledAction
+    action => compileAction(action).compiledAction
   )
 
   for (const concurrency of concurrencyLevels) {
@@ -429,7 +429,7 @@ export const testStateTalentPerformance = async (
   for (const talent of talents) {
     console.log(`   📊 Testing ${talent.name} talent`)
 
-    const compiledAction = compileActionWithStats({
+    const compiledAction = compileAction({
       ...talent.action,
       _hasProcessing: true,
       _processingTalents: [talent.name]
@@ -477,7 +477,7 @@ export const testComplexToSimplePerformance = async (
     console.log(`   📊 Testing ${category.name}`)
 
     const compiledActions = category.actions.map(
-      action => compileActionWithStats(action).compiledAction
+      action => compileAction(action).compiledAction
     )
 
     measurer.start()
@@ -532,7 +532,7 @@ export const testMemoryLeaks = async (
   ]
 
   const compiledActions = allActions.map(
-    action => compileActionWithStats(action).compiledAction
+    action => compileAction(action).compiledAction
   )
 
   const getMemory = () => {
@@ -604,7 +604,7 @@ export const testCacheEffectivenessUnderLoad = async (): Promise<void> => {
     detectChanges: true
   }
 
-  const compiledAction = compileActionWithStats(repeatedAction).compiledAction
+  const compiledAction = compileAction(repeatedAction).compiledAction
   const payload = {valid: true, value: 42}
 
   // Cold cache test

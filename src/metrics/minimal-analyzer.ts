@@ -203,11 +203,11 @@ function calculatePerformance(channels: any[], systemMetrics: SystemMetrics) {
   }
 }
 
-function calculateHealth(
+const calculateHealth = (
   performance: any,
   channels: any[],
   systemMetrics: SystemMetrics
-) {
+) => {
   let score = 100
   const issues: string[] = []
 
@@ -258,7 +258,7 @@ function calculateHealth(
   }
 }
 
-function calculatePipeline(channels: any[], systemMetrics: SystemMetrics) {
+const calculatePipeline = (channels: any[], systemMetrics: SystemMetrics) => {
   const totalCalls = systemMetrics.totalCalls
   const completedCalls = systemMetrics.totalExecutions
   const failedCalls = systemMetrics.totalErrors
@@ -280,7 +280,7 @@ function calculatePipeline(channels: any[], systemMetrics: SystemMetrics) {
   }
 }
 
-function detectSimpleAnomalies(channels: any[]) {
+const detectSimpleAnomalies = (channels: any[]) => {
   const anomalies: any[] = []
 
   // Simple anomaly detection
@@ -303,7 +303,7 @@ function detectSimpleAnomalies(channels: any[]) {
   }
 }
 
-function calculateInsights(allChannels: any[], activeChannels: any[]) {
+const calculateInsights = (allChannels: any[], activeChannels: any[]) => {
   const topPerformers = activeChannels
     .sort((a, b) => b.calls - a.calls)
     .slice(0, 3)
@@ -335,11 +335,11 @@ function calculateInsights(allChannels: any[], activeChannels: any[]) {
   }
 }
 
-function generateSimpleRecommendations(
+const generateSimpleRecommendations = (
   health: any,
   performance: any,
   pipeline: any
-): string[] {
+): string[] => {
   const recommendations: string[] = []
 
   if (pipeline.efficiency < 0.5) {
