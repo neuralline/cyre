@@ -277,13 +277,30 @@ export const call = async (
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   try {
+    if (!id) {
+      log.critical(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.UNABLE_TO_COMPLY}: ${id} `
+      }
+    }
     const action = io.get(id)
-    if (!action || action._isBlocked) {
-      log.critical(`call-validation: ${id}`)
+    if (!action) {
+      log.critical(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
       return {
         ok: false,
         payload: null,
         message: `${MSG.CALL_INVALID_ID}: ${id} `
+      }
+    }
+
+    if (action._isBlocked) {
+      log.critical(`${MSG.CALL_NOT_RESPONDING}: ${id}`)
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.CALL_NOT_RESPONDING}: ${id} `
       }
     }
     // log.debug(action)
@@ -292,29 +309,29 @@ export const call = async (
 
     // PRE-PIPELINE PROTECTIONS (Block, Throttle, Debounce, Recuperation)
 
-    // STEP 3: Recuperation check
-    // const breathing = metricsState.get().breathing
-    // if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-    //   sensor.log(
-    //     action.id,
-    //     'blocked',
-    //     'System is recuperating - only critical actions allowed',
-    //     'app/call/recuperation',
-    //     true,
-    //     {
-    //       stress: breathing.stress,
-    //       priority: action.priority?.level || 'medium'
-    //     }
-    //   )
-    //   return {
-    //     ok: false,
-    //     payload: undefined,
-    //     message: 'System is recuperating - only critical actions allowed'
-    //   }
-    // }
+    //STEP 3: Recuperation check
+    const breathing = metricsState.get().breathing
+    if (breathing.isRecuperating && action.priority?.level !== 'critical') {
+      sensor.log(
+        action.id,
+        'blocked',
+        'System is recuperating - only critical actions allowed',
+        'app/call/recuperation',
+        true,
+        {
+          stress: breathing.stress,
+          priority: action.priority?.level || 'medium'
+        }
+      )
+      return {
+        ok: false,
+        payload: undefined,
+        message: 'System is recuperating - only critical actions allowed'
+      }
+    }
 
     // STEP 4: Throttle check
-    if (action._hasProtections && action.throttle && action.throttle > 0) {
+    if (action.throttle && action.throttle > 0) {
       const metrics = io.getMetrics(action.id)
       const lastExecTime = metrics?.lastExecutionTime || 0
 
@@ -497,7 +514,6 @@ export const call = async (
     return result
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    const totalCallTime = Date.now() - callStartTime
 
     sensor.error(id, errorMessage, 'call-execution')
 
@@ -507,7 +523,6 @@ export const call = async (
       message: `Call failed: ${errorMessage}`,
       error: errorMessage,
       metadata: {
-        totalCallTime,
         executionPath: 'call-error'
       }
     }

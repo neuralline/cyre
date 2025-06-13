@@ -28,20 +28,18 @@ export async function processCall(
     let finalPayload = payload ?? action.payload
 
     // INLINE PROCESSING PIPELINE
-    if (action._hasProcessing && action._processingTalents?.length) {
-      for (const talentName of action._processingTalents) {
-        // Use optimized pipeline execution
-        const talentResult = executePipeline(action, finalPayload)
-        if (!talentResult.ok) {
-          return {
-            ok: false,
-            payload: talentResult.payload,
-            message: talentResult.message || 'Pipeline blocked execution'
-          }
+    if (action._processingTalents?.length) {
+      // Use optimized pipeline execution
+      const talentResult = executePipeline(action, finalPayload)
+      if (!talentResult.ok) {
+        return {
+          ok: false,
+          payload: talentResult.payload,
+          message: talentResult.message || 'Pipeline blocked execution'
         }
-        if (talentResult.payload !== undefined) {
-          finalPayload = talentResult.payload
-        }
+      }
+      if (talentResult.payload !== undefined) {
+        finalPayload = talentResult.payload
       }
     }
 

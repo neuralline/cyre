@@ -290,7 +290,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
     // 8. STORE COMPILED ACTION
     try {
-      io.set(finalAction)
+      io.set({...action, ...finalAction})
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
