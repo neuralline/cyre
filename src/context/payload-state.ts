@@ -1,117 +1,268 @@
 // src/context/payload-state.ts
-// Dedicated payload state management with reactive features
+// Payload state management with functional performance optimizations
 
+import type {ActionPayload, StateKey} from '../types/core'
 import {createStore} from './create-store'
-import {isEqual} from '../libs/utils'
 import {log} from '../components/cyre-log'
 import {sensor} from './metrics-report'
-import type {ActionPayload} from '../types/core'
+import {isEqual} from '../libs/utils'
+import {PAYLOAD_CONFIG} from '../config/cyre-config'
 
 /*
-
-      C.Y.R.E - P.A.Y.L.O.A.D - S.T.A.T.E
+      C.Y.R.E. - P.A.Y.L.O.A.D. - S.T.A.T.E
       
-      Dedicated payload state management:
-      - Separate from IO configuration
-      - Change detection and history
-      - Reactive payload features
-      - State snapshots and time travel
-      - Payload validation and transformation
-      - Cross-channel payload sharing
-
+      Optimized functional payload management:
+      - Separated from IO state for clean architecture
+      - Circular buffer history for performance
+      - Fast equality checks for common patterns
+      - Deferred logging to avoid blocking call path
+      - Memory-efficient operations with pooling
+      - 100% functional - no classes or OOP
 */
+
+export interface PayloadHistoryEntry {
+  payload: ActionPayload
+  timestamp: number
+  source: 'initial' | 'call' | 'pipeline' | 'external'
+  changeType: 'initial' | 'set' | 'merge' | 'transform'
+}
+
+export interface PayloadMetadata {
+  lastUpdated: number
+  updateCount: number
+  source: 'initial' | 'call' | 'pipeline' | 'external'
+  frozen: boolean
+}
 
 export interface PayloadEntry {
   current: ActionPayload
   previous?: ActionPayload
-  history: PayloadHistoryEntry[]
-  metadata: {
-    lastUpdated: number
-    updateCount: number
-    source: 'initial' | 'call' | 'pipeline' | 'external'
-    frozen: boolean
+  history: PayloadHistoryEntry[] | CircularHistory
+  metadata: PayloadMetadata
+}
+
+// Functional circular buffer implementation
+interface CircularHistory {
+  buffer: PayloadHistoryEntry[]
+  head: number
+  size: number
+  capacity: number
+  add: (entry: PayloadHistoryEntry) => void
+  toArray: () => PayloadHistoryEntry[]
+  length: number
+}
+
+// Factory function for circular history buffer
+const createCircularHistory = (
+  capacity: number = PAYLOAD_CONFIG.MAX_HISTORY_PER_CHANNEL
+): CircularHistory => {
+  const buffer: PayloadHistoryEntry[] = new Array(capacity)
+  let head = 0
+  let size = 0
+
+  const add = (entry: PayloadHistoryEntry): void => {
+    buffer[head] = entry
+    head = (head + 1) % capacity
+    if (size < capacity) {
+      size++
+    }
+  }
+
+  const toArray = (): PayloadHistoryEntry[] => {
+    if (size === 0) return []
+
+    const result = new Array(size)
+    let bufferIndex = size === capacity ? head : 0
+
+    for (let i = 0; i < size; i++) {
+      result[i] = buffer[bufferIndex]
+      bufferIndex = (bufferIndex + 1) % capacity
+    }
+
+    return result
+  }
+
+  return {
+    buffer,
+    head,
+    size,
+    capacity,
+    add,
+    toArray,
+    get length() {
+      return size
+    }
   }
 }
 
-interface PayloadHistoryEntry {
-  payload: ActionPayload
-  timestamp: number
-  source: string
-  changeType: 'set' | 'transform' | 'merge' | 'reset' | 'initial'
+// Pre-compute timestamp once per batch/tick for better performance
+let currentTimestamp = Date.now()
+let timestampUpdateId: NodeJS.Timeout | number | null = null
+
+const updateTimestamp = (): void => {
+  currentTimestamp = Date.now()
 }
 
-// Configuration
-const PAYLOAD_CONFIG = {
-  MAX_HISTORY_PER_CHANNEL: 50,
-  MAX_SNAPSHOTS: 10,
-  ENABLE_DEEP_WATCH: true,
-  AUTO_SNAPSHOT_INTERVAL: 300000, // 5 minutes
-  SUBSCRIPTION_TIMEOUT: 5000
+// Update timestamp every 16ms (60fps) or on-demand
+const ensureTimestamp = (): void => {
+  if (!timestampUpdateId) {
+    timestampUpdateId = setInterval(updateTimestamp, 16)
+  }
 }
 
-export const peqStore = createStore<PayloadEntry>() // Storage
-export const resStore = createStore<PayloadEntry>() // Storage
+// Fast shallow equality check for common payload types
+const fastEquals = (a: any, b: any): boolean => {
+  if (a === b) return true
+  if (!a || !b) return false
+
+  // Fast path for primitives and same reference
+  const typeA = typeof a
+  const typeB = typeof b
+  if (typeA !== typeB) return false
+  if (typeA !== 'object') return a === b
+
+  // Fast path for arrays of primitives
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
+  }
+
+  // For objects, use shallow comparison first
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
+}
+
+// Pool of reusable history buffers to reduce GC pressure
+const historyBufferPool: CircularHistory[] = []
+
+const getHistoryBuffer = (): CircularHistory => {
+  return historyBufferPool.pop() || createCircularHistory()
+}
+
+const returnHistoryBuffer = (buffer: CircularHistory): void => {
+  if (historyBufferPool.length < 10) {
+    // Keep pool small
+    historyBufferPool.push(buffer)
+  }
+}
+
+// Helper to check if object is CircularHistory
+const isCircularHistory = (obj: any): obj is CircularHistory => {
+  return (
+    obj &&
+    typeof obj === 'object' &&
+    typeof obj.add === 'function' &&
+    typeof obj.toArray === 'function'
+  )
+}
+
+// Create payload store
+const payloadStore = createStore<PayloadEntry>()
 
 /**
- * Core payload operations
+ * Core payload state operations
  */
 export const payloadState = {
   /**
-   * Set payload for channel
+   * Set payload for channel - OPTIMIZED FOR CALL PROCESS SPEED
    */
   set: (
     channelId: string,
     payload: ActionPayload,
     source: 'initial' | 'call' | 'pipeline' | 'external' = 'call'
   ): void => {
-    try {
-      const now = Date.now()
-      const existing = peqStore.get(channelId)
+    // Early timestamp update only when needed
+    ensureTimestamp()
 
-      // Create history entry
-      const historyEntry: PayloadHistoryEntry = {
-        payload: existing?.current,
-        timestamp: now,
-        source,
-        changeType: existing ? 'set' : 'initial'
+    const existing = payloadStore.get(channelId)
+
+    // Fast path: Check if frozen first (most common early exit)
+    if (existing?.metadata.frozen) {
+      // Defer expensive logging to avoid blocking call path
+      process.nextTick(() => {
+        log.warn(`Payload for ${channelId} is frozen - update blocked`)
+        sensor.log(channelId, 'blocked', 'payload-frozen', {source})
+      })
+      return
+    }
+
+    // Fast equality check - avoid expensive deep comparison
+    const hasChanged = !existing || !fastEquals(payload, existing.current)
+
+    // Skip update if no actual change and not initial
+    if (!hasChanged && source !== 'initial') {
+      return
+    }
+
+    try {
+      let historyBuffer: CircularHistory
+
+      if (existing) {
+        // Reuse existing buffer if it's already a CircularHistory
+        historyBuffer = isCircularHistory(existing.history)
+          ? existing.history
+          : getHistoryBuffer()
+
+        // Convert legacy array history to buffer if needed
+        if (Array.isArray(existing.history)) {
+          existing.history.forEach(entry => historyBuffer.add(entry))
+        }
+      } else {
+        historyBuffer = getHistoryBuffer()
       }
 
-      // Create new entry
+      // Create history entry only if there's a previous value
+      if (existing?.current !== undefined) {
+        const historyEntry: PayloadHistoryEntry = {
+          payload: existing.current,
+          timestamp: currentTimestamp,
+          source,
+          changeType: 'set'
+        }
+        historyBuffer.add(historyEntry)
+      }
+
+      // Create new entry with minimal object creation
+      const updateCount = (existing?.metadata.updateCount || 0) + 1
       const entry: PayloadEntry = {
         current: payload,
         previous: existing?.current,
-        history: existing
-          ? [
-              ...existing.history.slice(
-                -PAYLOAD_CONFIG.MAX_HISTORY_PER_CHANNEL + 1
-              ),
-              historyEntry
-            ]
-          : [historyEntry],
+        history: historyBuffer,
         metadata: {
-          lastUpdated: now,
-          updateCount: (existing?.metadata.updateCount || 0) + 1,
+          lastUpdated: currentTimestamp,
+          updateCount,
           source,
-          frozen: existing?.metadata.frozen || false
+          frozen: false
         }
       }
 
-      // Check if frozen
-      if (existing?.metadata.frozen) {
-        log.warn(`Payload for ${channelId} is frozen - update blocked`)
-        sensor.log(channelId, 'blocked', 'payload-frozen', {source})
-        return
-      }
+      payloadStore.set(channelId, entry)
 
-      peqStore.set(channelId, entry)
-      sensor.log(channelId, 'info', 'payload-updated', {
-        source,
-        updateCount: entry.metadata.updateCount,
-        hasChanged: !isEqual(payload, existing?.current)
-      })
+      // Defer expensive logging operations to next tick to avoid blocking
+      if (hasChanged) {
+        process.nextTick(() => {
+          sensor.log(channelId, 'info', 'payload-updated', {
+            source,
+            updateCount,
+            hasChanged: true
+          })
+        })
+      }
     } catch (error) {
-      log.error(`Failed to set payload for ${channelId}: ${error}`)
-      sensor.error(channelId, String(error), 'payload-set')
+      // Defer error logging to avoid blocking call path
+      process.nextTick(() => {
+        log.error(`Failed to set payload for ${channelId}: ${error}`)
+        sensor.error(channelId, String(error), 'payload-set')
+      })
     }
   },
 
@@ -119,79 +270,38 @@ export const payloadState = {
    * Get current payload for channel
    */
   get: (channelId: string): ActionPayload | undefined => {
-    return peqStore.get(channelId)?.current
+    return payloadStore.get(channelId)?.current
   },
 
   /**
    * Get previous payload for channel
    */
   getPrevious: (channelId: string): ActionPayload | undefined => {
-    return peqStore.get(channelId)?.previous
+    return payloadStore.get(channelId)?.previous
   },
 
   /**
-   * Check if payload has changed
+   * Check if payload has changed compared to new value
    */
   hasChanged: (channelId: string, newPayload: ActionPayload): boolean => {
-    try {
-      const entry = peqStore.get(channelId)
-      if (!entry) return true
-      const hasChanged = !isEqual(newPayload, entry.current)
-      sensor.log(channelId, 'info', 'change-detection', {
-        hasChanged,
-        comparisonType: 'deep-equal'
-      })
-
-      return hasChanged
-    } catch (error) {
-      log.error(`Change detection failed for ${channelId}: ${error}`)
-      return true // Assume changed on error
-    }
+    const current = payloadStore.get(channelId)?.current
+    return !fastEquals(current, newPayload)
   },
 
   /**
-   * Remove payload entry
-   */
-  forget: (channelId: string): boolean => {
-    try {
-      const result = peqStore.forget(channelId)
-      sensor.log(channelId, 'info', 'payload-forgotten')
-      return result
-    } catch (error) {
-      log.error(`Failed to forget payload for ${channelId}: ${error}`)
-      return false
-    }
-  },
-
-  /**
-   * Clear all payloads
-   */
-  clear: (): void => {
-    try {
-      peqStore.clear()
-      sensor.log('system', 'info', 'payload-state-cleared')
-      //log.debug('Payload state cleared')
-    } catch (error) {
-      log.error(`Failed to clear payload state: ${error}`)
-    }
-  },
-
-  /**
-   * Get payload metadata
-   */
-  getMetadata: (channelId: string) => {
-    const entry = peqStore.get(channelId)
-    return entry?.metadata
-  },
-
-  /**
-   * Get payload history
+   * Get payload history with circular buffer support
    */
   getHistory: (channelId: string, limit?: number): PayloadHistoryEntry[] => {
-    const entry = peqStore.get(channelId)
+    const entry = payloadStore.get(channelId)
     if (!entry) return []
 
-    const history = entry.history
+    if (isCircularHistory(entry.history)) {
+      const history = entry.history.toArray()
+      return limit ? history.slice(-limit) : history
+    }
+
+    // Legacy array support
+    const history = Array.isArray(entry.history) ? entry.history : []
     return limit ? history.slice(-limit) : history
   },
 
@@ -203,7 +313,7 @@ export const payloadState = {
     transformFn: (payload: ActionPayload) => ActionPayload
   ): ActionPayload | undefined => {
     try {
-      const entry = peqStore.get(channelId)
+      const entry = payloadStore.get(channelId)
       if (!entry) return undefined
 
       const transformed = transformFn(entry.current)
@@ -226,7 +336,7 @@ export const payloadState = {
     partialPayload: Partial<ActionPayload>
   ): ActionPayload | undefined => {
     try {
-      const entry = peqStore.get(channelId)
+      const entry = payloadStore.get(channelId)
       if (!entry) {
         payloadState.set(channelId, partialPayload, 'external')
         return partialPayload
@@ -252,11 +362,11 @@ export const payloadState = {
    */
   freeze: (channelId: string): boolean => {
     try {
-      const entry = peqStore.get(channelId)
+      const entry = payloadStore.get(channelId)
       if (!entry) return false
 
       entry.metadata.frozen = true
-      peqStore.set(channelId, entry)
+      payloadStore.set(channelId, entry)
 
       sensor.log(channelId, 'info', 'payload-frozen')
       return true
@@ -271,11 +381,11 @@ export const payloadState = {
    */
   unfreeze: (channelId: string): boolean => {
     try {
-      const entry = peqStore.get(channelId)
+      const entry = payloadStore.get(channelId)
       if (!entry) return false
 
       entry.metadata.frozen = false
-      peqStore.set(channelId, entry)
+      payloadStore.set(channelId, entry)
 
       sensor.log(channelId, 'info', 'payload-unfrozen')
       return true
@@ -286,42 +396,68 @@ export const payloadState = {
   },
 
   /**
-   * Get all channel IDs with payloads
+   * Remove payload for channel
    */
-  getChannels: (): string[] => {
-    return peqStore.getAll().map((_, index) => {
-      // We need to get the keys from the store
-      // This is a limitation of the current store implementation
-      // In practice, we'd need to modify createStore to expose keys
-      return `channel-${index}` // Placeholder - needs store enhancement
+  forget: (channelId: string): boolean => {
+    const entry = payloadStore.get(channelId)
+    if (entry && isCircularHistory(entry.history)) {
+      returnHistoryBuffer(entry.history)
+    }
+    return payloadStore.forget(channelId)
+  },
+
+  /**
+   * Clear all payloads
+   */
+  clear: (): void => {
+    // Return all history buffers to pool before clearing
+    payloadStore.getAll().forEach(entry => {
+      if (isCircularHistory(entry.history)) {
+        returnHistoryBuffer(entry.history)
+      }
     })
+    payloadStore.clear()
   },
 
   /**
    * Get payload statistics
    */
   getStats: () => {
-    const entries = peqStore.getAll()
+    const entries = payloadStore.getAll()
     const totalUpdates = entries.reduce(
       (sum, entry) => sum + entry.metadata.updateCount,
       0
     )
     const frozenCount = entries.filter(entry => entry.metadata.frozen).length
     const historySize = entries.reduce(
-      (sum, entry) => sum + entry.history.length,
+      (sum, entry) =>
+        isCircularHistory(entry.history)
+          ? entry.history.length
+          : entry.history.length,
       0
     )
     return {
       totalChannels: entries.length,
       totalUpdates,
       frozenChannels: frozenCount,
-
       historySize,
       memoryUsage: {
         payloads: entries.length * 256, // Rough estimate
         history: historySize * 128
-      }
+      },
+      bufferPoolSize: historyBufferPool.length
     }
+  },
+
+  /**
+   * Cleanup function for buffer pool management
+   */
+  cleanup: (): void => {
+    if (timestampUpdateId) {
+      clearInterval(timestampUpdateId as NodeJS.Timeout)
+      timestampUpdateId = null
+    }
+    historyBufferPool.length = 0
   }
 }
 
@@ -359,35 +495,6 @@ export const advancedPayloadOps = {
       equal,
       differences: equal ? [] : ['Payloads differ'], // Can be enhanced with deep diff
       similarity
-    }
-  },
-
-  /**
-   * Share payload between channels
-   */
-  share: (
-    sourceChannelId: string,
-    targetChannelId: string,
-    transform?: (payload: ActionPayload) => ActionPayload
-  ): boolean => {
-    try {
-      const sourcePayload = payloadState.get(sourceChannelId)
-      if (!sourcePayload) return false
-
-      const finalPayload = transform ? transform(sourcePayload) : sourcePayload
-      payloadState.set(targetChannelId, finalPayload, 'external')
-
-      sensor.log(sourceChannelId, 'info', 'payload-shared', {
-        targetChannelId,
-        transformed: !!transform
-      })
-
-      return true
-    } catch (error) {
-      log.error(
-        `Failed to share payload from ${sourceChannelId} to ${targetChannelId}: ${error}`
-      )
-      return false
     }
   },
 
@@ -449,5 +556,5 @@ export const advancedPayloadOps = {
   }
 }
 
-// Export main interface
+// Export default for compatibility
 export default payloadState

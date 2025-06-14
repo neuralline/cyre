@@ -1,11 +1,35 @@
 {
   "name": "cyre",
   "version": "4.3.0",
-  "description": "Neural Line - Reactive event manager with zero dependencies",
-  "type": "module",
+  "author": "Cyre Team",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neuralline/cyre.git"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "devDependencies": {
+    "@jest/globals": "30.0.0-beta.3",
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@types/bun": "latest",
+    "@types/node": "^22.15.31",
+    "@typescript-eslint/eslint-plugin": "^8.34.0",
+    "@typescript-eslint/parser": "^8.34.0",
+    "@vitest/coverage-v8": "^3.2.3",
+    "bundlesize": "^0.18.2",
+    "eslint": "^9.28.0",
+    "rimraf": "^6.0.1",
+    "rollup-plugin-dts": "^6.2.1",
+    "terser": "^5.42.0",
+    "ts-jest": "^29.4.0",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.8.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.3"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -29,11 +53,36 @@
       "types": "./dist/state-machine/index.d.ts"
     }
   },
+  "bugs": {
+    "url": "https://github.com/neuralline/cyre/issues"
+  },
+  "bundlesize": [
+    {
+      "path": "./dist/index.js",
+      "maxSize": "50kb"
+    }
+  ],
+  "description": "Neural Line - Reactive event manager with zero dependencies",
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
   "files": [
     "dist/**/*",
     "README.md",
     "LICENSE"
   ],
+  "homepage": "https://github.com/neuralline/cyre#readme",
+  "keywords": [
+    "reactive",
+    "events",
+    "state-management",
+    "functional",
+    "typescript",
+    "zero-dependency",
+    "performance"
+  ],
+  "license": "MIT",
   "scripts": {
     "build": "bun run clean && bun run build:types && bun run build:esm && bun run build:cjs",
     "build:vite": " bun run clean &&  vite build &&  vite build:types ",
@@ -52,58 +101,10 @@
     "benchmark": "bun run example/industry-standard-tests.ts",
     "dev": "tsx scripts/cyre-server.ts"
   },
-  "keywords": [
-    "reactive",
-    "events",
-    "state-management",
-    "functional",
-    "typescript",
-    "zero-dependency",
-    "performance"
-  ],
-  "author": "Cyre Team",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/neuralline/cyre.git"
-  },
-  "homepage": "https://github.com/neuralline/cyre#readme",
-  "bugs": {
-    "url": "https://github.com/neuralline/cyre/issues"
-  },
-  "devDependencies": {
-    "@jest/globals": "30.0.0-beta.3",
-    "@rollup/plugin-commonjs": "^28.0.3",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@types/bun": "latest",
-    "@types/node": "^22.15.30",
-    "@typescript-eslint/eslint-plugin": "^8.33.1",
-    "@typescript-eslint/parser": "^8.33.1",
-    "@vitest/coverage-v8": "^3.2.2",
-    "bundlesize": "^0.18.2",
-    "eslint": "^9.28.0",
-    "rimraf": "^6.0.1",
-    "rollup-plugin-dts": "^6.2.1",
-    "terser": "^5.41.0",
-    "ts-jest": "^29.3.4",
-    "ts-node": "^10.9.2",
-    "tslib": "^2.8.1",
-    "tsx": "^4.19.4",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5",
-    "vitest": "^3.2.2",
-    "concurrently": "^9.1.2",
-    "ws": "^8.18.2"
-  },
-  "bundlesize": [
-    {
-      "path": "./dist/index.js",
-      "maxSize": "50kb"
-    }
-  ],
-  "engines": {
-    "node": ">=18.0.0",
-    "bun": ">=1.0.0"
-  },
-  "sideEffects": false
+  "sideEffects": false,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "autocannon": "^8.0.0"
+  }
 }

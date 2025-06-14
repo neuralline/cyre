@@ -229,7 +229,6 @@ export const useCollective = (
     }
 
     collectives.set(collectiveId, initialState)
-
     // Set up collective coordination channel
     cyre.action({
       id: `collective://${collectiveId}`,
@@ -240,6 +239,7 @@ export const useCollective = (
     cyre.on(`collective://${collectiveId}`, async (data: any) => {
       return await handleCollectiveOperation(collectiveId, data)
     })
+    log.sys(collectiveId)
 
     log.info(`Collective created: ${collectiveId}`)
   }

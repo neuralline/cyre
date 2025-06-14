@@ -219,6 +219,9 @@ export interface IO {
   // Metadata fields
   timestamp?: number
   timeOfCreation?: number
+  _lastExecTime?: number
+  _executionTime?: number
+  _executionCount?: number
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any

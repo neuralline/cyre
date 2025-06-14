@@ -66,7 +66,11 @@ const setChannelDefaults = (channel: IO): IO => {
     type: channel.type, // Keep undefined if not provided
     payload: channel.payload !== undefined ? channel.payload : undefined,
     timestamp: now,
-    timeOfCreation: channel.timeOfCreation || now
+    timeOfCreation: channel.timeOfCreation || now,
+    _executionTime: 0,
+    _lastExecTime: 0,
+    _executionCount: 0,
+    _debounceTimer: undefined
   }
 }
 

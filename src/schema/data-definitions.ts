@@ -541,36 +541,3 @@ export const compileAction = (
   }
 }
 
-// Plugin architecture for extensible validation
-export interface ValidationPlugin {
-  name: string
-  definitions: Record<string, (value: any) => DataDefResult>
-}
-
-const registeredPlugins: ValidationPlugin[] = []
-
-export const registerValidationPlugin = (plugin: ValidationPlugin): void => {
-  registeredPlugins.push(plugin)
-
-  // Merge plugin definitions into main definitions
-  Object.assign(dataDefinitions, plugin.definitions)
-
-  log.info(`Registered validation plugin: ${plugin.name}`)
-}
-
-/**
- * Cache management
- */
-export const clearValidationCache = (): void => {
-  validationCache.clear()
-}
-
-export const getValidationCacheStats = (): {
-  size: number
-  limit: number
-} => {
-  return {
-    size: validationCache.size,
-    limit: CACHE_SIZE_LIMIT
-  }
-}

@@ -261,10 +261,14 @@ const action = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Channel registration failed: ${errorMessage}`)
-    sensor.error('system', 'error', 'Channel-registration', {
-      error: errorMessage
-    })
+    sensor.error(
+      'system',
+      '`Channel registration failed: ${errorMessage}`',
+      'app/channel',
+      {
+        error: errorMessage
+      }
+    )
     return {ok: false, message: `Channel registration failed: ${errorMessage}`}
   }
 }
@@ -278,7 +282,7 @@ export const call = async (
 ): Promise<CyreResponse> => {
   try {
     if (!id) {
-      log.critical(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
+      log.error(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
       return {
         ok: false,
         payload: null,
@@ -287,7 +291,8 @@ export const call = async (
     }
     const action = io.get(id)
     if (!action) {
-      log.critical(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
+      log.error(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
+
       return {
         ok: false,
         payload: null,
@@ -304,8 +309,6 @@ export const call = async (
       }
     }
     // log.debug(action)
-
-    const originalPayload = payload ?? action.payload
 
     // PRE-PIPELINE PROTECTIONS (Block, Throttle, Debounce, Recuperation)
 
@@ -329,53 +332,54 @@ export const call = async (
         message: 'System is recuperating - only critical actions allowed'
       }
     }
+    const req = payload ?? payloadState.get(id)
+    //io.set(action)
 
     // STEP 4: Throttle check
+    // ✅ STEP 4: FIXED Throttle check
     if (action.throttle && action.throttle > 0) {
-      const metrics = io.getMetrics(action.id)
-      const lastExecTime = metrics?.lastExecutionTime || 0
+      const currentTime = Date.now()
+      const lastExecTime = action._lastExecTime || 0
 
-      if (lastExecTime > 0) {
-        const elapsed = Date.now() - lastExecTime
-        if (elapsed < action.throttle) {
-          const remaining = action.throttle - elapsed
-          sensor.throttle(action.id, {throttleMs: action.throttle, remaining})
-          return {
-            ok: false,
-            payload: undefined,
-            message: `Throttled - ${remaining}ms remaining`,
-            metadata: {
-              throttled: true,
-              remaining
-            }
+      // FIX 1: Calculate elapsed time from LAST EXECUTION, not action creation
+      const elapsedSinceLastExec = currentTime - lastExecTime
+      const remaining = Math.max(0, action.throttle - elapsedSinceLastExec)
+
+      // FIX 2: Check if we should throttle (industry standard: first call always passes)
+      if (lastExecTime > 0 && elapsedSinceLastExec < action.throttle) {
+        return {
+          ok: false,
+          payload: undefined,
+          message: `Throttled - ${remaining}ms remaining`,
+          metadata: {
+            throttled: true,
+            remaining,
+            lastExecTime,
+            elapsed: elapsedSinceLastExec
           }
         }
       }
     }
+
     // STEP 5: Debounce check (most complex protection)
-    else if (
-      action.debounce &&
-      action.debounce > 0 &&
-      !action._bypassDebounce
-    ) {
+    if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
       const timerId = `${action.id}-debounce-${Date.now()}`
 
       if (!action._debounceTimer) {
         // First time debounce - execute immediately and set up debounce window
-        action._firstDebounceCall = Date.now()
+
         action._debounceTimer = timerId
 
         // Store the payload for debounced calls
-        payloadState.set(action.id, originalPayload, 'call')
+        payloadState.set(action.id, req, 'call')
 
         // Update action state
         io.set({
           ...action,
-          _debounceTimer: timerId,
-          _firstDebounceCall: action._firstDebounceCall
+          _debounceTimer: timerId
         })
 
-        return await processCall(action, originalPayload)
+        return await processCall(action, req)
       } else {
         // Subsequent calls within debounce window
 
@@ -383,34 +387,32 @@ export const call = async (
         TimeKeeper.forget(action._debounceTimer)
 
         // Check maxWait constraint
-        const firstCallTime = action._firstDebounceCall || Date.now()
-        if (action.maxWait && Date.now() - firstCallTime >= action.maxWait) {
+
+        if (action.maxWait && Date.now() - action.timestamp >= action.maxWait) {
           // MaxWait exceeded - execute immediately and reset debounce
-          action._firstDebounceCall = undefined
+
           action._debounceTimer = undefined
 
           // Update action state
           io.set({
             ...action,
-            _debounceTimer: undefined,
-            _firstDebounceCall: undefined
+            _debounceTimer: undefined
           })
 
           // Execute immediately due to maxWait
 
-          return await processCall(action, originalPayload)
+          return await processCall(action, req)
         } else {
           // Set up new debounce delay with latest payload
           action._debounceTimer = timerId
 
           // Update stored payload with latest data
-          payloadState.set(action.id, originalPayload, 'call')
+          payloadState.set(action.id, req, 'call')
 
           // Update action state
           io.set({
             ...action,
-            _debounceTimer: timerId,
-            _firstDebounceCall: firstCallTime
+            _debounceTimer: timerId
           })
 
           // Schedule delayed execution using TimeKeeper
@@ -419,20 +421,17 @@ export const call = async (
             async () => {
               try {
                 // Get the latest payload that was stored
-                const latestPayload =
-                  payloadState.get(action.id) || originalPayload
+                const latestPayload = payloadState.get(action.id) || req
 
                 // Clear timer reference since we're executing now
                 const currentAction = io.get(action.id)
                 if (currentAction) {
                   currentAction._debounceTimer = undefined
-                  currentAction._firstDebounceCall = undefined
 
                   // Update action state
                   io.set({
                     ...currentAction,
-                    _debounceTimer: undefined,
-                    _firstDebounceCall: undefined
+                    _debounceTimer: undefined
                   })
                 }
 
@@ -474,12 +473,10 @@ export const call = async (
 
             // Clear debounce state on timer creation failure
             action._debounceTimer = undefined
-            action._firstDebounceCall = undefined
 
             io.set({
               ...action,
-              _debounceTimer: undefined,
-              _firstDebounceCall: undefined
+              _debounceTimer: undefined
             })
 
             return {
@@ -493,7 +490,7 @@ export const call = async (
           // Return debounced response
           return {
             ok: true,
-            payload: originalPayload,
+            payload: req,
             message: `Debounced - will execute in ${action.debounce}ms with latest payload`,
             metadata: {
               debounced: true,
@@ -509,7 +506,7 @@ export const call = async (
     // ALL PRE-PIPELINE PROTECTIONS PASSED - Continue to pipeline
 
     // Execute the processing pipeline
-    const result = await processCall(action, originalPayload)
+    const result = await processCall(action, req)
 
     return result
   } catch (error) {

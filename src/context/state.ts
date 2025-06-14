@@ -33,16 +33,6 @@ const timelineStore = createStore<Timer>() // schedules and queued tasks
 const actionMetrics = createStore<StateActionMetrics>()
 const branchStore = createStore<BranchStore>()
 
-// Utility functions for state management
-const cleanupAction = (id: StateKey): void => {
-  const metrics = actionMetrics.get(id)
-  if (metrics?.intervalId) {
-    clearInterval(metrics.intervalId)
-  }
-  actionMetrics.forget(id)
-  // Payload cleanup is handled by payloadState
-}
-
 /**
  * IO operations - configuration only, no payload data
  * // channel information store
@@ -54,29 +44,14 @@ export const io = Object.freeze({
   set: (action: IO): void => {
     try {
       if (!action?.id) throw new Error('IO state: Action must have an id')
+      const id = action.id
 
-      // Clean action of any payload data for separation
-      const {payload: _, ...cleanAction} = action as any
-
-      const enhanced: IO = {
-        ...cleanAction,
-        timestamp: Date.now(),
-        type: action.type || action.id
+      const channel: IO = {
+        ...action,
+        timestamp: Date.now()
       }
 
-      cleanupAction(action.id)
-      ioStore.set(action.id, enhanced)
-
-      // Initialize action metrics properly with current timestamp
-      const currentMetrics = actionMetrics.get(action.id)
-
-      if (!currentMetrics) {
-        actionMetrics.set(action.id, {
-          lastExecutionTime: 0,
-          executionCount: 0,
-          errors: []
-        })
-      }
+      ioStore.set(id, channel)
     } catch (error) {
       log.critical(
         `IO state corruption detected: ${
@@ -84,43 +59,6 @@ export const io = Object.freeze({
         }`
       )
       throw error
-    }
-  },
-
-  /**
-   * Update action metrics
-   */
-  updateMetrics: (id: StateKey, update: Partial<StateActionMetrics>): void => {
-    try {
-      const current = actionMetrics.get(id) || {
-        lastExecutionTime: 0,
-        executionCount: 0,
-        errors: []
-      }
-
-      const updatedMetrics: StateActionMetrics = {
-        ...current,
-        lastExecutionTime:
-          update.lastExecutionTime !== undefined
-            ? Math.max(0, update.lastExecutionTime)
-            : current.lastExecutionTime,
-        executionCount:
-          update.executionCount !== undefined
-            ? Math.max(0, update.executionCount)
-            : current.executionCount,
-        errors: update.errors || current.errors
-      }
-
-      const hasChanges =
-        updatedMetrics.lastExecutionTime !== current.lastExecutionTime ||
-        updatedMetrics.executionCount !== current.executionCount ||
-        updatedMetrics.errors.length !== current.errors.length
-
-      if (hasChanges) {
-        actionMetrics.set(id, updatedMetrics)
-      }
-    } catch (error) {
-      log.error(`Failed to update metrics for ${id}: ${error}`)
     }
   },
 
@@ -133,7 +71,6 @@ export const io = Object.freeze({
    * Remove action configuration
    */
   forget: (id: StateKey): boolean => {
-    cleanupAction(id)
     // Also remove payload
     payloadState.forget(id)
     return ioStore.forget(id)
@@ -144,13 +81,10 @@ export const io = Object.freeze({
    */
   clear: (): void => {
     try {
-      ioStore.getAll().forEach(item => {
-        if (item.id) cleanupAction(item.id)
-      })
-      actionMetrics.clear()
+      //actionMetrics.clear()
       ioStore.clear()
-      // Clear payload state
-      payloadState.clear()
+
+      payloadState.clear() // Clear payload state
       metricsState.reset()
     } catch (error) {
       log.critical(`System clear failed: ${error}`)
@@ -167,21 +101,17 @@ export const io = Object.freeze({
    * Get action metrics
    */
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
-    const metrics = actionMetrics.get(id)
-    if (metrics) {
-      return metrics
-    } else {
-      const action = ioStore.get(id)
-      if (action) {
-        const newMetrics: StateActionMetrics = {
-          lastExecutionTime: 0,
-          executionCount: 0,
-          errors: []
-        }
-        actionMetrics.set(id, newMetrics)
-        return newMetrics
+    const action = ioStore.get(id)
+    if (action) {
+      const newMetrics: StateActionMetrics = {
+        lastExecutionTime: action._lastExecTime || 0,
+        executionCount: action._executionCount || 0,
+        errors: action.errors || []
       }
+
+      return newMetrics
     }
+
     return undefined
   },
 
@@ -196,14 +126,6 @@ export const io = Object.freeze({
         executionCount: 0,
         errors: []
       }
-
-      const updatedMetrics: StateActionMetrics = {
-        ...currentMetrics,
-        lastExecutionTime: now,
-        executionCount: currentMetrics.executionCount + 1
-      }
-
-      actionMetrics.set(id, updatedMetrics)
     } catch (error) {
       log.error(`Failed to track execution for ${id}: ${error}`)
     }

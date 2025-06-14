@@ -5,6 +5,7 @@ import {TimeKeeper} from './cyre-timekeeper'
 import {sensor} from '../context/metrics-report'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
 import {executePipeline} from '../schema/channel-operators'
+import payloadState from '../context/payload-state'
 
 /*
 
@@ -25,7 +26,7 @@ export async function processCall(
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
   try {
-    let finalPayload = payload ?? action.payload
+    let finalPayload = payload ?? payloadState.get(action.id)
 
     // INLINE PROCESSING PIPELINE
     if (action._processingTalents?.length) {

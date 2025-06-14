@@ -280,9 +280,11 @@ export const CyreActions = (action: IO): RegistrationResult => {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
 
-      sensor.warn(finalAction.id, `Group assignment failed: ${errorMessage}`, {
-        error: errorMessage
-      })
+      sensor.error(
+        finalAction.id,
+        `Group assignment failed: ${errorMessage}`,
+        'cyre-action'
+      )
 
       // Continue with registration even if group assignment fails
       crossValidation.warnings.push(`Group assignment failed: ${errorMessage}`)
@@ -318,18 +320,6 @@ export const CyreActions = (action: IO): RegistrationResult => {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
 
-        sensor.warn(
-          finalAction.id,
-          `Payload initialization failed: ${errorMessage}`,
-          {
-            payloadType: typeof action.payload,
-            error: errorMessage
-          }
-        )
-
-        log.warn(
-          `Payload initialization failed for ${finalAction.id}: ${errorMessage}`
-        )
         // Continue - payload initialization failure is not critical
         crossValidation.warnings.push(
           `Payload initialization failed: ${errorMessage}`

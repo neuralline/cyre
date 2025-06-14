@@ -50,6 +50,6 @@
       "cyre/*": ["src/*"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "server"],
   "exclude": ["node_modules", "dist", "coverage", "**/*.d.ts"]
 }

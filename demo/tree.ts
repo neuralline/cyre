@@ -1,4 +1,4 @@
-// examples/path-tree-capabilities.ts
+// demo/tree.ts
 // Demonstration of path system for hierarchical data structures
 
 import {cyre} from '../src'

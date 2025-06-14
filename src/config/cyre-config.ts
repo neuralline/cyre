@@ -9,7 +9,7 @@ import {Priority} from '../types/core'
       Enhanced with configurable action pipeline performance monitoring
 
 */
-
+export const PAYLOAD_CONFIG = {MAX_HISTORY_PER_CHANNEL: 10}
 // Add timing configuration section
 export const TIMING = {
   ANIMATION: 16.67, // 60fps - For smooth animations (requestAnimationFrame preferred)

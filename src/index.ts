@@ -18,7 +18,7 @@
     CYRE TARGET: Make Cyre the least call-to-execution overhead per channel while having cutting edge features 
 
 CYRE TODO: 
-[x]  Branch system with isolated stores and unified addressing
+
 [experimental]  Path-based cross-branch communication. location routing: use id as address bar eg 'home/branch/app'
 [x]  Component duplication and reuse capabilities
 []   Multi .on subscribers to single .action channel 
@@ -27,16 +27,17 @@ CYRE TODO:
 []   Improved react and nextjs support with hooks. low priority
 []   useCyre could take optional ID. if set, it uses that id instead of generated id. so cyre.call can access that useCyre remotely
 
+//external services built on core cyre
 [on hold]   cyre/ssr: experimental/testing stage
-[depreciated]   cyre/stream experimental/testing stage
+[on hold]   cyre/stream experimental/testing stage
 [on hold]   state-machine: experimental/testing stage
-[]   cyre/server: server for client cyre applicants or others
+[in progress]   cyre/server: server for client cyre applicants or others
 
 [x]  schema: built in data validation
 
 [in progress]   improve action pipeline. each channel in cyre are independent. so action pipeline should proactively compile actions that apply to specific channel when that channel run. the rest should run with zero overhead. 
 []   Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
-[]   more test coverage
+[in progress]   more test coverage
 [in progress]   more proactive decision on cyre init and registrations to minimize run time calculations and overheads
   
 []   publish to NPM these are my current todo list. what do you think? any todo suggestions?
@@ -44,20 +45,31 @@ CYRE TODO:
 [in progress]   system channels: instead of endless cyre.api create system .on listening channels for users to subscribe eg: on initialize, on error, on stress high etc
 [experimental]   persistent state. load Cyre from saved state, storage and sync with server
 
-[]   
+
 []   DM: Direct Message. ??
+
+//cyre hooks
+[in progress]   cyre/use: use-cyre hook easy use hook for cyre functional way
+[in progress]   cyre/collectives: use-collective hook
+[in progress]   cyre/group: use-group hook
+[in progress][testing]   cyre/branch: use-branch hook
+
+//timers and scheduler
 [in progress]   Calendar for scheduling tasks
 [in progress]  TimeKeeper.cron():
 
+//channel operators/ action talents
 []  .action future talents {
     [done] block: boolean // this channel is no longer available
-      no name yet: if call id is already in progress or in timeline: reset | ignore | debounce | update payload only| 
+    onConflict: if call id is already in progress or in timeline: reset | ignore | debounce | update payload only| 
     [done] required: boolean // payload is required on call
     [done]  maxWait: number : boolean
       immutable: boolean // can't modify payload
       noDispatch: boolean //this channel won't be dispatch to .on listeners. 
     [test] Multi-Sensor Fusion //combines data from multiple channel payload to create more accurate, reliable, and comprehensive environmental understanding.
     [test] Event Pattern Recognition? // detects complex patterns, sequences, and anomalies in channel payload data streams using various algorithmic approaches.
+    
+    
     }
 
     Branch System Benefits:
@@ -72,6 +84,7 @@ CYRE TODO:
 import {cyre} from './app'
 import {useGroup} from './hooks/use-group'
 import {useCyre} from './hooks/use-cyre'
+import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
 import {log} from './components/cyre-log'
 import {metrics} from './metrics/integration'
@@ -83,7 +96,17 @@ import schema from './schema/cyre-schema'
 import {orchestration} from './orchestration/orchestration-engine'
 
 // Main exports with branch system
-export {cyre, log, useCyre, useGroup, useBranch, schema, orchestration, metrics}
+export {
+  cyre,
+  log,
+  useCyre,
+  useGroup,
+  useBranch,
+  useCollective,
+  schema,
+  orchestration,
+  metrics
+}
 
 // Version information
 export const version = '4.6.0'

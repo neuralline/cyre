@@ -1,4 +1,4 @@
-// src/schema/talent-definitions-optimized.ts
+// src/schema/channel-operators.ts
 // Complete optimized talent system with compileAction and executePipeline
 
 import type {IO, TalentResult} from '../types/core'
@@ -10,23 +10,31 @@ import TimeKeeper from '../components/cyre-timekeeper'
 import {isEqual} from '../libs/utils'
 
 /*
-
       C.Y.R.E - O.P.T.I.M.I.Z.E.D - T.A.L.E.N.T - S.Y.S.T.E.M
       
-      Complete optimized talent system with:
-      - Smart compileAction with channel-specific optimization
-      - Zero-overhead executePipeline for simple channels
-      - Fast path execution for basic validation
-      - Intelligent caching and profiling
-      - Runtime analytics and monitoring
-      - 100% API compatibility with existing code
-
+      This system implements an optimized talent pipeline for processing actions:
+      - Smart compileAction: Pre-compiles actions with channel-specific optimizations
+      - Zero-overhead executePipeline: Skips unnecessary processing for simple channels
+      - Fast path execution: Specialized handling for basic validation cases
+      - Intelligent caching: Reduces redundant compilation
+      - Runtime analytics: Monitors performance and optimization effectiveness
+      - Full API compatibility: Maintains existing interface while improving performance
 */
 
 // ============================================================================
 // OPTIMIZATION INFRASTRUCTURE
 // ============================================================================
 
+/**
+ * ChannelProfile tracks optimization metadata for each channel
+ * - requiredTalents: Set of talents needed for this channel
+ * - compiledPipeline: Pre-compiled sequence of talent functions
+ * - lastCompiled: Timestamp of last compilation
+ * - executionCount: Number of times channel has been executed
+ * - avgExecutionTime: Average execution time in milliseconds
+ * - fastPath: Whether channel qualifies for fast path optimization
+ * - zeroOverhead: Whether channel can skip all processing
+ */
 interface ChannelProfile {
   id: string
   requiredTalents: Set<string>
@@ -38,6 +46,13 @@ interface ChannelProfile {
   zeroOverhead: boolean
 }
 
+/**
+ * TalentFunction represents a single processing step in the pipeline
+ * - name: Identifier for the talent
+ * - fn: The actual processing function
+ * - weight: Relative computational cost
+ * - dependencies: Other talents this one depends on
+ */
 interface TalentFunction {
   name: string
   fn: (action: IO, payload: any) => TalentResult
@@ -45,6 +60,16 @@ interface TalentFunction {
   dependencies: string[]
 }
 
+
+/**
+ * CompileResult contains the output of action compilation
+ * - compiledAction: The optimized action
+ * - errors: Any compilation errors
+ * - warnings: Non-critical issues
+ * - hasFastPath: Whether fast path optimization is possible
+ * - channelProfile: Associated optimization metadata
+ * - optimizationApplied: List of optimizations used
+ */
 interface CompileResult {
   compiledAction: IO
   errors: string[]
@@ -55,24 +80,28 @@ interface CompileResult {
 }
 
 // Global optimization state
-const channelProfiles = new Map<string, ChannelProfile>()
-const talentRegistry = new Map<string, TalentFunction>()
-const dependencyGraph = new Map<string, Set<string>>()
-const compilationCache = new Map<string, CompileResult>()
-let isOptimizationInitialized = false
+const channelProfiles = new Map<string, ChannelProfile>() // Tracks optimization data per channel
+const talentRegistry = new Map<string, TalentFunction>() // Registry of available talents
+const dependencyGraph = new Map<string, Set<string>>() // Talent dependency relationships
+const compilationCache = new Map<string, CompileResult>() // Caches compilation results
+let isOptimizationInitialized = false // Tracks initialization state
 
-// Available talents with execution weights and dependencies
+/**
+ * Available talents with their weights and dependencies
+ * Weights indicate relative computational cost (higher = more expensive)
+ * Dependencies list other talents that must run before this one
+ */
 const AVAILABLE_TALENTS = {
-  schema: {weight: 3, dependencies: []},
-  required: {weight: 1, dependencies: []},
-  selector: {weight: 2, dependencies: []},
-  condition: {weight: 2, dependencies: []},
-  transform: {weight: 2, dependencies: []},
-  detectChanges: {weight: 3, dependencies: ['selector']},
-  throttle: {weight: 4, dependencies: []},
-  debounce: {weight: 4, dependencies: []},
-  schedule: {weight: 5, dependencies: []},
-  priority: {weight: 1, dependencies: []}
+  schema: {weight: 3, dependencies: []}, // Validates payload structure
+  required: {weight: 1, dependencies: []}, // Checks if payload is required
+  selector: {weight: 2, dependencies: []}, // Extracts specific data from payload
+  condition: {weight: 2, dependencies: []}, // Validates payload against conditions
+  transform: {weight: 2, dependencies: []}, // Modifies payload data
+  detectChanges: {weight: 3, dependencies: ['selector']}, // Tracks payload changes
+  throttle: {weight: 4, dependencies: []}, // Limits execution frequency
+  debounce: {weight: 4, dependencies: []}, // Delays execution until quiet period
+  schedule: {weight: 5, dependencies: []}, // Handles timing of execution
+  priority: {weight: 1, dependencies: []} // Sets execution priority
 }
 
 // ============================================================================
@@ -84,6 +113,8 @@ const AVAILABLE_TALENTS = {
 // ============================================================================
 // STEP 1: REPLACE getTalentImplementation function (around line 200)
 // ============================================================================
+
+
 
 const getTalentImplementation = (talentName: string) => {
   switch (talentName) {
@@ -132,7 +163,9 @@ const getTalentImplementation = (talentName: string) => {
           return {
             ok: false,
             payload,
-            message: `Schema error: ${error}`,
+            message: `Schema error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
             error: true
           }
         }
@@ -140,37 +173,24 @@ const getTalentImplementation = (talentName: string) => {
 
     case 'required':
       return (action: IO, payload: any): TalentResult => {
+        // Auto-infer required from schema presence if not explicitly set
         const effectiveRequired =
           action.required !== undefined
             ? action.required
             : Boolean(action.schema)
 
-        if (!effectiveRequired) return {ok: true, payload}
-
-        // Strict undefined/null check
-        if (payload === undefined || payload === null) {
-          return {
-            ok: false,
-            payload,
-            message: 'Required payload not provided',
-            error: true
-          }
+        if (!effectiveRequired) {
+          return {ok: true, payload}
         }
 
-        // Non-empty check
-        if (effectiveRequired === 'non-empty') {
-          const isEmpty =
-            payload === '' ||
-            (Array.isArray(payload) && payload.length === 0) ||
-            (typeof payload === 'object' && Object.keys(payload).length === 0)
-
-          if (isEmpty) {
-            return {
-              ok: false,
-              payload,
-              message: 'Non-empty payload required',
-              error: true
-            }
+        if (effectiveRequired === true && payload === undefined) {
+          return {
+            ok: false,
+            message: action.schema
+              ? 'Payload required (enforced by schema)'
+              : 'Payload required',
+            payload: undefined,
+            error: true
           }
         }
 
@@ -183,12 +203,18 @@ const getTalentImplementation = (talentName: string) => {
 
         try {
           const selected = action.selector(payload)
-          return {ok: true, payload: selected}
+          return {
+            ok: true,
+            payload: selected,
+            message: 'Payload selected'
+          }
         } catch (error) {
           return {
             ok: false,
             payload,
-            message: `Selector error: ${error}`,
+            message: `Selector failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
             error: true
           }
         }
@@ -206,33 +232,46 @@ const getTalentImplementation = (talentName: string) => {
               ok: false,
               payload,
               message: 'Condition not met',
-              error: false
+              error: false // Not an error, just condition failed
             }
           }
 
           return {ok: true, payload}
         } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
+
           return {
             ok: false,
-            payload,
-            message: `Condition error: ${error}`,
-            error: true
+            error: true,
+            message: `Condition failed: ${errorMessage}`,
+            payload
           }
         }
       }
 
     case 'transform':
       return (action: IO, payload: any): TalentResult => {
-        if (!action.transform) return {ok: true, payload}
+        if (!action.transform) {
+          return {ok: true, payload}
+        }
 
         try {
           const transformed = action.transform(payload)
-          return {ok: true, payload: transformed}
+
+          return {
+            ok: true,
+            payload: transformed,
+            message: 'Payload transformed'
+          }
         } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
+
           return {
             ok: false,
             payload,
-            message: `Transform error: ${error}`,
+            message: `Transform failed: ${errorMessage}`,
             error: true
           }
         }
@@ -256,7 +295,7 @@ const getTalentImplementation = (talentName: string) => {
               ok: false,
               payload,
               message: 'No changes detected',
-              error: false
+              error: false // Not an error, just no changes
             }
           }
 
@@ -266,11 +305,79 @@ const getTalentImplementation = (talentName: string) => {
         }
       }
 
-    // Keep other cases the same...
-    default:
+    case 'throttle':
       return (action: IO, payload: any): TalentResult => {
+        // Throttle logic is handled at the app.ts level before talents run
+        // This is a pass-through since throttling happens earlier in the pipeline
         return {ok: true, payload}
       }
+
+    case 'debounce':
+      return (action: IO, payload: any): TalentResult => {
+        // Debounce logic is handled at the app.ts level before talents run
+        // This is a pass-through since debouncing happens earlier in the pipeline
+        return {ok: true, payload}
+      }
+
+    case 'schedule':
+      return (action: IO, payload: any): TalentResult => {
+        // CRITICAL FIX: The schedule talent should ONLY validate scheduling params
+        // The actual scheduling is handled by cyre-dispatch.ts AFTER pipeline execution
+        // This talent just validates that scheduling parameters are valid
+
+        const interval = action.interval
+        const delay = action.delay
+        const repeat = action.repeat
+
+        // Validate scheduling parameters
+        if (interval !== undefined && interval < 0) {
+          return {
+            ok: false,
+            payload,
+            message: 'Invalid interval: must be >= 0',
+            error: true
+          }
+        }
+
+        if (delay !== undefined && delay < 0) {
+          return {
+            ok: false,
+            payload,
+            message: 'Invalid delay: must be >= 0',
+            error: true
+          }
+        }
+
+        if (repeat !== undefined && repeat !== true && repeat < 0) {
+          return {
+            ok: false,
+            payload,
+            message: 'Invalid repeat: must be >= 0 or true',
+            error: true
+          }
+        }
+
+        // Scheduling parameters are valid - pass through
+        // The actual scheduling happens in cyre-dispatch.ts
+        return {
+          ok: true,
+          payload,
+          message: 'Scheduling parameters validated'
+        }
+      }
+
+    case 'priority':
+      return (action: IO, payload: any): TalentResult => {
+        // Priority is handled at dispatch level, this is a pass-through
+        return {ok: true, payload}
+      }
+
+    default:
+      return () => ({
+        ok: false,
+        message: `Unknown talent: ${talentName}`,
+        error: true
+      })
   }
 }
 
@@ -397,7 +504,10 @@ export const resetOptimizationCache = (): void => {
 // ============================================================================
 
 /**
- * Static analysis: determine which talents a channel actually needs
+ * Analyzes an action to determine which talents it requires
+ * This is a static analysis that happens during compilation
+ * @param action The action to analyze
+ * @returns Set of required talent names
  */
 const analyzeChannelRequirements = (action: IO): Set<string> => {
   const requiredTalents = new Set<string>()
@@ -416,7 +526,7 @@ const analyzeChannelRequirements = (action: IO): Set<string> => {
     requiredTalents.add('schedule')
   if (action.priority) requiredTalents.add('priority')
 
-  // Add dependencies
+  // Add dependencies recursively
   const resolvedTalents = new Set(requiredTalents)
   requiredTalents.forEach(talent => {
     const deps = dependencyGraph.get(talent)
@@ -488,7 +598,13 @@ const isZeroOverhead = (requiredTalents: Set<string>): boolean => {
 // ============================================================================
 
 /**
- * Main optimized compilation function
+ * Main compilation function that optimizes an action
+ * - Analyzes required talents
+ * - Builds optimized pipeline
+ * - Creates channel profile
+ * - Caches results
+ * @param action The action to compile
+ * @returns Compilation result with optimizations
  */
 export const compileAction = (action: Partial<IO>): CompileResult => {
   if (!isOptimizationInitialized) {
@@ -580,23 +696,9 @@ export const compileAction = (action: Partial<IO>): CompileResult => {
     compilationCache.set(cacheKey, result)
 
     // Log performance insights
-    if (profile.fastPath || profile.zeroOverhead) {
-      log.debug(`Optimized compilation for ${fullAction.id}`, {
-        talents: requiredTalents.size,
-        compilationTime: compilationTime.toFixed(3),
-        fastPath: profile.fastPath,
-        zeroOverhead: profile.zeroOverhead
-      })
-    }
+  
 
-    sensor.log(fullAction.id, 'info', 'compilation-optimized', {
-      requiredTalents: requiredTalents.size,
-      totalAvailable: Object.keys(AVAILABLE_TALENTS).length,
-      fastPath: profile.fastPath,
-      zeroOverhead: profile.zeroOverhead,
-      compilationTime,
-      cached: false
-    })
+ 
 
     return result
   } catch (error) {
@@ -630,13 +732,20 @@ export const compileAction = (action: Partial<IO>): CompileResult => {
 // ============================================================================
 
 /**
- * Optimized pipeline execution with zero-overhead for unused talents
+ * Executes the talent pipeline with optimizations
+ * - Uses zero-overhead path when possible
+ * - Falls back to fast path for simple cases
+ * - Otherwise uses full optimized pipeline
+ * @param action The action to execute
+ * @param payload The data to process
+ * @returns Result of pipeline execution
  */
 export const executePipeline = (action: IO, payload: any): TalentResult => {
   const startTime = performance.now()
 
   // Get channel profile
   const profile = channelProfiles.get(action.id)
+  log.warn(profile)
 
   if (!profile) {
     // Fallback: compile on demand

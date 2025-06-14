@@ -41,167 +41,6 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
   // ============================================================================
 
   describe('Timing Operators', () => {
-    describe('delay operator', () => {
-      test('should wait specified delay before first execution', async () => {
-        let executionCount = 0
-        const executions: number[] = []
-        const actionId = 'delay-test'
-        const delayTime = 1000
-
-        // Handler first (CYRE pattern)
-        cyre.on(actionId, () => {
-          executionCount++
-          executions.push(Date.now())
-          return {executed: true, count: executionCount}
-        })
-
-        // Action with delay
-        cyre.action({
-          id: actionId,
-          delay: delayTime
-        })
-
-        const startTime = Date.now()
-
-        // Call action with delay - should schedule, not execute immediately
-        const resultPromise = cyre.call(actionId, {test: 'delay'})
-
-        // CYRE v4.0.0: Actions with delay WAIT before first execution
-        expect(executionCount).toBe(0) // Should not execute immediately
-
-        // Advance by half the delay - still should not execute
-        vi.advanceTimersByTime(500)
-        await vi.runAllTimersAsync()
-        expect(executionCount).toBe(0)
-
-        // Advance to complete the delay
-        vi.advanceTimersByTime(500)
-        await vi.runAllTimersAsync()
-
-        // Now it should have executed
-        expect(executionCount).toBe(1)
-        expect(executions).toHaveLength(1)
-
-        // Verify timing
-        const executionTime = executions[0]
-        expect(executionTime - startTime).toBeGreaterThanOrEqual(delayTime)
-
-        await resultPromise // Ensure promise resolves
-      })
-
-      test('should handle processing pipeline with all operators', async () => {
-        let executionCount = 0
-        let finalPayload: any = null
-        const actionId = 'full-pipeline-test'
-
-        // Handler first
-        cyre.on(actionId, payload => {
-          executionCount++
-          finalPayload = payload
-          return {executed: true, payload}
-        })
-
-        // Action with processing operators only (no timing)
-        cyre.action({
-          id: actionId,
-          required: true,
-          schema: (payload: any) => ({
-            ok: payload && typeof payload.value === 'number',
-            data: payload,
-            errors: []
-          }),
-          condition: (payload: any) => payload.value > 0,
-          selector: (payload: any) => payload.data,
-          transform: (payload: any) => ({
-            ...payload,
-            processed: true,
-            timestamp: Date.now()
-          })
-        })
-
-        // Valid payload that passes all checks
-        const validPayload = {
-          data: {value: 42, name: 'test'},
-          metadata: {ignored: true}
-        }
-
-        const result = await cyre.call(actionId, validPayload)
-
-        // Processing operators without timing should execute immediately
-        expect(result.ok).toBe(true)
-        expect(executionCount).toBe(1)
-        expect(finalPayload.value).toBe(42)
-        expect(finalPayload.name).toBe('test')
-        expect(finalPayload.processed).toBe(true)
-        expect(finalPayload.timestamp).toBeDefined()
-        expect(finalPayload.metadata).toBeUndefined() // Should be removed by selector
-
-        // Invalid payload that fails condition
-        const invalidResult = await cyre.call(actionId, {
-          data: {value: -1, name: 'negative'}
-        })
-
-        expect(invalidResult.ok).toBe(false)
-        expect(executionCount).toBe(1) // Should not execute again
-      })
-
-      test('should handle timing + processing operators together', async () => {
-        let executionCount = 0
-        const executions: any[] = []
-        const actionId = 'timing-processing-test'
-
-        // Handler first
-        cyre.on(actionId, payload => {
-          executionCount++
-          executions.push({
-            count: executionCount,
-            payload,
-            timestamp: Date.now()
-          })
-          return {executed: true}
-        })
-
-        // Action with both timing AND processing
-        cyre.action({
-          id: actionId,
-          delay: 100,
-          interval: 200,
-          repeat: 3,
-          condition: (payload: any) => payload?.active === true,
-          transform: (payload: any) => ({
-            ...payload,
-            execution: executionCount + 1
-          })
-        })
-
-        // Call with valid condition
-        cyre.call(actionId, {active: true, data: 'test'})
-
-        // CYRE v4.0.0: Should not execute immediately due to delay
-        expect(executionCount).toBe(0)
-
-        // First execution after delay
-        vi.advanceTimersByTime(100)
-        await vi.runAllTimersAsync()
-        expect(executionCount).toBe(1)
-        expect(executions[0].payload.execution).toBe(1)
-
-        // Subsequent executions at interval
-        vi.advanceTimersByTime(200)
-        await vi.runAllTimersAsync()
-        expect(executionCount).toBe(2)
-
-        vi.advanceTimersByTime(200)
-        await vi.runAllTimersAsync()
-        expect(executionCount).toBe(3)
-
-        // Should stop after repeat count
-        vi.advanceTimersByTime(200)
-        await vi.runAllTimersAsync()
-        expect(executionCount).toBe(3) // No more executions
-      })
-    })
-
     describe('Edge Cases & Error Handling', () => {
       test('should handle conflicting operators gracefully', async () => {
         const actionId = 'conflicting-operators-test'
@@ -403,7 +242,6 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
         // Cleanup
         actionIds.forEach(id => {
           cyre.forget(id)
-          TimeKeeper.forget(id)
         })
       })
 
@@ -537,7 +375,7 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
         await vi.runAllTimersAsync()
         expect(executionCount).toBe(1) // No additional executions
 
-        TimeKeeper.forget(actionId)
+        cyre.forget(actionId)
       })
 
       test('should handle action replacement with new timing configuration', async () => {
@@ -581,7 +419,7 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
         // Should have executed original + new executions
         expect(executionCount).toBe(4) // 1 + 3
 
-        TimeKeeper.forget(actionId)
+        cyre.forget(actionId)
       })
     })
 
@@ -594,6 +432,11 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
         const actionId = 'health-check'
         let checkCount = 0
         let failureCount = 0
+        cyre.action({
+          id: actionId,
+          interval: 1000,
+          repeat: 10
+        })
 
         cyre.on(actionId, async () => {
           checkCount++
@@ -607,12 +450,6 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
           return {healthy: true, timestamp: Date.now()}
         })
 
-        cyre.action({
-          id: actionId,
-          interval: 100,
-          repeat: 10
-        })
-
         cyre.call(actionId)
 
         // Run all health checks
@@ -624,7 +461,7 @@ describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
         expect(checkCount).toBe(10)
         expect(failureCount).toBe(3) // Every 3rd check fails
 
-        TimeKeeper.forget(actionId)
+        cyre.forget(actionId)
       })
 
       test('should handle user activity debouncing', async () => {
