@@ -147,7 +147,7 @@ const snapshot = () => {
  * Create simple workflow for testing
  */
 const createSimpleWorkflow = (id: string, steps: string[]) => {
-  return orchestration.create({
+  return orchestration.keep({
     id,
     name: `Simple Workflow: ${id}`,
     description: `Auto-generated workflow with steps: ${steps.join(' -> ')}`,

@@ -90,7 +90,6 @@ import {log} from './components/cyre-log'
 import {metrics} from './metrics/integration'
 
 // Import schema system
-import schema from './schema/cyre-schema'
 
 // Import orchestration system
 import {orchestration} from './orchestration/orchestration-engine'
@@ -98,14 +97,13 @@ import {orchestration} from './orchestration/orchestration-engine'
 // Main exports with branch system
 export {
   cyre,
-  log,
   useCyre,
   useGroup,
   useBranch,
   useCollective,
-  schema,
-  orchestration,
-  metrics
+  orchestration, //advanced task setup// not sure to expose this
+  log, //utility logger function
+  metrics //Cyre stats fro external live stat monitors
 }
 
 // Version information

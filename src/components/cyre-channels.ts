@@ -65,9 +65,9 @@ const setChannelDefaults = (channel: IO): IO => {
     // Type is a group/category - don't default to ID
     type: channel.type, // Keep undefined if not provided
     payload: channel.payload !== undefined ? channel.payload : undefined,
-    timestamp: now,
-    timeOfCreation: channel.timeOfCreation || now,
-    _executionTime: 0,
+    _timestamp: now,
+    _timeOfCreation: channel._timeOfCreation || now,
+    _executionDuration: 0,
     _lastExecTime: 0,
     _executionCount: 0,
     _debounceTimer: undefined

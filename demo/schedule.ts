@@ -1,7 +1,7 @@
-// examples/pure-cyre-ecosystem.ts
+// demo/schedule.ts
 // Complete example using only Cyre's ecosystem - no external timers!
 
-import {cyre} from '../src/app'
+import {cyre, log} from '../src'
 
 /*
 
@@ -145,28 +145,7 @@ async function setupPureCyreEcosystem() {
   })
 
   cyre.on('performance-analyzer', () => {
-    const metrics = cyre.getMetricsReport()
-
-    console.log('🔍 Performance Analysis:')
-    console.log(`   Total Calls: ${metrics.global.totalCalls}`)
-    console.log(`   Uptime: ${metrics.global.uptime}s`)
-    console.log(
-      `   Error Rate: ${(
-        (metrics.global.totalErrors / metrics.global.totalCalls) *
-        100
-      ).toFixed(2)}%`
-    )
-
-    // Generate insights
-    const insights = []
-    if (metrics.global.callRate > 50) {
-      insights.push('High call rate detected - consider caching')
-    }
-    if (metrics.global.totalErrors > 10) {
-      insights.push('Error rate above threshold - investigate')
-    }
-
-    return {metrics: metrics.global, insights}
+    log.debug('hola')
   })
 
   cyre.on('alert-manager', alert => {
@@ -230,8 +209,8 @@ async function setupPureCyreEcosystem() {
   // ===== ORCHESTRATIONS =====
 
   // Weekly report generation orchestration
-  cyre.orchestration.create({
-    id: 'weekly-report-generation',
+  cyre.orchestration.keep({
+    id: 'weekly-report-generation', // task id
     triggers: [
       {
         name: 'manual',
@@ -242,7 +221,7 @@ async function setupPureCyreEcosystem() {
       {
         name: 'collect-user-data',
         type: 'action',
-        targets: 'user-activity-check'
+        targets: 'user-activity-check' // .call channel
       },
       {
         name: 'analyze-performance',
@@ -263,7 +242,7 @@ async function setupPureCyreEcosystem() {
   })
 
   // System maintenance orchestration
-  cyre.orchestration.create({
+  cyre.orchestration.keep({
     id: 'nightly-maintenance',
     triggers: [
       {
@@ -422,48 +401,5 @@ async function setupPureCyreEcosystem() {
 }
 
 // ===== DEMO FUNCTIONS =====
-
-function demonstrateAdaptiveSystem() {
-  console.log('\n🎯 Demonstrating Adaptive System...')
-
-  // Simulate high load to show breathing adaptation
-  cyre.schedule.task({
-    id: 'load-simulator',
-    triggers: [
-      {
-        interval: 100, // High frequency task
-        channels: ['system-monitor'],
-        repeat: 50 // Run 50 times to create load
-      }
-    ]
-  })
-
-  console.log('📈 High load simulation started - watch tasks adapt!')
-
-  // Schedule load reduction
-  cyre.schedule.once(30000, {
-    id: 'reduce-load',
-    function: async () => {
-      cyre.schedule.cancel('load-simulator')
-      console.log('📉 Load simulation ended - watch system recover!')
-    }
-  })
-}
-
-function demonstrateOrchestrationIntegration() {
-  console.log('\n🎼 Demonstrating Orchestration Integration...')
-
-  // Trigger the weekly report manually to show orchestration
-  cyre.schedule.once(1000, {
-    id: 'demo-orchestration',
-    orchestration: 'weekly-report-generation'
-  })
-
-  console.log('🎵 Orchestration will execute in 1 second...')
-}
-
-// ===== MAIN EXECUTION =====
-
-// ===== MAIN EXECUTION =====
 
 setupPureCyreEcosystem()

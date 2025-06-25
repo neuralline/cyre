@@ -1,3 +1,5 @@
+// demo/debug.ts
+
 // Debug the data-definitions structure
 
 // Check if auth is actually in the dataDefinitions object
@@ -8,17 +10,8 @@ import {dataDefinitions} from '../src/schema/data-definitions'
 
 console.log('🔧 DEBUG: dataDefinitions keys:', Object.keys(dataDefinitions))
 console.log('🔧 DEBUG: dataDefinitions has auth:', 'auth' in dataDefinitions)
-console.log('🔧 DEBUG: auth definition type:', typeof dataDefinitions.auth)
 
 // 2. Test the auth definition directly
-if (dataDefinitions.auth) {
-  console.log('🔧 DEBUG: Testing auth definition directly...')
-  const testResult = dataDefinitions.auth({
-    mode: 'session',
-    sessionTimeout: 30000
-  })
-  console.log('🔧 DEBUG: Direct auth test result:', testResult)
-}
 
 // 3. Check if there are multiple auth definitions
 const authKeys = Object.keys(dataDefinitions).filter(key =>
@@ -30,14 +23,6 @@ console.log('🔧 DEBUG: Keys containing "auth":', authKeys)
 const testValue = {mode: 'session', sessionTimeout: 1800000}
 console.log('🔧 DEBUG: Testing with exact log data...')
 
-if (dataDefinitions.auth) {
-  console.log('🔧 DEBUG: About to call auth definition...')
-  const result = dataDefinitions.auth(testValue)
-  console.log('🔧 DEBUG: Result from auth definition:', result)
-} else {
-  console.log('❌ DEBUG: auth definition not found in dataDefinitions!')
-}
-
 // 5. Check if there's a different auth definition being used
 // Let's trace through the compilation process manually
 console.log('\n🔧 DEBUG: Manual compilation trace...')
@@ -46,16 +31,6 @@ const actionKeys = ['id', 'auth', 'timeOfCreation', 'timestamp', 'type']
 for (const key of actionKeys) {
   const definition = dataDefinitions[key as keyof typeof dataDefinitions]
   console.log(`🔧 DEBUG: Key "${key}" has definition: ${!!definition}`)
-
-  if (key === 'auth' && definition) {
-    console.log('🔧 DEBUG: Found auth definition, testing...')
-    try {
-      const result = definition(testValue)
-      console.log('🔧 DEBUG: Auth definition result:', result)
-    } catch (error) {
-      console.log('❌ DEBUG: Auth definition error:', error)
-    }
-  }
 }
 
 // 6. Check the exact structure of your dataDefinitions export

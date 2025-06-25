@@ -456,25 +456,7 @@ const createFormation = (
     isActive: true,
     delay,
     interval,
-    hasExecutedOnce: false,
-
-    // Comprehensive metrics
-    metrics: {
-      totalExecutions: 0,
-      successfulExecutions: 0,
-      failedExecutions: 0,
-      averageExecutionTime: 0,
-      lastExecutionTime: 0,
-      longestExecutionTime: 0,
-      shortestExecutionTime: Infinity,
-      missedExecutions: 0,
-      surgeProtection: {
-        totalDelays: 0,
-        totalDelayTime: 0,
-        averageDelay: 0,
-        lastDelay: 0
-      }
-    }
+    hasExecutedOnce: false
   }
 
   sensor.info(id, 'Timer created', {

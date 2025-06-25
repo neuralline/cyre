@@ -278,7 +278,6 @@ export const metricsState = {
    */
   lock: (): void => {
     try {
-      metricsState._isLocked = true
       metricsState.update({_isLocked: true})
     } catch (error) {
       log.critical(`System lock failed: ${error}`)
@@ -291,7 +290,6 @@ export const metricsState = {
    */
   init: (): void => {
     try {
-      metricsState._init = true
       metricsState.update({_init: true})
       log.success('Cyre Metrics State' + metricsState._init)
     } catch (error) {
@@ -305,7 +303,6 @@ export const metricsState = {
    */
   shutdown: (): void => {
     try {
-      metricsState._shutdown = true
       metricsState.update({_shutdown: true})
     } catch (error) {
       log.critical(`System shutdown failed: ${error}`)

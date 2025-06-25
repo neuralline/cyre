@@ -1,4 +1,4 @@
-// example/industry-standard-tests.ts
+// benchmark/industry-standard-tests.ts
 // Industry-standard performance benchmarks for CYRE
 
 import {cyre, log} from '../src'

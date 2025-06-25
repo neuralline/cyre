@@ -1,7 +1,6 @@
 // src/context/state.ts
-// Refactored state management with payload separation
+// Cyre state management with payload separation
 
-import {log} from '../components/cyre-log'
 import type {
   BranchStore,
   IO,
@@ -13,13 +12,14 @@ import {metricsState, type MetricsState} from './metrics-state'
 import {payloadState} from './payload-state'
 import type {StateKey} from '../types/core'
 import {createStore} from './create-store'
+import {sensor} from '../metrics'
 
 /*
 
       C.Y.R.E - S.T.A.T.E
       
-      Refactored state management with clean separation:
-      - IO store: Configuration and behavior only
+      State management with clean separation:
+      - IO store: Channel configuration and behavior only
       - Payload state: Separate payload management
       - Clean interfaces and backward compatibility
       - Enhanced state operations
@@ -29,8 +29,8 @@ import {createStore} from './create-store'
 // Create stores with proper typing
 const ioStore = createStore<IO>() // Channels
 const subscriberStore = createStore<ISubscriber>() // .on subscribers/listeners
-const timelineStore = createStore<Timer>() // schedules and queued tasks
-const actionMetrics = createStore<StateActionMetrics>()
+const timelineStore = createStore<Timer>() // schedules and queued tasks used by TimeKeeper
+//const actionMetrics = createStore<StateActionMetrics>()
 const branchStore = createStore<BranchStore>()
 
 /**
@@ -43,17 +43,17 @@ export const io = Object.freeze({
    */
   set: (action: IO): void => {
     try {
-      if (!action?.id) throw new Error('IO state: Action must have an id')
+      if (!action?.id) throw new Error('IO state: Channel must have an id')
       const id = action.id
 
       const channel: IO = {
         ...action,
-        timestamp: Date.now()
+        _timestamp: Date.now()
       }
 
       ioStore.set(id, channel)
     } catch (error) {
-      log.critical(
+      sensor.critical(
         `IO state corruption detected: ${
           error instanceof Error ? error.message : String(error)
         }`
@@ -72,8 +72,8 @@ export const io = Object.freeze({
    */
   forget: (id: StateKey): boolean => {
     // Also remove payload
-    payloadState.forget(id)
-    return ioStore.forget(id)
+    payloadState.forget(id) //remove chanel's payload state
+    return ioStore.forget(id) // finally forget channel
   },
 
   /**
@@ -87,7 +87,7 @@ export const io = Object.freeze({
       payloadState.clear() // Clear payload state
       metricsState.reset()
     } catch (error) {
-      log.critical(`System clear failed: ${error}`)
+      sensor.critical(`System clear failed: ${error}`)
       throw error
     }
   },
@@ -113,22 +113,6 @@ export const io = Object.freeze({
     }
 
     return undefined
-  },
-
-  /**
-   * Track execution
-   */
-  trackExecution: (id: StateKey, executionTime?: number): void => {
-    try {
-      const now = Date.now()
-      const currentMetrics = io.getMetrics(id) || {
-        lastExecutionTime: 0,
-        executionCount: 0,
-        errors: []
-      }
-    } catch (error) {
-      log.error(`Failed to track execution for ${id}: ${error}`)
-    }
   }
 })
 

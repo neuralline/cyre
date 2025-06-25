@@ -1,7 +1,7 @@
 // demo/smart-city.ts
 // Simple demo showing Cyre features with real-time feedback
 
-import {cyre, createBranch, schema} from '../src'
+import {cyre, useBranch} from '../src'
 
 /*
 
@@ -21,20 +21,6 @@ import {cyre, createBranch, schema} from '../src'
 // DEMO SCHEMAS
 // ===========================================
 
-const UserSchema = schema.object({
-  id: schema.string().minLength(3),
-  name: schema.string().minLength(2),
-  email: schema.email_string(),
-  age: schema.number().min(13).max(120)
-})
-
-const MessageSchema = schema.object({
-  from: schema.string(),
-  to: schema.string(),
-  content: schema.string().minLength(1).maxLength(500),
-  timestamp: schema.number()
-})
-
 // ===========================================
 // CHAT APPLICATION DEMO
 // ===========================================
@@ -45,9 +31,9 @@ async function createChatDemo() {
   await cyre.initialize()
 
   // Create chat rooms as branches
-  const generalRoom = createBranch(undefined, {id: 'general-chat'})
-  const techRoom = createBranch(undefined, {id: 'tech-chat'})
-  const randomRoom = createBranch(undefined, {id: 'random-chat'})
+  const generalRoom = useBranch(undefined, {id: 'general-chat'})
+  const techRoom = useBranch(undefined, {id: 'tech-chat'})
+  const randomRoom = useBranch(undefined, {id: 'random-chat'})
 
   // Setup message system for each room
   const rooms = [
@@ -60,7 +46,6 @@ async function createChatDemo() {
     // Message action with schema validation and throttling
     branch.action({
       id: 'send-message',
-      schema: MessageSchema,
       throttle: 1000, // 1 message per second max
       detectChanges: true,
       payload: {from: '', to: '', content: '', timestamp: 0}
@@ -69,7 +54,6 @@ async function createChatDemo() {
     // User join/leave actions
     branch.action({
       id: 'user-join',
-      schema: UserSchema,
       payload: {id: '', name: '', email: '', age: 0}
     })
 
@@ -135,9 +119,9 @@ async function createGamingDemo() {
   console.log('🎮 Creating Gaming System Demo...')
 
   // Create game instances as branches
-  const game1 = createBranch(undefined, {id: 'tic-tac-toe-1'})
-  const game2 = createBranch(undefined, {id: 'tic-tac-toe-2'})
-  const game3 = createBranch(undefined, {id: 'tic-tac-toe-3'})
+  const game1 = useBranch(undefined, {id: 'tic-tac-toe-1'})
+  const game2 = useBranch(undefined, {id: 'tic-tac-toe-2'})
+  const game3 = useBranch(undefined, {id: 'tic-tac-toe-3'})
 
   const games = [
     {branch: game1, id: 'Game #1'},
@@ -410,11 +394,9 @@ function setupInteractiveCommands(chatRooms: any, games: any) {
     getStats: () => {
       const health = cyre.getSystemHealth()
       const performance = cyre.getPerformanceState()
-      const branchStats = cyre.branch.getStats()
 
       console.log('📊 Current System Stats:')
       console.log({
-        branches: branchStats,
         health: health,
         performance: {
           callRate: performance.callRate,

@@ -3,13 +3,12 @@
 
 import type {IO} from '../types/core'
 import type {TalentName} from './talent-definitions'
-import {log} from '../components/cyre-log'
 
 /*
 
       C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S
       
-      Action compilation system with improved validation messages:
+      Oerator compilation system with improved validation messages:
       - Clear, helpful error messages in British AI assistant style
       - Detailed suggestions for fixing configuration issues
       - Talent discovery and validation
@@ -27,21 +26,6 @@ export interface DataDefResult {
   suggestions?: string[]
 }
 
-// Validation result cache for performance
-const validationCache = new Map<string, DataDefResult>()
-const CACHE_SIZE_LIMIT = 1000
-
-// Helper to create cache key for simple values
-const createCacheKey = (fieldName: string, value: any): string => {
-  const valueType = typeof value
-  if (valueType === 'boolean' || valueType === 'number') {
-    return `${fieldName}:${valueType}:${value}`
-  }
-  if (valueType === 'string' && value.length < 100) {
-    return `${fieldName}:${valueType}:${value}`
-  }
-  return '' // Don't cache complex values
-}
 // Helper to describe the actual value received
 const describeValue = (value: any): string => {
   if (value === null) return 'null'
@@ -76,6 +60,7 @@ const PROCESSING_TALENTS = [
 ] as const
 
 const SCHEDULING_TALENTS = ['interval', 'delay', 'repeat'] as const
+
 // Main data definitions with improved error messages
 export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   // Core required fields
@@ -119,12 +104,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       return {ok: true, data: undefined}
     }
 
-    // Check cache first
-    const cacheKey = createCacheKey('path', value)
-    if (cacheKey && validationCache.has(cacheKey)) {
-      return validationCache.get(cacheKey)!
-    }
-
     // Validate path format
     const pathRegex = /^[a-zA-Z0-9/_-]+$/
     if (!pathRegex.test(value)) {
@@ -133,13 +112,9 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: 'Path contains invalid characters',
         suggestions: ['Use only letters, numbers, /, _, and -']
       }
-      if (cacheKey) validationCache.set(cacheKey, result)
-      return result
     }
 
-    const result = {ok: true, data: value}
-    if (cacheKey) validationCache.set(cacheKey, result)
-    return result
+    return {ok: true, data: value}
   },
 
   // Protection talents
@@ -540,4 +515,3 @@ export const compileAction = (
     hasFastPath
   }
 }
-

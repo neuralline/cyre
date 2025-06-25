@@ -28,7 +28,8 @@
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vitest": "^3.2.3"
+    "vitest": "^3.2.3",
+    "autocannon": "^8.0.0"
   },
   "exports": {
     ".": {
@@ -103,8 +104,5 @@
   },
   "sideEffects": false,
   "type": "module",
-  "types": "./dist/index.d.ts",
-  "dependencies": {
-    "autocannon": "^8.0.0"
-  }
+  "types": "./dist/index.d.ts"
 }

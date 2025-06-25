@@ -1,10 +1,10 @@
 // src/orchestration/orchestration-engine.ts
-// Orchestration system with proper TimeKeeper integration
+// Updated orchestration engine with clean functional API
 
 import {timeline} from '../context/state'
 import {sensor} from '../context/metrics-report'
 import {metricsState} from '../context/metrics-state'
-import {call} from '../app'
+import {call as cyreCall} from '../app'
 import {TimeKeeper} from '../components/cyre-timekeeper'
 import type {
   OrchestrationConfig,
@@ -12,20 +12,19 @@ import type {
   ExecutionContext,
   StepResult,
   OrchestrationRuntime,
-  TriggerEvent
+  TriggerEvent,
+  OrchestrationAction
 } from '../types/orchestration'
 
 /*
 
-      C.Y.R.E - O.R.C.H.E.S.T.R.A.T.I.O.N - E.N.G.I.N.E
+      C.Y.R.E - O.R.C.H.E.S.T.R.A.T.I.O.N - E.N.G.I.N.E - V2
       
-      Timeline-unified orchestration with TimeKeeper integration:
-      - Uses TimeKeeper.keep() to actually schedule timer execution
-      - Proper timer callback execution 
-      - Breathing system integration
-      - Fixed timer execution flow
-
-      CRITICAL FIX: Now properly calls TimeKeeper.keep() to schedule timers
+      Clean functional API with TimeKeeper alignment:
+      - orchestration.activate(id, boolean) - Enable/disable triggers
+      - orchestration.call(id, payload) - Direct execution like cyre.call
+      - orchestration.forget(id) - Remove orchestration
+      - Perfect alignment with functional programming principles
 
 */
 
@@ -76,9 +75,7 @@ interface StepContext {
 /**
  * Create orchestration runtime and register with timeline
  */
-const create = (
-  config: OrchestrationConfig
-): {ok: boolean; message: string} => {
+const keep = (config: OrchestrationConfig): {ok: boolean; message: string} => {
   try {
     // Validate configuration
     if (!config.id) {
@@ -92,7 +89,7 @@ const create = (
     // Create runtime
     const runtime: OrchestrationRuntime = {
       config,
-      status: 'stopped',
+      status: 'inactive',
       lastExecution: undefined,
       executionCount: 0,
       metrics: {
@@ -121,116 +118,83 @@ const create = (
 }
 
 /**
- * Start orchestration (enable triggers and timeline integration)
+ * Activate/deactivate orchestration triggers (replaces start/stop)
+ * Aligns with TimeKeeper.keep/forget pattern
  */
-const start = (orchestrationId: string): {ok: boolean; message: string} => {
-  const runtime = orchestrationRuntimes.get(orchestrationId)
-  if (!runtime) {
-    return {ok: false, message: 'Orchestration not found'}
-  }
-
-  if (runtime.status === 'running') {
-    return {ok: false, message: 'Orchestration already running'}
-  }
-
-  try {
-    // Register triggers with PROPER TimeKeeper integration
-    const triggerIds = registerTriggers(runtime.config)
-    runtime.triggerIds = triggerIds
-
-    runtime.status = 'running'
-    orchestrationRuntimes.set(orchestrationId, runtime)
-
-    sensor.log(orchestrationId, 'info', 'orchestration-started', {
-      triggersRegistered: triggerIds.length
-    })
-
-    return {ok: true, message: 'Orchestration started'}
-  } catch (error) {
-    sensor.error(orchestrationId, String(error), 'orchestration-start')
-    return {ok: false, message: String(error)}
-  }
-}
-
-/**
- * Stop orchestration (disable triggers and remove from timeline)
- */
-const stop = (orchestrationId: string): {ok: boolean; message: string} => {
-  const runtime = orchestrationRuntimes.get(orchestrationId)
-  if (!runtime) {
-    return {ok: false, message: 'Orchestration not found'}
-  }
-
-  try {
-    // Stop all triggers using TimeKeeper
-    runtime.triggerIds?.forEach(triggerId => {
-      TimeKeeper.forget(triggerId)
-      timeline.forget(triggerId)
-
-      const unsubscribe = triggerSubscriptions.get(triggerId)
-      if (unsubscribe) {
-        unsubscribe()
-        triggerSubscriptions.delete(triggerId)
-      }
-    })
-
-    // Remove from timeline
-    timeline.forget(orchestrationId)
-
-    runtime.status = 'stopped'
-    runtime.triggerIds = []
-    orchestrationRuntimes.set(orchestrationId, runtime)
-
-    sensor.log(orchestrationId, 'info', 'orchestration-stopped')
-
-    return {ok: true, message: 'Orchestration stopped'}
-  } catch (error) {
-    sensor.error(orchestrationId, String(error), 'orchestration-stop')
-    return {ok: false, message: String(error)}
-  }
-}
-
-/**
- * Get orchestration runtime information
- */
-const get = (orchestrationId: string): OrchestrationRuntime | undefined => {
-  return orchestrationRuntimes.get(orchestrationId)
-}
-
-/**
- * List all orchestration runtimes
- */
-const list = (): OrchestrationRuntime[] => {
-  return Array.from(orchestrationRuntimes.values())
-}
-
-/**
- * Remove orchestration completely
- */
-const remove = (orchestrationId: string): boolean => {
-  const runtime = orchestrationRuntimes.get(orchestrationId)
-  if (!runtime) {
-    return false
-  }
-
-  // Stop first if running
-  if (runtime.status === 'running') {
-    stop(orchestrationId)
-  }
-
-  // Remove runtime
-  orchestrationRuntimes.delete(orchestrationId)
-
-  sensor.log(orchestrationId, 'info', 'orchestration-removed')
-  return true
-}
-
-/**
- * Manual trigger for orchestration execution
- */
-const trigger = async (
+const activate = (
   orchestrationId: string,
-  triggerName: string,
+  enabled: boolean
+): {ok: boolean; message: string} => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) {
+    return {ok: false, message: 'Orchestration not found'}
+  }
+
+  try {
+    if (enabled) {
+      // Enable triggers (like TimeKeeper.keep)
+      if (runtime.status === 'active') {
+        return {ok: true, message: 'Orchestration already active'}
+      }
+
+      // Register triggers with PROPER TimeKeeper integration
+      const triggerIds = registerTriggers(runtime.config)
+      runtime.triggerIds = triggerIds
+      runtime.status = 'active'
+      orchestrationRuntimes.set(orchestrationId, runtime)
+
+      sensor.log(orchestrationId, 'info', 'orchestration-activated', {
+        triggersRegistered: triggerIds.length
+      })
+
+      return {
+        ok: true,
+        message: `Orchestration activated with ${triggerIds.length} triggers`
+      }
+    } else {
+      // Disable triggers (like TimeKeeper.forget)
+      if (runtime.status === 'inactive') {
+        return {ok: true, message: 'Orchestration already inactive'}
+      }
+
+      // Stop all triggers using TimeKeeper
+      runtime.triggerIds?.forEach(triggerId => {
+        TimeKeeper.forget(triggerId)
+        timeline.forget(triggerId)
+
+        const unsubscribe = triggerSubscriptions.get(triggerId)
+        if (unsubscribe) {
+          unsubscribe()
+          triggerSubscriptions.delete(triggerId)
+        }
+      })
+
+      // Remove from timeline
+      timeline.forget(orchestrationId)
+      runtime.status = 'inactive'
+      runtime.triggerIds = []
+      orchestrationRuntimes.set(orchestrationId, runtime)
+
+      sensor.log(orchestrationId, 'info', 'orchestration-deactivated')
+
+      return {ok: true, message: 'Orchestration deactivated'}
+    }
+  } catch (error) {
+    sensor.error(
+      orchestrationId,
+      String(error),
+      enabled ? 'orchestration-activate' : 'orchestration-deactivate'
+    )
+    return {ok: false, message: String(error)}
+  }
+}
+
+/**
+ * Call orchestration directly (like cyre.call) - replaces trigger
+ * Immediate execution with payload, similar to channel calls
+ */
+const call = async (
+  orchestrationId: string,
   payload?: any
 ): Promise<{ok: boolean; result?: any; message: string}> => {
   const runtime = orchestrationRuntimes.get(orchestrationId)
@@ -239,7 +203,7 @@ const trigger = async (
   }
 
   const triggerEvent: TriggerEvent = {
-    name: triggerName,
+    name: 'manual-call',
     type: 'external',
     payload,
     timestamp: Date.now()
@@ -263,9 +227,44 @@ const trigger = async (
 
     return result
   } catch (error) {
-    sensor.error(orchestrationId, String(error), 'orchestration-trigger')
+    sensor.error(orchestrationId, String(error), 'orchestration-call')
     return {ok: false, message: String(error)}
   }
+}
+
+/**
+ * Get orchestration runtime information
+ */
+const get = (orchestrationId: string): OrchestrationRuntime | undefined => {
+  return orchestrationRuntimes.get(orchestrationId)
+}
+
+/**
+ * List all orchestration runtimes
+ */
+const list = (): OrchestrationRuntime[] => {
+  return Array.from(orchestrationRuntimes.values())
+}
+
+/**
+ * Remove orchestration completely (forget pattern)
+ */
+const forget = (orchestrationId: string): boolean => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) {
+    return false
+  }
+
+  // Deactivate first if running
+  if (runtime.status === 'active') {
+    activate(orchestrationId, false)
+  }
+
+  // Remove runtime
+  orchestrationRuntimes.delete(orchestrationId)
+
+  sensor.log(orchestrationId, 'info', 'orchestration-forgotten')
+  return true
 }
 
 /**
@@ -286,7 +285,9 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
             : [trigger.channels]
 
           channels.forEach(channelId => {
-            // Register channel subscription
+            // TODO: Implement channel subscription logic
+            // This should use cyre.on() to subscribe to channel events
+            // and trigger orchestration when those channels are called
             const unsubscribe = () => {
               // Implementation would subscribe to channel events
               // For now, placeholder
@@ -298,8 +299,7 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
 
       case 'time':
         if (trigger.interval) {
-          // CRITICAL FIX: Use TimeKeeper.keep() instead of just timeline.add()
-
+          // Use TimeKeeper.keep() to actually schedule execution
           const executionCallback = async () => {
             console.log(`🔄 Orchestration trigger fired: ${config.id}`)
             const triggerEvent: TriggerEvent = {
@@ -324,7 +324,6 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
             }
           }
 
-          // Use TimeKeeper.keep() to actually schedule execution
           const timerResult = TimeKeeper.keep(
             trigger.interval, // duration
             executionCallback, // callback
@@ -347,6 +346,25 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
             )
           }
         }
+        break
+
+      case 'condition':
+        // TODO: Implement condition-based triggers
+        // This should periodically evaluate the condition function
+        // and trigger orchestration when condition becomes true
+        sensor.warn(config.id, 'condition-trigger-not-implemented', {
+          triggerId,
+          triggerName: trigger.name
+        })
+        break
+
+      case 'external':
+        // External triggers are handled via the call() method
+        // No registration needed
+        sensor.warn(config.id, 'external-trigger-registered', {
+          triggerId,
+          triggerName: trigger.name
+        })
         break
     }
   })
@@ -426,7 +444,7 @@ const executeWorkflowSteps = async (
                     ? step.payload(context)
                     : step.payload || context.trigger.payload
 
-                return call(target, payload)
+                return cyreCall(target, payload)
               })
             )
 
@@ -452,6 +470,39 @@ const executeWorkflowSteps = async (
 
           if (!conditionResult && step.onError === 'abort') {
             throw new Error('Condition not met - aborting workflow')
+          }
+          break
+
+        case 'parallel':
+          if (step.steps) {
+            const parallelResults = await Promise.all(
+              step.steps.map(subStep =>
+                executeWorkflowSteps([subStep], context)
+              )
+            )
+            stepResult = parallelResults.flat()
+          }
+          break
+
+        case 'sequential':
+          if (step.steps) {
+            stepResult = await executeWorkflowSteps(step.steps, context)
+          }
+          break
+
+        case 'loop':
+          if (step.steps) {
+            const loopResults: any[] = []
+            // Simple loop implementation - can be enhanced with iteration logic
+            const iterations = 3 // Default iterations
+            for (let i = 0; i < iterations; i++) {
+              const iterationResult = await executeWorkflowSteps(
+                step.steps,
+                context
+              )
+              loopResults.push(iterationResult)
+            }
+            stepResult = loopResults
           }
           break
 
@@ -500,7 +551,7 @@ const executeWorkflowSteps = async (
  * Execute orchestration action
  */
 const executeOrchestrationAction = async (
-  action: any,
+  action: OrchestrationAction,
   context: ExecutionContext
 ): Promise<any> => {
   const targets =
@@ -517,7 +568,7 @@ const executeOrchestrationAction = async (
           ? action.payload(context)
           : action.payload || context.trigger.payload
 
-      return call(target, payload)
+      return cyreCall(target, payload)
     })
   )
 
@@ -525,16 +576,15 @@ const executeOrchestrationAction = async (
 }
 
 /**
- * Main orchestration engine interface aligned with app.ts expectations
+ * Main orchestration engine interface with clean functional API
  */
 export const orchestration = {
-  create,
-  start,
-  stop,
+  keep,
+  activate, // NEW: Enable/disable triggers (replaces start/stop)
+  call, // NEW: Direct execution (replaces trigger)
   get,
   list,
-  remove,
-  trigger,
+  forget, // RENAMED: Remove orchestration (replaces remove)
 
   // Additional utility methods
   getStatus: (orchestrationId: string) => {
@@ -569,12 +619,26 @@ export const orchestration = {
     return {
       total: {
         orchestrations: orchestrationRuntimes.size,
-        running: allRuntimes.filter(r => r.status === 'running').length,
+        running: allRuntimes.filter(r => r.status === 'active').length,
         timelineEntries: timeline.getAll().length,
         activeTriggers: timeKeeperStatus.activeFormations
       },
       breathing: metricsState.get().breathing,
       systemStress: metricsState.get().stress?.combined || 0
     }
-  }
+  },
+
+  // Backward compatibility methods (deprecated)
+  /** @deprecated Use activate(id, true) instead */
+  start: (id: string) => activate(id, true),
+
+  /** @deprecated Use activate(id, false) instead */
+  stop: (id: string) => activate(id, false),
+
+  /** @deprecated Use call(id, payload) instead */
+  trigger: async (id: string, triggerName: string, payload?: any) =>
+    call(id, payload),
+
+  /** @deprecated Use forget(id) instead */
+  remove: (id: string) => forget(id)
 }

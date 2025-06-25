@@ -2,7 +2,7 @@
 // AI Content Moderation Pipeline using Cyre hooks family
 // Demonstrates: data processing pipelines, AI integration, scalable content filtering
 
-import {cyre, useCyre, useBranch, useGroup, schema, metrics} from '../src'
+import {cyre, useCyre, useBranch, useGroup} from '../src'
 
 /**
  * 🤖 AI CONTENT MODERATION PIPELINE

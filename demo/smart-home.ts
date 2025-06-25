@@ -1,7 +1,7 @@
-// demo/fixed-functional-cyre.ts
+// demo/smart-home.ts
 // File location: Fixed pure functional demo with corrected issues
 
-import {cyre, schema} from '../src'
+import {cyre} from '../src'
 
 /*
   FIXED PURE FUNCTIONAL CYRE DEMONSTRATION
@@ -15,41 +15,6 @@ import {cyre, schema} from '../src'
 */
 
 console.log('🧮 Fixed Functional Cyre Demo Starting...')
-
-// ===========================================
-// FIXED SCHEMAS (NO DESCRIPTION FIELD)
-// ===========================================
-
-const createUserSchema = () =>
-  schema.object({
-    id: schema.pipe(schema.string(), schema.minLength(3)),
-    name: schema.pipe(schema.string(), schema.minLength(2)),
-    email: schema.email(),
-    age: schema.pipe(schema.number(), schema.min(13), schema.max(120))
-  })
-
-const createMessageSchema = () =>
-  schema.object({
-    from: schema.fast('string'),
-    to: schema.fast('string'),
-    content: schema.pipe(
-      schema.string(),
-      schema.minLength(1),
-      schema.maxLength(500)
-    ),
-    timestamp: schema.timestamp(),
-    type: schema.enums('text', 'system', 'broadcast')
-  })
-
-const createSensorDataSchema = () =>
-  schema.object({
-    deviceId: schema.id(),
-    location: schema.fast('string'),
-    value: schema.fast('number'),
-    unit: schema.enums('celsius', 'fahrenheit', 'humidity', 'lux', 'db'),
-    timestamp: schema.timestamp(),
-    quality: schema.pipe(schema.number(), schema.min(0), schema.max(1))
-  })
 
 // ===========================================
 // FIXED FUNCTIONAL UTILITIES
@@ -336,13 +301,12 @@ const setupChatSystem = async () => {
   // Register actions without unsupported fields
   cyre.action({
     id: 'send-message',
-    schema: createMessageSchema(),
     throttle: 1000
   })
 
   cyre.action({
     id: 'high-priority-message',
-    schema: createMessageSchema(),
+
     priority: {level: 'high'}
   })
 
@@ -409,18 +373,12 @@ const setupSensorSystem = async () => {
   // Register actions
   cyre.action({
     id: 'sensor-reading',
-    schema: createSensorDataSchema(),
     debounce: 2000
   })
 
   cyre.action({
     id: 'sensor-alert',
-    schema: schema.object({
-      type: schema.fast('string'),
-      severity: schema.enums('low', 'medium', 'high'),
-      message: schema.fast('string'),
-      source: schema.fast('string')
-    }),
+
     priority: {level: 'high'}
   })
 

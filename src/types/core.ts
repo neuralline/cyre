@@ -1,5 +1,5 @@
 // src/types/core.ts
-// Enhanced IO interface with additional channel fields
+// IO: channel interface with additional
 
 export type * from './timer'
 export type * from './orchestration'
@@ -55,7 +55,6 @@ export interface CyreResponse<T = any> {
     conditionMet?: boolean
     selectorApplied?: boolean
     transformApplied?: boolean
-    [key: string]: any
   }
 }
 
@@ -144,19 +143,20 @@ export interface IO {
   /** Version for channel evolution tracking */
   version?: string
 
-  /** Require payload to be provided - boolean for basic requirement, 'non-empty' for non-empty requirement */
-  required?: boolean | 'non-empty'
+  //channel operators aka action talents
+  /** Require payload to be provided - boolean for basic requirement */
+  required?: boolean
   /** Milliseconds between executions for repeated actions */
   interval?: number
   /** Number of times to repeat execution, true for infinite repeats */
   repeat?: number | boolean
-  /** Milliseconds to delay before first execution */
+  /** Milliseconds to delay before first execution in other word wait on the first reputation*/
   delay?: number
   /** Minimum milliseconds between executions (rate limiting) */
   throttle?: number
   /** Collapse rapid calls within this window (milliseconds) */
   debounce?: number
-  /** Maximum wait for debounce */
+  /** Maximum wait time for debounce */
   maxWait?: number
   /** Only execute if payload has changed from previous execution */
   detectChanges?: boolean
@@ -164,21 +164,12 @@ export interface IO {
   log?: boolean
   /** Priority level for execution during system stress */
   priority?: PriorityConfig
-  /** Middleware functions to process action before execution */
-  middleware?: string[]
-  /** Schema validation for payload */
+
+  /** Schema validation for payload. only execute hen these conditions are error free*/
   schema?: Schema<any>
   /** Block this action from execution */
   block?: boolean
 
-  //authentication
-  auth?: {
-    mode: 'token' | 'context' | 'group' | 'disabled'
-    token?: string
-    allowedCallers?: string[]
-    groupPolicy?: string
-    sessionTimeout?: number
-  }
   // State reactivity options
   /** Only execute when this condition returns true */
   condition?: ConditionFunction
@@ -187,41 +178,48 @@ export interface IO {
   /** Transform payload before execution */
   transform?: TransformFunction
 
+  //authentication: experimental
+  auth?: {
+    mode: 'token' | 'context' | 'group' | 'disabled'
+    token?: string
+    allowedCallers?: string[]
+    groupPolicy?: string
+    sessionTimeout?: number
+  }
+
   // Internal optimization fields
-  /** Pre-computed blocking state for instant rejection */
+  /** Pre-computed blocking state for instant use */
   _isBlocked?: boolean
   /** Reason for blocking if _isBlocked is true */
   _blockReason?: string
   /** True if action has no protections and can use fast path */
   _hasFastPath?: boolean
-  /** Pre-compiled protection pipeline functions */
-  _protectionPipeline?: ProtectionFn[]
+  /** save Pre-compiled channel operators list here */
+  _pipeline?: pipeline[]
   /** Active debounce timer ID */
   _debounceTimer?: string
-  /** Flag to bypass debounce protection for internal use */
-  _bypassDebounce?: boolean
-  /** Flag to indicate if action is scheduled for execution */
+
+  /** Flag to indicate if this channel has schedule elements */
   _isScheduled?: boolean
-  /** First debounce call timestamp for maxWait calculation */
-  _firstDebounceCall?: number
+
   /** Branch ID if this channel belongs to a branch */
   _branchId?: string
 
   // Compiled pipelines (internal)
-  _fusionPipeline?: FusionFn[]
-  _patternPipeline?: PatternFn[]
+
   _hasProtections?: boolean
   _hasProcessing?: boolean
   _hasScheduling?: boolean
   _processingTalents?: string[]
   _hasChangeDetection?: boolean
 
-  // Metadata fields
-  timestamp?: number
-  timeOfCreation?: number
-  _lastExecTime?: number
-  _executionTime?: number
-  _executionCount?: number
+  // system fields
+  _timestamp?: number //latest call to channel timestamp
+  _timeOfCreation?: number //time of channel creation timestamp
+  _lastExecTime?: number // last successful execution time timestamp
+  _executionDuration?: number //how long last execution took
+  _executionCount?: number //how many times it has been successfully executed
+  _errorCount?: number //error execution count
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any

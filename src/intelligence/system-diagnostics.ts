@@ -500,8 +500,8 @@ const getDiagnosticHandlers = (): Array<{
 
           // Check each orchestration
           allOrchestrations.forEach(runtime => {
-            const status = cyre.orchestration.getStatus(runtime.config.id)
-            const isHealthy = status?.isActive && runtime.status === 'running'
+            const status = cyre.orchestration.status(runtime.config.id)
+            const isHealthy = status?.isActive && runtime.status === 'active'
 
             results.push({
               component: `Orchestration: ${runtime.config.id}`,

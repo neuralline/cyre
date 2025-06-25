@@ -71,7 +71,6 @@ const applySharedConfig = (channelId: string, shared: Partial<IO>): void => {
   }
 
   io.set(updated)
-  sensor.log(channelId, 'info', 'group-config-applied')
 }
 
 /**

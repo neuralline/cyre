@@ -1,3 +1,4 @@
+import {subscribers, timeline} from './../context/state'
 // src/types/system.ts
 // System performance and monitoring types
 
@@ -56,6 +57,13 @@ export interface QuantumState {
   hibernating: boolean
   recuperationInterval?: NodeJS.Timeout
   activeFormations: number
+  store: {
+    channels: number
+    branches: number
+    subscribers: number
+    tasks: number
+    timeline: number
+  }
   _Locked: boolean
   _shutdown: boolean
   _init: boolean

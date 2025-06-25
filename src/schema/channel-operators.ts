@@ -60,7 +60,6 @@ interface TalentFunction {
   dependencies: string[]
 }
 
-
 /**
  * CompileResult contains the output of action compilation
  * - compiledAction: The optimized action
@@ -113,8 +112,6 @@ const AVAILABLE_TALENTS = {
 // ============================================================================
 // STEP 1: REPLACE getTalentImplementation function (around line 200)
 // ============================================================================
-
-
 
 const getTalentImplementation = (talentName: string) => {
   switch (talentName) {
@@ -696,9 +693,6 @@ export const compileAction = (action: Partial<IO>): CompileResult => {
     compilationCache.set(cacheKey, result)
 
     // Log performance insights
-  
-
- 
 
     return result
   } catch (error) {
@@ -745,7 +739,6 @@ export const executePipeline = (action: IO, payload: any): TalentResult => {
 
   // Get channel profile
   const profile = channelProfiles.get(action.id)
-  log.warn(profile)
 
   if (!profile) {
     // Fallback: compile on demand

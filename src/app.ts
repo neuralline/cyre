@@ -211,17 +211,19 @@ const initialize = async (
  */
 const initializeBreathing = (): void => {
   TimeKeeper.keep(
-    1000, // Check every second
+    1000, // reputation interval
     async () => {
+      //callback on each reputation
       try {
         await updateBreathingFromMetrics()
       } catch (error) {
         // Silent fail to prevent log spam
-        console.error('Breathing update error:', error)
+        sensor.error('system', 'Breathing update error:', 'initialize')
       }
     },
-    true,
-    'system-breathing'
+    true, //repeat infinity or number to count down
+    'system-breathing', // id for tracking progress and cancellation
+    2000 // start reputation after 2s delay
   )
 
   sensor.info('system', 'Breathing system initialized with metrics integration')
@@ -388,7 +390,10 @@ export const call = async (
 
         // Check maxWait constraint
 
-        if (action.maxWait && Date.now() - action.timestamp >= action.maxWait) {
+        if (
+          action.maxWait &&
+          Date.now() - action._timestamp >= action.maxWait
+        ) {
           // MaxWait exceeded - execute immediately and reset debounce
 
           action._debounceTimer = undefined
@@ -565,23 +570,20 @@ const forget = (id: string): boolean => {
 }
 const shutdown = (): void => {
   try {
-    sensor.log('system', 'critical', 'system-shutdown', {
-      timestamp: Date.now()
-    })
-    log.sys('Initiating system shutdown')
+    sensor.debug('system', 'critical', 'system-shutdown')
+    sensor.sys('system', 'Initiating system shutdown')
 
     // Stop system orchestrations
     systemOrchestrationIds.forEach(id => {
       orchestration.stop(id)
     })
 
-    clear()
-    log.debug('System offline!')
+    reset()
+    sensor.debug('System offline!')
     if (typeof process !== 'undefined' && process.exit) {
       process.exit(0)
     }
   } catch (error) {
-    log.critical(`Shutdown failed: ${error}`)
     sensor.critical('shutdown', 'System-shutdown failed')
   }
 }
@@ -589,7 +591,7 @@ const shutdown = (): void => {
 /**
  * Clear system with all integrations
  */
-const clear = (): void => {
+const reset = (): void => {
   try {
     sensor.info('system', 'System clear initiated', {
       timestamp: Date.now(),
@@ -599,7 +601,7 @@ const clear = (): void => {
     // Stop system orchestrations first
     systemOrchestrationIds.forEach(id => {
       orchestration.stop(id)
-      orchestration.remove(id)
+      orchestration.forget(id)
     })
 
     io.clear()
@@ -616,7 +618,7 @@ const clear = (): void => {
 
     // Clear orchestrations
     orchestration.list().forEach(runtime => {
-      orchestration.remove(runtime.config.id)
+      orchestration.forget(runtime.config.id)
     })
 
     // Clear query cache
@@ -641,7 +643,7 @@ export const cyre = Object.freeze({
   on: subscribe,
   call,
   forget,
-  clear,
+  clear: reset,
 
   // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
@@ -687,189 +689,7 @@ export const cyre = Object.freeze({
 
   shutdown,
 
-  status: (): boolean => metricsState.get().hibernating,
-
-  // System monitoring with metrics integration
-  getSystemHealth: () => {
-    const breathing = metricsState.get().breathing
-    const systemMetrics = metrics.getSystemMetrics()
-    const analysis = metrics.analyze()
-
-    return {
-      overall:
-        breathing.stress < 0.8 && analysis.health.factors.errorRate < 0.1,
-      breathing: {
-        stress: breathing.stress,
-        rate: breathing.currentRate,
-        healthy: breathing.stress < 0.8
-      },
-      metrics: {
-        callRate: systemMetrics.callRate,
-        successRate: analysis.health.factors.successRate,
-        errorRate: analysis.health.factors.errorRate,
-        averageLatency: analysis.health.factors.latency
-      }
-    }
-  },
-
-  // Breathing system controls with metrics awareness
-  adaptSystemLoad: (loadLevel: number) => {
-    const breathing = metricsState.get().breathing
-    const systemMetrics = metrics.getSystemMetrics()
-
-    if (loadLevel < 0.2) {
-      // Recovery mode - reset stress to very low
-      breathing.stress = 0.1
-      breathing.currentRate = BREATHING.RATES.BASE
-    } else {
-      // Normal adaptation based on actual metrics
-      const metricsStress = calculateSystemStress()
-      breathing.stress = Math.max(loadLevel, metricsStress)
-      breathing.currentRate =
-        breathing.stress > 0.8
-          ? BREATHING.RATES.RECOVERY
-          : breathing.stress > 0.5
-          ? BREATHING.RATES.MAX
-          : BREATHING.RATES.BASE
-    }
-
-    // Log the adaptation with metrics context
-    if (loadLevel > 0.9) {
-      log.warn('High system load detected - adapting orchestration frequency')
-      sensor.warn('system', 'Load adaptation triggered', {
-        requestedLoad: loadLevel,
-        actualStress: breathing.stress,
-        callRate: systemMetrics.callRate,
-        newBreathingRate: breathing.currentRate
-      })
-    }
-
-    return {
-      adapted: true,
-      loadLevel,
-      newStress: breathing.stress,
-      metricsSnapshot: {
-        callRate: systemMetrics.callRate,
-        totalCalls: systemMetrics.totalCalls,
-        totalErrors: systemMetrics.totalErrors
-      }
-    }
-  },
-
-  // Monitoring methods with metrics integration
-  getBreathingState: () => {
-    const state = metricsState.get().breathing
-    const systemMetrics = metrics.getSystemMetrics()
-
-    return {
-      ...state,
-      // Include relevant metrics context
-      metricsContext: {
-        callRate: systemMetrics.callRate,
-        totalCalls: systemMetrics.totalCalls,
-        totalErrors: systemMetrics.totalErrors,
-        uptime: systemMetrics.uptime
-      }
-    }
-  },
-
-  getPerformanceState: () => {
-    const systemMetrics = metrics.getSystemMetrics()
-    const analysis = metrics.analyze()
-    const breathing = metricsState.get().breathing
-
-    return {
-      totalProcessingTime: 0, // Could be calculated from metrics
-      totalCallTime: 0, // Could be calculated from metrics
-      totalStress: breathing.stress,
-      stress: breathing.stress,
-      callRate: systemMetrics.callRate,
-      totalCalls: systemMetrics.totalCalls,
-      totalExecutions: systemMetrics.totalExecutions,
-      successRate: analysis.health.factors.successRate,
-      errorRate: analysis.health.factors.errorRate,
-      averageLatency: analysis.health.factors.latency
-    }
-  },
-
-  // Group system methods
-  group: (groupId: string, config: GroupConfig) => {
-    return groupOperations.create(groupId, config)
-  },
-
-  getGroup: (groupId: string) => {
-    return groupOperations.get(groupId)
-  },
-
-  updateGroup: (groupId: string, updates: Partial<GroupConfig>) => {
-    return groupOperations.update(groupId, updates)
-  },
-
-  removeGroup: (groupId: string): boolean => {
-    return groupOperations.remove(groupId)
-  },
-
-  getAllGroups: () => {
-    return groupOperations.getAll()
-  },
-
-  getChannelGroups: (channelId: string) => {
-    return groupOperations.getChannelGroups(channelId)
-  }, // System diagnostics methods
-  runSystemDiagnostics: async () => {
-    return await runDiagnostics()
-  },
-
-  getSystemDiagnostics: () => {
-    const overview = cyre.orchestration.getSystemOverview()
-    const breathing = metricsState.get().breathing
-    const systemMetrics = metrics.getSystemMetrics()
-
-    return {
-      timestamp: Date.now(),
-      orchestrations: {
-        total: overview.total.orchestrations,
-        running: overview.total.running,
-        active: overview.total.activeTriggers
-      },
-      breathing: {
-        stress: breathing.stress,
-        rate: breathing.currentRate,
-        isRecuperating: breathing.isRecuperating
-      },
-      metrics: {
-        totalCalls: systemMetrics.totalCalls,
-        callRate: systemMetrics.callRate,
-        totalErrors: systemMetrics.totalErrors,
-        uptime: systemMetrics.uptime
-      },
-      timeline: {
-        total: timeline.getAll().length,
-        active: timeline.getActive().length
-      }
-    }
-  },
-
-  // Manual trigger for immediate diagnostics
-  triggerDiagnostics: async () => {
-    try {
-      log.info('🔍 Manual diagnostics triggered...')
-      const result = await cyre.call('system-diagnostics-runner', {
-        manual: true
-      })
-
-      if (result.ok) {
-        log.success('🔍 Manual diagnostics completed successfully')
-        return result.payload
-      } else {
-        log.error(`🔍 Manual diagnostics failed: ${result.message}`)
-        return null
-      }
-    } catch (error) {
-      log.error(`🔍 Manual diagnostics error: ${error}`)
-      return null
-    }
-  }
+  status: (): boolean => metricsState.get().hibernating
 })
 
 export default cyre

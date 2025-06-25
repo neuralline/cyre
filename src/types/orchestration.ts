@@ -1,8 +1,6 @@
 // src/types/orchestration.ts
 // Unified orchestration types for engine and app integration
 
-import type {ActionPayload} from './core'
-
 export interface OrchestrationConfig {
   id: string
   name?: string
@@ -129,7 +127,7 @@ export type ConditionFunction = (
 
 export interface OrchestrationRuntime {
   config: OrchestrationConfig
-  status: 'stopped' | 'running' | 'paused' | 'error'
+  status: 'inactive' | 'active' | 'paused' | 'error'
   context?: ExecutionContext
   lastExecution?: number
   executionCount: number

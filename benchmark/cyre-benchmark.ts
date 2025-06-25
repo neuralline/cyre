@@ -433,8 +433,6 @@ export async function runCompleteAdvancedBenchmark(): Promise<void> {
     console.log('\n🏥 System Health Check:')
     //const metrics = cyre.getMetricsReport()
     //
-    console.log(`System Stress: ${(breathingState.stress * 100).toFixed(1)}%`)
-    console.log(`Breathing Rate: ${breathingState.currentRate}ms`)
   } catch (error) {
     console.error('❌ Advanced benchmark failed:', error)
   } finally {

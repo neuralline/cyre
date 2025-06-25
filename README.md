@@ -494,7 +494,7 @@ Originally evolved from the Quantum-Inception clock project (2016), Cyre has gro
 
 ```sh
 Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-Expands HORIZONTALLY as your projects grow
+Expands HORIZONTALLY as your project grow
 ```
 
 **CYRE** - Neural Line Reactive Event Manager  

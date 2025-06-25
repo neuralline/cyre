@@ -38,6 +38,8 @@ export type TalentName =
   | 'transform'
   | 'detectChanges'
   | 'required'
+  | 'schedule'
+  | 'auth'
 
 // Performance-optimized talent function cache
 const talentFunctionCache = new Map<string, TalentFunction>()

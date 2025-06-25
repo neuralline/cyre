@@ -1,12 +1,11 @@
 // src/config/cyre-config.ts
 
 import {QuantumState} from '../types/system'
-import {Priority} from '../types/core'
 
 /*
 
       C.Y.R.E. - C.O.N.F.I.G.
-      Enhanced with configurable action pipeline performance monitoring
+      cyre system configurations and messages
 
 */
 export const PAYLOAD_CONFIG = {MAX_HISTORY_PER_CHANNEL: 10}
@@ -22,71 +21,6 @@ export const TIMING = {
   RECUPERATION: 60 * 1000, // 1 minute - Recuperation check interval
   LONG_INTERVAL: 60 * 60 * 1000, // 1 hour - Long timer handling
   MAX_TIMEOUT: Math.pow(2, 31) - 1 // Max safe timeout value
-} as const
-
-// Enhanced performance monitoring configuration with action pipeline terminology
-export const PERFORMANCE = {
-  // Action pipeline timing thresholds
-  ACTION_PIPELINE_THRESHOLDS: {
-    EXCELLENT: 1, // < 1ms pipeline overhead
-    GOOD: 3, // < 3ms pipeline overhead
-    ACCEPTABLE: 5, // < 5ms pipeline overhead
-    POOR: 10, // < 10ms pipeline overhead
-    CRITICAL: 20 // > 20ms pipeline overhead (needs optimization)
-  },
-
-  // Listener execution thresholds by priority
-  LISTENER_EXECUTION_THRESHOLDS: {
-    critical: {
-      WARNING: 100, // Critical actions can take longer
-      ERROR: 500 // But not too long
-    },
-    high: {
-      WARNING: 50,
-      ERROR: 200
-    },
-    medium: {
-      WARNING: 20, // Current Cyre standard
-      ERROR: 100
-    },
-    low: {
-      WARNING: 15,
-      ERROR: 50
-    },
-    background: {
-      WARNING: 10, // Background should be fast
-      ERROR: 30
-    }
-  },
-
-  // Total execution time thresholds
-  TOTAL_EXECUTION_THRESHOLDS: {
-    FAST: 5, // < 5ms total (excellent)
-    NORMAL: 25, // < 25ms total (good)
-    SLOW: 100, // < 100ms total (acceptable)
-    VERY_SLOW: 500, // < 500ms total (concerning)
-    CRITICAL: 1000 // > 1000ms total (critical)
-  },
-
-  // Pipeline efficiency thresholds
-  PIPELINE_EFFICIENCY: {
-    EXCELLENT: 0.1, // Pipeline overhead < 10% of total
-    GOOD: 0.2, // Pipeline overhead < 20% of total
-    ACCEPTABLE: 0.3, // Pipeline overhead < 30% of total
-    POOR: 0.5, // Pipeline overhead < 50% of total
-    CRITICAL: 0.7 // Pipeline overhead > 70% of total (bad!)
-  },
-
-  // Monitoring settings
-  MONITORING: {
-    DEFAULT_THRESHOLD: 20, // Default threshold in ms
-    WARNING_ENABLED: true, // Enable/disable warnings
-    TRACK_PERCENTILES: true, // Track 95th percentile times
-    MAX_HISTORY_SIZE: 100, // Max execution times to store
-    REPORT_INTERVAL: 10000, // How often to check for patterns (ms)
-    AUTO_OPTIMIZE_THRESHOLD: 100, // Auto-suggest optimizations above this
-    STAGE_BREAKDOWN_ENABLED: true // Enable detailed stage timing
-  }
 } as const
 
 export const MSG = {
@@ -219,51 +153,6 @@ export const MSG = {
   SYSTEM_OPTIMIZED: 'System optimization complete - performance improved'
 } as const
 
-// Helper function to create contextual messages with British politeness
-export const createPoliteMessage = (
-  operation: 'success' | 'error' | 'info' | 'warning',
-  context: string,
-  details?: string
-): string => {
-  const templates = {
-    success: {
-      base: 'Operation completed successfully',
-      withDetails: (details: string) =>
-        `Operation completed successfully - ${details}`,
-      polite: 'Task accomplished as requested'
-    },
-    error: {
-      base: "I'm afraid there was an issue",
-      withDetails: (details: string) => `I\'m unable to proceed - ${details}`,
-      polite: 'I apologize, but I cannot complete that request'
-    },
-    info: {
-      base: 'Status update',
-      withDetails: (details: string) => `Information: ${details}`,
-      polite: 'Keeping you informed'
-    },
-    warning: {
-      base: 'Advisory notice',
-      withDetails: (details: string) => `Please note: ${details}`,
-      polite: 'I should mention'
-    }
-  }
-
-  const template = templates[operation]
-  if (details) {
-    return template.withDetails(details)
-  }
-  return template.base
-}
-
-// Export type for message tone consistency
-export type MessageTone =
-  | 'formal'
-  | 'polite'
-  | 'neutral'
-  | 'helpful'
-  | 'assertive'
-
 // Protection thresholds (keeping existing structure)
 export const PROTECTION = {
   CALL_THRESHOLD: 100,
@@ -378,6 +267,13 @@ export const defaultMetrics: QuantumState = {
     callRate: 0,
     combined: 0
   },
+  store: {
+    channels: 0,
+    branches: 0,
+    tasks: 0,
+    subscribers: 0,
+    timeline: 0
+  },
   lastUpdate: Date.now(),
   inRecuperation: false,
   hibernating: false,
@@ -385,41 +281,4 @@ export const defaultMetrics: QuantumState = {
   _Locked: false,
   _init: false,
   _shutdown: false
-}
-
-export const systemMetrics = {
-  system: {
-    cpuUsage: 0,
-    memoryUsage: 0,
-    eventLoopLag: 0,
-    isOverloaded: false
-  },
-  totalCalls: 0,
-  callsPerSecond: 0,
-  protectionLevel: 0,
-  activeQueues: new Set<Priority>(),
-  isOverloaded: false
-}
-
-// Helper functions for performance monitoring
-export const getListenerThreshold = (priority: Priority = 'medium'): number => {
-  return (
-    PERFORMANCE.LISTENER_EXECUTION_THRESHOLDS[priority]?.WARNING ||
-    PERFORMANCE.MONITORING.DEFAULT_THRESHOLD
-  )
-}
-
-export const getPipelineThreshold = (): number => {
-  return PERFORMANCE.ACTION_PIPELINE_THRESHOLDS.ACCEPTABLE
-}
-
-export const categorizeExecutionTime = (
-  timeMs: number
-): keyof typeof PERFORMANCE.TOTAL_EXECUTION_THRESHOLDS => {
-  if (timeMs < PERFORMANCE.TOTAL_EXECUTION_THRESHOLDS.FAST) return 'FAST'
-  if (timeMs < PERFORMANCE.TOTAL_EXECUTION_THRESHOLDS.NORMAL) return 'NORMAL'
-  if (timeMs < PERFORMANCE.TOTAL_EXECUTION_THRESHOLDS.SLOW) return 'SLOW'
-  if (timeMs < PERFORMANCE.TOTAL_EXECUTION_THRESHOLDS.VERY_SLOW)
-    return 'VERY_SLOW'
-  return 'CRITICAL'
 }

@@ -1,4 +1,4 @@
-// benchmark/true-spray-pray-benchmark.ts
+// benchmark/cyre-performance-benchmark.ts
 // File location: /benchmark/true-spray-pray-benchmark.ts
 
 /**
