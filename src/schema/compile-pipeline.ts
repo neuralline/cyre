@@ -1,23 +1,8 @@
-import {ChannelOperator, IO} from '../types/core'
+// Enhanced compile-pipeline.ts with function reference pre-compilation
+
+import type {IO, ChannelOperator} from '../types/core'
 import {dataDefinitions} from './data-definitions'
-
-// Talent categories for optimization flags
-const PROTECTION_TALENTS: ChannelOperator[] = [
-  'block',
-  'throttle',
-  'debounce'
-] as const
-
-const PROCESSING_TALENTS: ChannelOperator[] = [
-  'schema',
-  'condition',
-  'selector',
-  'transform',
-  'detectChanges',
-  'required'
-] as const
-
-const SCHEDULING_TALENTS = ['interval', 'delay', 'repeat'] as const
+import {talentOperators} from './talent-definitions' // Import the Map
 
 export const compileAction = (
   action: Partial<IO>
@@ -43,24 +28,21 @@ export const compileAction = (
     const definition = dataDefinitions[key as keyof typeof dataDefinitions]
 
     if (!definition) {
-      // Unknown field - pass through with warning
       warnings.push(`Unknown field: ${key}`)
       compiledAction[key as keyof IO] = value
       continue
     }
 
-    // Validate field with actual value, not key
     const result = definition(value)
 
     if (!result.ok) {
       if (result.blocking) {
-        // Immediate blocking condition - early exit
         return {
           compiledAction: {
             ...action,
             _isBlocked: true,
             _blockReason: result.error!,
-            _pipeline: []
+            _pipeline: undefined // No pipeline for blocked actions
           } as IO,
           errors: [result.error!],
           warnings,
@@ -71,7 +53,6 @@ export const compileAction = (
       continue
     }
 
-    // Store validated value
     compiledAction[key as keyof IO] = result.data
 
     // Smart categorization - single check per field
@@ -98,6 +79,10 @@ export const compileAction = (
           break
       }
     }
+
+    if (['interval', 'delay', 'repeat'].includes(key)) {
+      hasScheduling = true
+    }
   }
 
   // Phase 2: Cross-validation rules
@@ -105,12 +90,25 @@ export const compileAction = (
   errors.push(...crossValidation.errors)
   warnings.push(...crossValidation.warnings)
 
-  // Check for blocking cross-validation errors
   if (crossValidation.errors.length > 0) {
     isBlocked = true
   }
 
-  // Smart compilation flags - computed once
+  // RUST-STYLE OPTIMIZATION: Pre-compile function references into _pipeline
+  let compiledPipeline: Array<(action: IO, payload: any) => any> | undefined
+
+  if (processingPipeline.length > 0) {
+    // Pre-compile function references for maximum hot path performance
+    compiledPipeline = processingPipeline.map(talentName => {
+      const talentFn = talentOperators.get(talentName)
+      if (!talentFn) {
+        errors.push(`Unknown talent operator: ${talentName}`)
+        return () => ({ok: false, error: 'Unknown talent'})
+      }
+      return talentFn
+    })
+  }
+
   const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
 
   // Efficient final assembly
@@ -119,7 +117,7 @@ export const compileAction = (
     _hasProtections: hasProtections,
     _hasProcessing: hasProcessing,
     _hasScheduling: hasScheduling,
-    _pipeline: processingPipeline.length > 0 ? processingPipeline : undefined
+    _pipeline: compiledPipeline // Now contains function references, not strings
   })
 
   return {
@@ -130,8 +128,56 @@ export const compileAction = (
   }
 }
 
-// Cross-validation function for dependency and conflict checks
-export const validateCrossRules = (
+// Enhanced executePipeline with function reference optimization
+export const executePipeline = (action: IO, payload: any) => {
+  // Ultra-fast path: No processing needed
+  if (!action._pipeline?.length) {
+    return {ok: true, data: payload}
+  }
+
+  const functions = action._pipeline // Now contains function references
+  const functionCount = functions.length
+
+  // Specialized fast paths for common cases
+  if (functionCount === 1) {
+    // Single talent - direct call
+    return functions[0](action, payload)
+  }
+
+  if (functionCount === 2) {
+    // Dual talent - unrolled loop
+    const result1 = functions[0](action, payload)
+    if (!result1.ok) return result1
+    return functions[1](
+      action,
+      result1.data !== undefined ? result1.data : payload
+    )
+  }
+
+  // General case - optimized loop with function references
+  let currentData = payload
+
+  for (let i = 0; i < functionCount; i++) {
+    const result = functions[i](action, currentData)
+
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.error || `Talent failed at position ${i}`,
+        blocking: result.blocking
+      }
+    }
+
+    if (result.data !== undefined) {
+      currentData = result.data
+    }
+  }
+
+  return {ok: true, data: currentData}
+}
+
+// Cross-validation remains the same
+const validateCrossRules = (
   action: Partial<IO>
 ): {
   errors: string[]
@@ -140,7 +186,6 @@ export const validateCrossRules = (
   const errors: string[] = []
   const warnings: string[] = []
 
-  // Dependency requirements
   if (action.interval !== undefined && action.repeat === undefined) {
     errors.push(
       'interval requires repeat to be specified (add repeat: true for infinite)'
@@ -151,7 +196,6 @@ export const validateCrossRules = (
     errors.push('maxWait requires debounce to be specified')
   }
 
-  // Conflicting combinations
   if (
     action.throttle &&
     action.debounce &&
@@ -169,7 +213,6 @@ export const validateCrossRules = (
     )
   }
 
-  // Performance warnings
   if (action.throttle && action.throttle < 16) {
     warnings.push('throttle below 16ms may cause performance issues')
   }
@@ -186,7 +229,6 @@ export const validateCrossRules = (
     )
   }
 
-  // Logical warnings
   if (action.schema && !action.required) {
     warnings.push(
       'schema validation without required may allow undefined payloads'

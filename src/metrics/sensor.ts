@@ -277,5 +277,3 @@ export const sensor = {
     })
   }
 }
-
-// Export LogLevel for compatibility with existing code

@@ -4,7 +4,7 @@ import {useDispatch} from './cyre-dispatch'
 import {TimeKeeper} from './cyre-timekeeper'
 import {sensor} from '../context/metrics-report'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
-import {executePipeline} from '../schema/talent-definitions'
+import {executePipeline} from '../schema/compile-pipeline'
 import payloadState from '../context/payload-state'
 
 /*
@@ -28,24 +28,27 @@ export async function processCall(
   try {
     let finalPayload = payload ?? payloadState.get(action.id)
 
-    // INLINE PROCESSING PIPELINE
-    if (action._processingTalents?.length) {
-      // Use optimized pipeline execution
-      const talentResult = executePipeline(action, finalPayload)
-      if (!talentResult.ok) {
+    // EXECUTE TALENT PIPELINE (this was missing!)
+    if (action._pipeline?.length) {
+      const pipelineResult = executePipeline(action, finalPayload)
+
+      if (!pipelineResult.ok) {
         return {
           ok: false,
-          payload: talentResult.payload,
-          message: talentResult.message || 'Pipeline blocked execution'
+          payload: pipelineResult.data,
+          message: pipelineResult.error || 'Pipeline execution failed'
         }
       }
-      if (talentResult.payload !== undefined) {
-        finalPayload = talentResult.payload
+
+      // Update payload with pipeline result
+      if (pipelineResult.data !== undefined) {
+        finalPayload = pipelineResult.data
       }
     }
 
-    // INLINE SCHEDULING LOGIC
+    // SCHEDULING LOGIC
     if (action._hasScheduling) {
+      sensor.sys(action)
       const result = TimeKeeper.keep(
         action.interval || 0,
         async () => await useDispatch(action, finalPayload),
@@ -69,7 +72,7 @@ export async function processCall(
       }
     }
 
-    // DIRECT DISPATCH (fastest path)
+    // DIRECT DISPATCH
     return await useDispatch(action, finalPayload)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)

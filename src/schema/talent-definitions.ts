@@ -3,7 +3,6 @@
 
 import type {IO} from '../types/core'
 import payloadState from '../context/payload-state'
-import {isEqual} from '../libs/utils'
 
 /*
 
@@ -29,7 +28,7 @@ export interface TalentResult {
 export type TalentFunction = (action: IO, payload: any) => TalentResult
 
 // O(1) talent operator Map - hot path optimization
-const talentOperators = new Map<string, TalentFunction>([
+export const talentOperators = new Map<string, TalentFunction>([
   [
     'schema',
     (action: IO, payload: any): TalentResult => {
@@ -195,19 +194,14 @@ const talentOperators = new Map<string, TalentFunction>([
     }
   ],
 
+  // In talent-definitions.ts, update the detectChanges operator:
+
   [
     'detectChanges',
     (action: IO, payload: any): TalentResult => {
-      // OPERATOR: Compare with previous payload and block if unchanged
       try {
-        const previousPayload = payloadState.get(action.id)
-
-        if (previousPayload === undefined) {
-          // First time - always allow
-          return {ok: true, data: payload}
-        }
-
-        const hasChanges = !isEqual(payload, previousPayload)
+        // Use the built-in hasChanged method from payload-state
+        const hasChanges = payloadState.hasChanged(action.id, payload)
 
         if (!hasChanges) {
           return {
@@ -225,67 +219,3 @@ const talentOperators = new Map<string, TalentFunction>([
     }
   ]
 ])
-
-/**
- * HOT PATH: Optimized pipeline execution with O(1) talent lookup
- */
-export const executePipeline = (action: IO, payload: any): TalentResult => {
-  // Fast exit for channels without processing pipeline
-  if (!action._pipeline?.length) {
-    return {ok: true, data: payload}
-  }
-
-  let currentData = payload
-  const pipelineLength = action._pipeline.length
-
-  // Hot path: Direct array iteration with O(1) Map lookups
-  for (let i = 0; i < pipelineLength; i++) {
-    const talentName = action._pipeline[i]
-    const talentOperator = talentOperators.get(talentName)
-
-    // Execute operator
-    const result = talentOperator!(action, currentData)
-
-    if (!result.ok) {
-      // Early termination on failure or blocking
-      return {
-        ok: false,
-        error: result.error || `Talent ${talentName} failed`,
-        blocking: result.blocking
-      }
-    }
-
-    // Update data for next operator (if provided)
-    if (result.data !== undefined) {
-      currentData = result.data
-    }
-  }
-
-  return {
-    ok: true,
-    data: currentData
-  }
-}
-
-/**
- * HOT PATH: Direct talent operator execution (for testing/direct calls)
- */
-export const executeTalent = (
-  talentName: string,
-  action: IO,
-  payload: any
-): TalentResult => {
-  const talentOperator = talentOperators.get(talentName)
-
-  if (!talentOperator) {
-    return {
-      ok: false,
-      error: `Unknown talent operator: ${talentName}`,
-      suggestions: [
-        `Available operators: ${Array.from(talentOperators.keys()).join(', ')}`
-      ]
-    }
-  }
-
-  return talentOperator(action, payload)
-}

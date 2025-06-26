@@ -26,6 +26,7 @@ import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
 import {dev} from './dev/dev'
 import {metrics} from './metrics'
+import {useDispatch} from './components/cyre-dispatch'
 
 /* 
     Neural Line
@@ -106,64 +107,6 @@ const init = async (
 
     initializeBreathing()
     TimeKeeper.resume()
-
-    // Register standardized system intelligence
-    // try {
-    //   const intelligenceResults = await registerSystemIntelligence(
-    //     orchestration
-    //   )
-    //   systemOrchestrationIds.push(...intelligenceResults.registered)
-
-    //   if (intelligenceResults.failed.length > 0) {
-    //     sensor.debug(
-    //       'initialize',
-    //       `System intelligence: ${intelligenceResults.registered.length} registered, ${intelligenceResults.failed.length} failed`,
-    //       {
-    //         registered: intelligenceResults.registered,
-    //         failed: intelligenceResults.failed
-    //       }
-    //     )
-    //   } else {
-    //     sensor.success(
-    //       'initialize',
-    //       `Registered ${intelligenceResults.registered.length} system intelligence orchestrations`
-    //     )
-    //   }
-    // } catch (error) {
-    //   sensor.debug(
-    //     'initialize',
-    //     'System intelligence registration deferred - will be available after system setup'
-    //   )
-    // }
-
-    // // Register system diagnostics for comprehensive testing
-    // try {
-    //   const diagnosticsResults = registerSystemDiagnostics(orchestration)
-    //   systemOrchestrationIds.push(...diagnosticsResults.registered)
-
-    //   if (diagnosticsResults.failed.length > 0) {
-    //     sensor.warn(
-    //       'initialize',
-    //       `System diagnostics: ${diagnosticsResults.registered.length} registered, ${diagnosticsResults.failed.length} failed`,
-    //       {
-    //         registered: diagnosticsResults.registered,
-    //         failed: diagnosticsResults.failed
-    //       }
-    //     )
-    //   } else {
-    //     sensor.success(
-    //       'initialize',
-    //       `Registered ${diagnosticsResults.registered.length} system diagnostic orchestrations`
-    //     )
-    //   }
-    // } catch (error) {
-    //   sensor.error(
-    //     'initialize',
-    //     `System diagnostics registration deferred: ${error}`
-    //   )
-    // }
-
-    sensor.debug('initialize', ` subscribers`)
 
     sensor.debug('system', 'success', 'system-initialization')
 
@@ -257,7 +200,7 @@ export const call = async (
 ): Promise<CyreResponse> => {
   try {
     if (!id) {
-      log.error(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
+      sensor.error(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
       return {
         ok: false,
         payload: null,
@@ -290,16 +233,11 @@ export const call = async (
     //STEP 3: Recuperation check
     const breathing = metricsState.get().breathing
     if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-      sensor.log(
-        action.id,
-        'blocked',
-        'System is recuperating - only critical actions allowed',
+      sensor.error(
         'app/call/recuperation',
-        true,
-        {
-          stress: breathing.stress,
-          priority: action.priority?.level || 'medium'
-        }
+        'System is recuperating - only critical actions allowed',
+        action.id,
+        'blocked'
       )
       return {
         ok: false,
@@ -310,9 +248,14 @@ export const call = async (
     const req = payload ?? payloadState.get(id)
     //io.set(action)
 
+    // In call() - detect fast path early
+    if (action._hasFastPath) {
+      // Direct dispatch - skip processCall entirely
+      return await useDispatch(action, payload)
+    }
     // STEP 4: Throttle check
     // ✅ STEP 4: FIXED Throttle check
-    if (action.throttle && action.throttle > 0) {
+    else if (action.throttle && action.throttle > 0) {
       const currentTime = Date.now()
       const lastExecTime = action._lastExecTime || 0
 
@@ -337,7 +280,11 @@ export const call = async (
     }
 
     // STEP 5: Debounce check (most complex protection)
-    if (action.debounce && action.debounce > 0 && !action._bypassDebounce) {
+    else if (
+      action.debounce &&
+      action.debounce > 0 &&
+      !action._bypassDebounce
+    ) {
       const timerId = `${action.id}-debounce-${Date.now()}`
 
       if (!action._debounceTimer) {
@@ -445,7 +392,7 @@ export const call = async (
           if (timerResult.ok === 'error') {
             sensor.error(
               action.id,
-              timerResult.error,
+              '  timerResult.error',
               'debounce-timer-creation-failed'
             )
 
@@ -556,10 +503,7 @@ const shutdown = (): void => {
  */
 const reset = (): void => {
   try {
-    sensor.info('system', 'System clear initiated', {
-      timestamp: Date.now(),
-      log: true
-    })
+    sensor.info('system', 'System clear initiated')
 
     // Stop system orchestrations first
     systemOrchestrationIds.forEach(id => {
@@ -588,9 +532,6 @@ const reset = (): void => {
     query.cache.clear()
 
     log.success('System cleared')
-    sensor.success('system', 'System clear completed successfully', {
-      completed: true
-    })
   } catch (error) {
     log.error(`Clear operation failed: ${error}`)
     sensor.error('system', String(error), 'system-clear')
