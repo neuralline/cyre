@@ -4,7 +4,7 @@ import {useDispatch} from './cyre-dispatch'
 import {TimeKeeper} from './cyre-timekeeper'
 import {sensor} from '../context/metrics-report'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
-import {executePipeline} from '../schema/channel-operators'
+import {executePipeline} from '../schema/talent-definitions'
 import payloadState from '../context/payload-state'
 
 /*

@@ -291,7 +291,7 @@ export const metricsState = {
   init: (): void => {
     try {
       metricsState.update({_init: true})
-      log.success('Cyre Metrics State' + metricsState._init)
+      log.success('Cyre Metrics State online')
     } catch (error) {
       log.critical(`System init failed: ${error}`)
       throw error

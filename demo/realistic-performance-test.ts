@@ -436,7 +436,7 @@ async function runRealisticPerformanceTest(): Promise<void> {
   console.log('Testing real-world scenarios with defensive handlers...\n')
 
   try {
-    await cyre.initialize()
+    await cyre.init()
 
     const results: TestResults[] = []
     const allMetrics: PerformanceMetrics[] = []

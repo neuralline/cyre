@@ -1,12 +1,8 @@
 // test/talent-system.test.ts
 // Vitest test suite to verify talent system works correctly
 
-import {describe, test, expect, beforeEach, vi, beforeAll} from 'vitest'
-import {
-  talents,
-  executeTalent,
-  type TalentResult
-} from '../src/schema/talent-definitions'
+import {describe, test, expect, vi} from 'vitest'
+import {talents, executeTalent} from '../src/schema/talent-definitions'
 import {compileAction} from '../src/schema/data-definitions'
 import type {IO} from '../src/types/core'
 import {processCall} from '../src/components/cyre-call'

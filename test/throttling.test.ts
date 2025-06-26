@@ -8,12 +8,12 @@ import {cyre} from '../src'
 describe('Cyre Throttling System', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    cyre.dev?.clearAll()
+    cyre.clear()
   })
 
   // ============================================================================

@@ -28,7 +28,7 @@ import {cyre, useBranch} from '../src'
 async function createChatDemo() {
   console.log('💬 Creating Chat Application Demo...')
 
-  await cyre.initialize()
+  await cyre.init()
 
   // Create chat rooms as branches
   const generalRoom = useBranch(undefined, {id: 'general-chat'})
@@ -305,11 +305,6 @@ function startPerformanceMonitoring() {
   console.log('📊 Starting performance monitoring...')
 
   setInterval(() => {
-    const health = cyre.getSystemHealth()
-    const performance = cyre.getPerformanceState()
-    const branchStats = cyre.branch.getStats()
-    const insights = cyre.getPerformanceInsights()
-
     console.log('\n📈 === PERFORMANCE DASHBOARD ===')
     console.log(`🏗️  Branches: ${branchStats.active}/${branchStats.total}`)
     console.log(`📡 Channels: ${branchStats.totalChannels}`)

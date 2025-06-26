@@ -1,16 +1,12 @@
 // src/app.ts - Updated with intelligent system orchestration
 
-import type {IO, ActionPayload, CyreResponse, GroupConfig} from './types/core'
-import {BREATHING, MSG} from './config/cyre-config'
+import type {IO, ActionPayload, CyreResponse} from './types/core'
+import {MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
-import {
-  calculateSystemStress,
-  metricsState,
-  updateBreathingFromMetrics
-} from './context/metrics-state'
+import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
 import {sensor} from './context/metrics-report'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
@@ -21,7 +17,7 @@ import payloadState from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
-import {query, initializeQuerySystem} from './query/cyre-query'
+import {query} from './query/cyre-query'
 import type {OrchestrationConfig} from './types/orchestration'
 
 import {pathPlugin} from './schema/path-plugin'
@@ -30,12 +26,6 @@ import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
 import {dev} from './dev/dev'
 import {metrics} from './metrics'
-
-import {registerSystemIntelligence} from './intelligence/system-intelligence'
-import {
-  registerSystemDiagnostics,
-  runDiagnostics
-} from './intelligence/system-diagnostics'
 
 /* 
     Neural Line
@@ -100,7 +90,7 @@ let sysInitialize = false
 /**
  * Initialize with standardized system intelligence
  */
-const initialize = async (
+const init = async (
   config: CyreConfig = {}
 ): Promise<{ok: boolean; payload: number; message: string}> => {
   try {
@@ -175,19 +165,7 @@ const initialize = async (
 
     sensor.debug('initialize', ` subscribers`)
 
-    sensor.log('system', 'success', 'system-initialization', {
-      timestamp: Date.now(),
-      features: [
-        'core-system',
-        'system-intelligence',
-        'orchestration-engine',
-        'path-addressing',
-        'query-system',
-        'metrics-tracking',
-        'breathing-system',
-        'persistent-state'
-      ]
-    })
+    sensor.debug('system', 'success', 'system-initialization')
 
     sysInitialize = true
     metricsState.init()
@@ -235,9 +213,7 @@ const action = (
   attribute: IO | IO[]
 ): {ok: boolean; message: string; payload?: any} => {
   if (metricsState.isLocked()) {
-    sensor.error('system', 'error', 'Channel-registration', {
-      error: 'System is locked'
-    })
+    sensor.error('system', 'error', 'Channel-registration')
     log.error(MSG.SYSTEM_LOCKED_CHANNELS)
     return {ok: false, message: MSG.SYSTEM_LOCKED_CHANNELS}
   }
@@ -266,10 +242,7 @@ const action = (
     sensor.error(
       'system',
       '`Channel registration failed: ${errorMessage}`',
-      'app/channel',
-      {
-        error: errorMessage
-      }
+      'app/channel'
     )
     return {ok: false, message: `Channel registration failed: ${errorMessage}`}
   }
@@ -523,10 +496,7 @@ export const call = async (
       ok: false,
       payload: null,
       message: `Call failed: ${errorMessage}`,
-      error: errorMessage,
-      metadata: {
-        executionPath: 'call-error'
-      }
+      error: errorMessage
     }
   }
 }
@@ -548,19 +518,12 @@ const forget = (id: string): boolean => {
     removeChannelFromGroups(id)
 
     if (actionRemoved || subscriberRemoved) {
-      sensor.info(id, 'Action removal successful', {
-        success: true,
-        actionRemoved,
-        subscriberRemoved
-      })
+      sensor.info(id, 'Action removal successful')
 
       return true
     }
 
-    sensor.info(id, 'Action removal failed - not found', {
-      success: false,
-      reason: 'not found'
-    })
+    sensor.info(id, 'Action removal failed - not found')
     return false
   } catch (error) {
     log.error(`Failed to forget ${id}: ${error}`)
@@ -638,7 +601,7 @@ const reset = (): void => {
  */
 export const cyre = Object.freeze({
   // Core methods
-  initialize,
+  init,
   action,
   on: subscribe,
   call,
@@ -673,17 +636,17 @@ export const cyre = Object.freeze({
   // Control methods with metrics
   pause: (id?: string): void => {
     TimeKeeper.pause(id)
-    sensor.log(id || 'system', 'info', 'system-pause')
+    sensor.debug(id || 'system', 'info', 'system-pause')
   },
 
   resume: (id?: string): void => {
     TimeKeeper.resume(id)
-    sensor.log(id || 'system', 'info', 'system-resume')
+    sensor.debug(id || 'system', 'info', 'system-resume')
   },
 
   lock: (): {ok: boolean; message: string; payload: null} => {
     metricsState.lock()
-    sensor.log('system', 'critical', 'system-lock')
+    sensor.sys('system', 'lock', 'system-lock')
     return {ok: true, message: 'System locked', payload: null}
   },
 

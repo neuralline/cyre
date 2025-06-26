@@ -22,7 +22,7 @@ describe('Cyre API Tests', () => {
     vi.spyOn(log, 'warn').mockImplementation(() => {})
 
     // Initialize cyre
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {
@@ -537,73 +537,6 @@ describe('Cyre API Tests', () => {
   /**
    * Metrics and Monitoring Tests
    */
-  describe('Metrics and Monitoring', () => {
-    it('should provide breathing state metrics', () => {
-      const breathingState = cyre.getBreathingState()
-
-      expect(breathingState).toBeDefined()
-      expect(typeof breathingState.breathCount).toBe('number')
-      expect(typeof breathingState.currentRate).toBe('number')
-      expect(typeof breathingState.stress).toBe('number')
-      expect(typeof breathingState.isRecuperating).toBe('boolean')
-      expect(breathingState.stress).toBeGreaterThanOrEqual(0)
-      expect(breathingState.stress).toBeLessThanOrEqual(1)
-    })
-
-    it('should provide performance state metrics', () => {
-      const perfState = cyre.getPerformanceState()
-
-      expect(perfState).toBeDefined()
-      expect(typeof perfState.totalProcessingTime).toBe('number')
-      expect(typeof perfState.stress).toBe('number')
-      expect(perfState.stress).toBeGreaterThanOrEqual(0)
-      expect(perfState.stress).toBeLessThanOrEqual(1)
-    })
-
-    it('should provide action-specific metrics', async () => {
-      const actionId = `metrics-test-${Date.now()}`
-
-      cyre.on(actionId, () => ({handled: true}))
-      cyre.action({id: actionId, type: 'metrics-test'})
-
-      // Execute action to generate metrics
-      await cyre.call(actionId)
-
-      const metrics = cyre.getMetrics(actionId)
-      expect(metrics).toBeDefined()
-      expect(metrics.breathing).toBeDefined()
-    })
-
-    it('should provide comprehensive metrics report', async () => {
-      const actionId = `report-test-${Date.now()}`
-
-      cyre.on(actionId, () => ({handled: true}))
-      cyre.action({id: actionId, type: 'report-test'})
-
-      await cyre.call(actionId)
-
-      const report = cyre.getMetricsReport()
-      expect(report).toBeDefined()
-      expect(report.global).toBeDefined()
-      expect(report.actions).toBeDefined()
-      expect(Array.isArray(report.insights)).toBe(true)
-    })
-
-    it('should provide performance insights', async () => {
-      const actionId = `insights-test-${Date.now()}`
-
-      cyre.on(actionId, () => ({handled: true}))
-      cyre.action({id: actionId, type: 'insights-test'})
-
-      await cyre.call(actionId)
-
-      const insights = cyre.getPerformanceInsights()
-      expect(Array.isArray(insights)).toBe(true)
-
-      const actionInsights = cyre.getPerformanceInsights(actionId)
-      expect(Array.isArray(actionInsights)).toBe(true)
-    })
-  })
 
   /**
    * Error Handling Tests

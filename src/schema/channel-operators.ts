@@ -5,8 +5,6 @@ import type {IO, TalentResult} from '../types/core'
 import {sensor} from '../context/metrics-report'
 import {log} from '../components/cyre-log'
 import payloadState from '../context/payload-state'
-import {useDispatch} from '../components/cyre-dispatch'
-import TimeKeeper from '../components/cyre-timekeeper'
 import {isEqual} from '../libs/utils'
 
 /*
@@ -474,13 +472,6 @@ export const initializeOptimization = (): void => {
   })
 
   isOptimizationInitialized = true
-  log.info(
-    'Talent optimization system initialized with FIXED implementations',
-    {
-      totalTalents: talentRegistry.size,
-      dependencyNodes: dependencyGraph.size
-    }
-  )
 }
 
 // ============================================================================

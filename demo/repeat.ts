@@ -1,3 +1,4 @@
+// demo/repeat.ts
 import cyre, {log} from '../src'
 
 cyre.action({id: 'repeat 10', repeat: 10, interval: 1000})

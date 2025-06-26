@@ -5,6 +5,18 @@ import {Schema} from '../schema/cyre-schema'
 
 export type * from './timer'
 export type * from './orchestration'
+export type ChannelOperator =
+  | 'block'
+  | 'throttle'
+  | 'debounce'
+  | 'schema'
+  | 'condition'
+  | 'selector'
+  | 'transform'
+  | 'detectChanges'
+  | 'required'
+  | 'schedule'
+  | 'auth'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
 export type ActionPayload = any
@@ -197,7 +209,7 @@ export interface IO {
   /** True if action has no protections and can use fast path */
   _hasFastPath?: boolean
   /** save Pre-compiled channel operators list here */
-  _pipeline?: pipeline[]
+  _pipeline?: ChannelOperator[]
   /** Active debounce timer ID */
   _debounceTimer?: string
 

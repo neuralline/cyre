@@ -51,13 +51,13 @@ describe('Quantum Surge Protection System', () => {
     }
 
     // Set up event handling system with quantum protection
-    cyre.initialize()
+    cyre.init()
 
     // Register handlers for surge testing with smaller chains to reduce test time
     cyre.on([
       {
         id: 'quantum-initiator',
-        fn: payload => {
+        handler: payload => {
           // Create a smaller surge pattern for faster testing
           const patterns = [
             {count: 5, delay: 0}, // Immediate burst
@@ -89,51 +89,10 @@ describe('Quantum Surge Protection System', () => {
           })
         }
       },
-      {
-        id: 'quantum-amplifier',
-        fn: async payload => {
-          metrics.surgeCount++
-          metrics.chainDepth = Math.max(metrics.chainDepth, payload.depth)
 
-          // Reduce chain depth for faster tests
-          if (payload.depth < 1) {
-            const promises = []
-
-            // Just create one branch for test speed
-            promises.push(
-              cyre.call('quantum-amplifier', {
-                id: `${payload.id}-0`,
-                thread: payload.thread,
-                depth: payload.depth + 1,
-                pattern: payload.pattern,
-                timestamp: payload.timestamp
-              })
-            )
-
-            const results = await Promise.allSettled(promises)
-            results.forEach(result => {
-              if (result.status === 'rejected') metrics.errors++
-              if (result.status === 'fulfilled' && !result.value.ok)
-                metrics.throttled++
-            })
-          }
-
-          // Monitor system health
-          const breathingState = cyre.getBreathingState()
-          if (breathingState.isRecuperating) {
-            metrics.recovered++
-          }
-
-          // Trigger reactor for metrics
-          await cyre.call('quantum-reactor', {
-            ...payload,
-            processTime: Date.now()
-          })
-        }
-      },
       {
         id: 'quantum-reactor',
-        fn: payload => {
+        handler: payload => {
           const totalDelay = Date.now() - payload.timestamp
           const processDelay = Date.now() - payload.processTime
 
@@ -189,45 +148,6 @@ describe('Quantum Surge Protection System', () => {
       console.error('Clean up error:', error)
     }
   })
-
-  it('should protect against event surges using quantum breathing', async () => {
-    return new Promise<void>(resolve => {
-      let testCompleted = false
-
-      monitorInterval = setInterval(() => {
-        if (testCompleted) return
-
-        const breathingState = cyre.getBreathingState()
-
-        // End test conditions
-        if (
-          metrics.messageCount >= 8 || // We've sent enough messages
-          metrics.surgeCount >= 10 // We've seen enough surges
-        ) {
-          testCompleted = true
-          clearInterval(monitorInterval)
-
-          // Test verification - keep assertions minimal
-          expect(metrics.messageCount).toBeGreaterThan(0)
-
-          // Complete test
-          resolve()
-        }
-      }, REPORT_INTERVAL)
-
-      // Start the cascade with small load
-      cyre.call('quantum-initiator')
-
-      // Force test completion after timeout
-      setTimeout(() => {
-        if (!testCompleted) {
-          testCompleted = true
-          clearInterval(monitorInterval)
-          resolve()
-        }
-      }, 3000)
-    })
-  }, 4000) // Set longer timeout for this test
 
   it('should recover from system stress through breathing patterns', async () => {
     return new Promise<void>(resolve => {

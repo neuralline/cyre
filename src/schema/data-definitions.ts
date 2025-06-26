@@ -1,14 +1,13 @@
 // src/schema/data-definitions.ts
 // Action compilation with talent discovery and improved validation messages
 
-import type {IO} from '../types/core'
-import type {TalentName} from './talent-definitions'
+import type {IO, ChannelOperator} from '../types/core'
 
 /*
 
       C.Y.R.E - D.A.T.A - D.E.F.I.N.I.T.I.O.N.S
       
-      Oerator compilation system with improved validation messages:
+      Channel Operator's verification and compilation system with improved validation messages:
       - Clear, helpful error messages in British AI assistant style
       - Detailed suggestions for fixing configuration issues
       - Talent discovery and validation
@@ -22,7 +21,7 @@ export interface DataDefResult {
   data?: any
   error?: string
   blocking?: boolean
-  talentName?: TalentName
+  operator?: ChannelOperator
   suggestions?: string[]
 }
 
@@ -46,20 +45,6 @@ const isNumber = (value: any): value is number =>
 const isBoolean = (value: any): value is boolean => typeof value === 'boolean'
 const isFunction = (value: any): value is Function =>
   typeof value === 'function'
-
-// Talent categories for optimization flags
-const PROTECTION_TALENTS = ['block', 'throttle', 'debounce'] as const
-
-const PROCESSING_TALENTS = [
-  'schema',
-  'condition',
-  'selector',
-  'transform',
-  'detectChanges',
-  'required'
-] as const
-
-const SCHEDULING_TALENTS = ['interval', 'delay', 'repeat'] as const
 
 // Main data definitions with improved error messages
 export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
@@ -94,7 +79,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Path must be text, but received ${describeValue(value)}`,
         suggestions: [
           'Use hierarchical format like "app/users/profile"',
-          'Separate levels with forward slashes',
+          'Path must be url friendly string',
           'Example: "sensors/temperature/room1"'
         ]
       }
@@ -107,7 +92,8 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     // Validate path format
     const pathRegex = /^[a-zA-Z0-9/_-]+$/
     if (!pathRegex.test(value)) {
-      const result = {
+      return {
+        // FIX: Actually return the error result
         ok: false,
         error: 'Path contains invalid characters',
         suggestions: ['Use only letters, numbers, /, _, and -']
@@ -116,7 +102,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
 
     return {ok: true, data: value}
   },
-
   // Protection talents
   block: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
@@ -124,7 +109,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     if (value === true) {
       return {
         ok: false,
-        error: 'Service not available',
+        error: 'Channel is blocked from execution',
         blocking: true
       }
     }
@@ -135,19 +120,15 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Block must be true or false, but received ${describeValue(
           value
         )}`,
-        talentName: 'block',
         suggestions: [
-          'Remove repeat property - actions run once by default',
-          'Use repeat: 2 or higher for multiple executions',
-          'Use repeat: true for infinite repeats with interval',
-          'Use repeat: false to explicitly disable repeats',
-          'Combine with interval for timed execution: {repeat: 5, interval: 1000}'
+          'Use true to prevent channel execution entirely',
+          'Use false or omit to allow normal execution',
+          'Block is useful for temporarily disabling channels'
         ]
       }
     }
 
-    // Valid number greater than 1
-    return {ok: true, data: value, talentName: 'block'}
+    return {ok: true, data: value, operator: 'block'}
   },
 
   // Timing validations
@@ -160,7 +141,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Throttle must be a positive number (milliseconds), but received ${describeValue(
           value
         )}`,
-        talentName: 'throttle',
         suggestions: [
           'Specify time in milliseconds to limit execution frequency',
           'Example: 1000 for maximum once per second',
@@ -169,7 +149,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'throttle'}
+    return {ok: true, data: value, operator: 'throttle'}
   },
 
   debounce: (value: any): DataDefResult => {
@@ -181,7 +161,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Debounce must be a positive number (milliseconds), but received ${describeValue(
           value
         )}`,
-        talentName: 'debounce',
         suggestions: [
           'Specify delay in milliseconds to wait for rapid calls to settle',
           'Example: 300 to wait 300ms after last call before executing',
@@ -190,7 +169,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'debounce'}
+    return {ok: true, data: value, operator: 'debounce'}
   },
 
   // Processing talents
@@ -203,7 +182,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Schema must be a validation function, but received ${describeValue(
           value
         )}`,
-        talentName: 'schema',
         suggestions: [
           'Use cyre-schema builders: schema.object({ name: schema.string() })',
           'Or provide custom function: (data) => ({ ok: true, data })',
@@ -212,7 +190,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'schema'}
+    return {ok: true, data: value, operator: 'schema'}
   },
 
   // Condition validation (functions)
@@ -225,7 +203,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Condition must be a function that returns true or false, but received ${describeValue(
           value
         )}`,
-        talentName: 'condition',
         suggestions: [
           'Function should return boolean: (payload) => boolean',
           'Return true to allow execution, false to skip',
@@ -234,7 +211,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'condition'}
+    return {ok: true, data: value, operator: 'condition'}
   },
 
   // Selector validation (functions)
@@ -247,7 +224,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Selector must be a function that extracts data, but received ${describeValue(
           value
         )}`,
-        talentName: 'selector',
         suggestions: [
           'Function should extract part of your data: (payload) => any',
           'Return the specific data you want to use',
@@ -256,7 +232,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'selector'}
+    return {ok: true, data: value, operator: 'selector'}
   },
 
   // Transform validation (functions)
@@ -269,7 +245,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Transform must be a function that modifies data, but received ${describeValue(
           value
         )}`,
-        talentName: 'transform',
         suggestions: [
           'Function should return modified data: (payload) => any',
           'Transform and return your data as needed',
@@ -278,7 +253,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'transform'}
+    return {ok: true, data: value, operator: 'transform'}
   },
 
   // Boolean validations with clear explanations
@@ -291,7 +266,6 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `DetectChanges must be true or false, but received ${describeValue(
           value
         )}`,
-        talentName: 'detectChanges',
         suggestions: [
           'Use true to only execute when data changes from previous call',
           'Use false to execute every time regardless of changes',
@@ -300,29 +274,28 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'detectChanges'}
+    return {ok: true, data: value, operator: 'detectChanges'}
   },
 
   // Required validation
   required: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (!isBoolean(value) && value !== 'non-empty') {
+    if (!isBoolean(value)) {
       return {
         ok: false,
-        error: `Required must be true, false, or "non-empty", but received ${describeValue(
+        error: `Required must be true or false, but received ${describeValue(
           value
         )}`,
-        talentName: 'required',
         suggestions: [
-          'Use true to require any value (including empty strings and zero)',
-          'Use "non-empty" to require non-empty values (excludes "", [], {})',
-          'Use false to make the field optional'
+          'Use true to require payload (rejects undefined/null)',
+          'Use false to make payload optional',
+          'Required validation includes empty string/array/object checks automatically'
         ]
       }
     }
 
-    return {ok: true, data: value, talentName: 'required'}
+    return {ok: true, data: value, operator: 'required'}
   },
 
   delay: (value: any): DataDefResult => {
@@ -334,7 +307,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
         error: `Delay must be a positive number (milliseconds), but received ${describeValue(
           value
         )}`,
-        talentName: 'delay',
+        operator: 'schedule',
         suggestions: [
           'Specify initial delay in milliseconds before first execution',
           'Example: 1000 to wait 1 second before executing',
@@ -343,13 +316,13 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'schedule'}
+    return {ok: true, data: value, operator: 'schedule'}
   },
 
   interval: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
 
-    if (!isNumber(value) || value <= 0) {
+    if (!isNumber(value) || value < 0) {
       return {
         ok: false,
         error: `Interval must be a positive number (milliseconds), but received ${describeValue(
@@ -364,7 +337,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'schedule'}
+    return {ok: true, data: value, operator: 'schedule'}
   },
 
   repeat: (value: any): DataDefResult => {
@@ -398,14 +371,32 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
       }
     }
 
-    return {ok: true, data: value, talentName: 'schedule'}
+    return {ok: true, data: value, operator: 'schedule'}
+  },
+  maxWait: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (!isNumber(value) || value <= 0) {
+      return {
+        ok: false,
+        error: `MaxWait must be a positive number (milliseconds), but received ${describeValue(
+          value
+        )}`,
+        suggestions: [
+          'Specify maximum wait time in milliseconds for debounce',
+          'Should be greater than debounce value',
+          'Example: 2000 for 2-second maximum wait'
+        ]
+      }
+    }
+
+    return {ok: true, data: value} // No operator - it's a modifier
   },
 
   // Additional fields (pass-through)
   payload: (value: any): DataDefResult => ({ok: true, data: value}),
   type: (value: any): DataDefResult => ({ok: true, data: value}),
   priority: (value: any): DataDefResult => ({ok: true, data: value}),
-  maxWait: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasFastPath: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasProtections: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasProcessing: (value: any): DataDefResult => ({ok: true, data: value}),
@@ -415,103 +406,4 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   _blockReason: (value: any): DataDefResult => ({ok: true, data: value}),
   timestamp: (value: any): DataDefResult => ({ok: true, data: value}),
   timeOfCreation: (value: any): DataDefResult => ({ok: true, data: value})
-}
-
-/**
- * Compile action with talent discovery, pipeline building, and path indexing
- */
-export const compileAction = (
-  action: Partial<IO>
-): {
-  compiledAction: IO
-  errors: string[]
-  warnings: string[]
-  hasFastPath: boolean
-} => {
-  const errors: string[] = []
-  const warnings: string[] = []
-  const compiledAction: Partial<IO> = {...action}
-  const processingPipeline: TalentName[] = []
-
-  // Track talent categories
-  let hasProtections = false
-  let hasScheduling = false
-  let hasProcessing = false
-
-  // Process fields in order to preserve user-defined execution sequence
-  const actionKeys = Object.keys(action)
-
-  for (const key of actionKeys) {
-    const value = action[key as keyof typeof action]
-    const definition = dataDefinitions[key as keyof typeof dataDefinitions]
-
-    if (definition) {
-      const result = definition(value)
-
-      if (!result.ok) {
-        if (result.blocking) {
-          // Early return for blocking conditions
-          return {
-            compiledAction: {
-              ...action,
-              _isBlocked: true,
-              _blockReason: result.error!
-            } as IO,
-            errors: [result.error!],
-            warnings,
-            hasFastPath: false
-          }
-        } else {
-          errors.push(result.error || 'Validation failed')
-        }
-      } else {
-        // Store validated value
-        compiledAction[key as keyof IO] = result.data
-
-        // Track talent categories and build pipeline
-        if (result.talentName) {
-          // Check if it's a processing talent and add to pipeline
-          if (PROCESSING_TALENTS.includes(result.talentName as any)) {
-            processingPipeline.push(result.talentName)
-            hasProcessing = true
-          }
-
-          // Check protection talents (validated but not in pipeline)
-          if (PROTECTION_TALENTS.includes(result.talentName as any)) {
-            hasProtections = true
-          }
-        }
-
-        // Check scheduling talents
-        if (SCHEDULING_TALENTS.includes(key as any)) {
-          hasScheduling = true
-        }
-      }
-    } else {
-      // Unknown field - pass through with warning
-      warnings.push(`Unknown field: ${key}`)
-      compiledAction[key as keyof IO] = value
-    }
-  }
-
-  // Determine fast path eligibility
-  const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
-
-  // Set compilation flags
-  compiledAction._hasFastPath = hasFastPath
-  compiledAction._hasProtections = hasProtections
-  compiledAction._hasProcessing = hasProcessing
-  compiledAction._hasScheduling = hasScheduling
-
-  // Set processing pipeline if we have processing talents
-  if (processingPipeline.length > 0) {
-    compiledAction._processingPipeline = processingPipeline
-  }
-
-  return {
-    compiledAction: compiledAction as IO,
-    errors,
-    warnings,
-    hasFastPath
-  }
 }

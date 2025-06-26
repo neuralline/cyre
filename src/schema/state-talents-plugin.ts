@@ -32,12 +32,6 @@ const selector = (action: IO, payload: any): TalentResult => {
   try {
     const selectedData = action.selector(payload)
 
-    sensor.log(action.id, 'info', 'talent-selector', {
-      originalPayloadType: typeof payload,
-      selectedDataType: typeof selectedData,
-      hasSelection: selectedData !== undefined
-    })
-
     return {
       ok: true,
       payload: selectedData,
@@ -69,22 +63,12 @@ const condition = (action: IO, payload: any): TalentResult => {
     const conditionMet = action.condition(payload)
 
     if (!conditionMet) {
-      sensor.log(action.id, 'skip', 'talent-condition', {
-        reason: 'Condition not met',
-        payloadType: typeof payload
-      })
-
       return {
         ok: false,
         message: 'Condition not met - execution skipped',
         payload
       }
     }
-
-    sensor.log(action.id, 'info', 'talent-condition', {
-      conditionMet: true,
-      payloadType: typeof payload
-    })
 
     return {
       ok: true,
@@ -115,12 +99,6 @@ const transform = (action: IO, payload: any): TalentResult => {
 
   try {
     const transformedPayload = action.transform(payload)
-
-    sensor.log(action.id, 'info', 'talent-transform', {
-      originalPayloadType: typeof payload,
-      transformedPayloadType: typeof transformedPayload,
-      transformation: 'applied'
-    })
 
     return {
       ok: true,
@@ -154,11 +132,6 @@ export const detectChanges = (action: IO, payload: any): TalentResult => {
 
     if (!hasChanged) {
       // This is SUCCESSFUL protection, not an error
-      sensor.log(action.id, 'skip', 'change-detection', {
-        reason: 'Payload unchanged',
-        payloadType: typeof payload,
-        protectionActive: true
-      })
 
       return {
         ok: false, // Don't execute, but this is successful protection
@@ -166,12 +139,6 @@ export const detectChanges = (action: IO, payload: any): TalentResult => {
         payload
       }
     }
-
-    sensor.log(action.id, 'info', 'change-detection', {
-      hasChanged: true,
-      payloadType: typeof payload,
-      protectionPassed: true
-    })
 
     return {
       ok: true,
@@ -205,41 +172,12 @@ const required = (action: IO, payload: any): TalentResult => {
   }
 
   if (effectiveRequired === true && payload === undefined) {
-    sensor.log(action.id, 'error', 'talent-required', {
-      reason: 'Required payload not provided',
-      payloadProvided: false,
-      autoInferred: action.required === undefined && Boolean(action.schema)
-    })
-
     return {
       ok: false,
       message: action.schema
         ? 'Payload required for schema validation'
         : 'Required payload not provided',
       payload
-    }
-  }
-
-  if (effectiveRequired === 'non-empty') {
-    const isEmpty =
-      payload === undefined ||
-      payload === null ||
-      payload === '' ||
-      (Array.isArray(payload) && payload.length === 0) ||
-      (typeof payload === 'object' && Object.keys(payload).length === 0)
-
-    if (isEmpty) {
-      sensor.log(action.id, 'error', 'talent-required', {
-        reason: 'Non-empty payload required',
-        payloadType: typeof payload,
-        payloadProvided: payload !== undefined
-      })
-
-      return {
-        ok: false,
-        message: 'Non-empty payload required',
-        payload
-      }
     }
   }
 
@@ -262,11 +200,6 @@ const schema = (action: IO, payload: any): TalentResult => {
     const result = action.schema(payload)
 
     if (!result.ok) {
-      sensor.log(action.id, 'error', 'talent-schema', {
-        errors: result.errors,
-        payloadType: typeof payload
-      })
-
       return {
         ok: false,
         error: true,
@@ -274,11 +207,6 @@ const schema = (action: IO, payload: any): TalentResult => {
         payload
       }
     }
-
-    sensor.log(action.id, 'info', 'talent-schema', {
-      validationPassed: true,
-      payloadTransformed: result.data !== payload
-    })
 
     return {
       ok: true,

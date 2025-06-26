@@ -303,9 +303,7 @@ const QuartzEngine = {
     } catch (error) {
       this.metrics.executionErrors++
 
-      sensor.error(formation.id, String(error), 'timer-execution', {
-        executionCount: formation.executionCount
-      })
+      sensor.error(formation.id, String(error), 'timer-execution')
 
       // Update failure metrics
       if (formation.metrics) {

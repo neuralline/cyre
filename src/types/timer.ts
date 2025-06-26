@@ -41,7 +41,7 @@ export interface Timer {
   timeoutId?: NodeJS.Timeout
   isInRecuperation: boolean
   status: 'active' | 'paused'
-  metrics: TimerMetrics
+  metrics?: TimerMetrics
   cleanup?: () => void
   isActive: boolean
   priority?: 'critical' | 'normal'

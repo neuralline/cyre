@@ -18,7 +18,7 @@ import {cyre, log} from '../src'
 async function setupPureCyreEcosystem() {
   console.log('🚀 Setting up Pure Cyre Ecosystem...')
 
-  await cyre.initialize()
+  await cyre.init()
 
   // ===== BUSINESS CHANNELS =====
 
@@ -97,15 +97,15 @@ async function setupPureCyreEcosystem() {
   })
 
   cyre.on('health-check', () => {
-    const breathing = cyre.getBreathingState()
-    const performance = cyre.getPerformanceState()
+    // const breathing = cyre.getBreathingState()
+    //const performance = cyre.getPerformanceState()
 
     const health = {
       cpu: Math.random() * 100,
       memory: Math.random() * 100,
-      stress: breathing.stress,
-      callRate: performance.callRate,
-      healthy: breathing.stress < 0.7
+      stress: breathing?.stress,
+      callRate: performance?.callRate,
+      healthy: breathing?.stress < 0.7
     }
 
     console.log(
@@ -121,22 +121,22 @@ async function setupPureCyreEcosystem() {
 
   cyre.on('system-monitor', () => {
     const load = cyre.schedule.getLoad()
-    const breathing = cyre.getBreathingState()
-    const performance = cyre.getPerformanceState()
+    //const breathing = cyre.getBreathingState()
+    //const performance = cyre.getPerformanceState()
 
     const status = {
       tasks: `${load.activeTasks}/${load.totalTasks}`,
-      stress: Math.round(breathing.stress * 100),
-      breathing: breathing.currentRate,
-      callRate: performance.callRate,
+      //stress: Math.round(breathing.stress * 100),
+      //breathing: breathing.currentRate,
+      //callRate: performance.callRate,
       overloaded: load.overloaded
     }
 
     console.log(`📊 System Monitor:`)
     console.log(`   Tasks: ${status.tasks}`)
-    console.log(`   Stress: ${status.stress}%`)
-    console.log(`   Breathing: ${status.breathing}ms`)
-    console.log(`   Call Rate: ${status.callRate}/sec`)
+    console.log(`   Stress: ${status?.stress}%`)
+    console.log(`   Breathing: ${status?.breathing}ms`)
+    console.log(`   Call Rate: ${status?.callRate}/sec`)
     console.log(
       `   Status: ${status.overloaded ? '🔴 Overloaded' : '🟢 Healthy'}`
     )

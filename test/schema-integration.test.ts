@@ -2,7 +2,7 @@
 // Schema validation integration tests
 
 import {describe, it, expect, beforeEach} from 'vitest'
-import {cyre, schema} from '../src'
+import {cyre} from '../src'
 
 /*
 
