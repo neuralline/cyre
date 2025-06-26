@@ -1,6 +1,6 @@
 {
   "name": "cyre",
-  "version": "4.3.0",
+  "version": "4.4.0",
   "author": "Cyre Team",
   "repository": {
     "type": "git",
@@ -9,27 +9,26 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "devDependencies": {
-    "@jest/globals": "30.0.0-beta.3",
-    "@rollup/plugin-commonjs": "^28.0.3",
+    "@jest/globals": "30.0.3",
+    "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@types/bun": "latest",
-    "@types/node": "^22.15.31",
-    "@typescript-eslint/eslint-plugin": "^8.34.0",
-    "@typescript-eslint/parser": "^8.34.0",
-    "@vitest/coverage-v8": "^3.2.3",
-    "bundlesize": "^0.18.2",
-    "eslint": "^9.28.0",
+    "@types/node": "^24.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.35.0",
+    "@typescript-eslint/parser": "^8.35.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "autocannon": "^8.0.0",
+    "eslint": "^9.29.0",
     "rimraf": "^6.0.1",
     "rollup-plugin-dts": "^6.2.1",
-    "terser": "^5.42.0",
+    "terser": "^5.43.1",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
     "tslib": "^2.8.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vitest": "^3.2.3",
-    "autocannon": "^8.0.0"
+    "vitest": "^3.2.4"
   },
   "exports": {
     ".": {
@@ -98,7 +97,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "bun run typecheck",
     "prepublishOnly": "bun run build && bun run test",
-    "size": "bun run build && bundlesize",
     "benchmark": "bun run example/industry-standard-tests.ts",
     "dev": "tsx scripts/cyre-server.ts"
   },

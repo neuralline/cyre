@@ -14,7 +14,7 @@ import {sensor} from '../metrics'
 
 export function useCyre<TPayload = ActionPayload>(
   instance?: CyreInstance,
-  configOrId: string | UseCyreConfig<TPayload>
+  configOrId?: string | UseCyreConfig<TPayload>
 ): CyreChannel<TPayload> {
   let finalConfig: UseCyreConfig<TPayload>
   let targetInstance: CyreInstance

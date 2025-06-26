@@ -29,7 +29,6 @@ export const useDispatch = async (
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
-  const isTestAction = action.id.includes('diagnostic-test-action')
 
   // Preserve falsy values like 0, undefined, false, ''
   const currentPayload = payload !== undefined ? payload : action.payload
@@ -69,19 +68,17 @@ export const useDispatch = async (
         }
       }
 
-      const executionTime = performance.now() - startTime
-      const lastExecTime = Date.now()
-      const executionCount = (action.executionCount || 0) + 1
+      const _executionTime = performance.now() - startTime
+      const _lastExecTime = Date.now()
+      const _executionCount = (action.executionCount || 0) + 1
 
       // 5. UPDATE IO.SET() (streamlined)
       io.set({
         ...action,
-        _executionTime: executionTime,
-        _lastExecTime: lastExecTime,
-        _executionCount: executionCount
+        _executionTime,
+        _lastExecTime,
+        _executionCount
       })
-
-      const totalTime = performance.now() - startTime
 
       // Update payload history after successful execution for change detection
 
@@ -92,7 +89,7 @@ export const useDispatch = async (
         payload: executionResult,
         message: MSG.WELCOME,
         metadata: {
-          executionTime: totalTime,
+          executionTime: _executionTime,
           intraLink, // Pass through IntraLink metadata
           validationPassed: !!action.schema // Indicate if validation was performed
         }
@@ -105,13 +102,10 @@ export const useDispatch = async (
         executionError instanceof Error
           ? executionError.message
           : String(executionError)
-      const lastExecTime = Date.now()
-      const totalTime = performance.now() - startTime
 
       // Update action with error info
       io.set({
         ...action,
-        _lastExecTime: lastExecTime,
         errors: [{timestamp: Date.now(), message: errorMessage}]
       })
 
@@ -125,7 +119,6 @@ export const useDispatch = async (
         message: `Execution error: ${errorMessage}`,
         error: true,
         metadata: {
-          executionTime: totalTime,
           validationPassed: !!action.schema
         }
       }

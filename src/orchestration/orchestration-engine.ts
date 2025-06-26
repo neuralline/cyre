@@ -332,7 +332,7 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
             trigger.delay // delay (optional)
           )
 
-          if (timerResult.kind === 'ok') {
+          if (timerResult.ok === 'ok') {
             console.log(
               `✅ TimeKeeper scheduled: ${triggerId} (${trigger.interval}ms interval)`
             )

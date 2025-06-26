@@ -469,7 +469,7 @@ export const call = async (
             timerId
           )
 
-          if (timerResult.kind === 'error') {
+          if (timerResult.ok === 'error') {
             sensor.error(
               action.id,
               timerResult.error,

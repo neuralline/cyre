@@ -8,7 +8,7 @@ import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
 import {io} from '../context/state'
 import {pathEngine} from '../schema/path-engine'
-import {compileAction} from '../schema/channel-operators'
+import {compileAction} from '../schema/data-definitions'
 
 /*
 
@@ -162,12 +162,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         error instanceof Error ? error.message : String(error)
       const registrationTime = performance.now() - startTime
 
-      sensor.error(action.id, errorMessage, 'compilation-exception', {
-        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : undefined,
-        actionConfig: Object.keys(actionWithDefaults),
-        registrationTime
-      })
+      sensor.error(action.id, errorMessage, 'compilation-exception')
 
       return {
         ok: false,
@@ -182,13 +177,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         ', '
       )}`
 
-      sensor.error(action.id, detailedMessage, 'compilation-errors', {
-        errors: compilation.errors,
-        warnings: compilation.warnings,
-        hasFastPath: compilation.hasFastPath,
-        actionConfig: Object.keys(actionWithDefaults),
-        compilationTime: compilation.compilationTime
-      })
+      sensor.error(action.id, detailedMessage, 'compilation-errors')
 
       log.error(
         `Action compilation failed for ${action.id}:`,
@@ -226,12 +215,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
       sensor.error(
         action.id,
         'Cross-validation failed',
-        'cross-validation-errors',
-        {
-          errors: crossValidation.errors,
-          warnings: crossValidation.warnings,
-          compilationTime: compilation.compilationTime
-        }
+        'cross-validation-errors'
       )
 
       return {
@@ -263,10 +247,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
 
-        sensor.error(finalAction.id, errorMessage, 'path-indexing-failed', {
-          path: finalAction.path,
-          errorType: error instanceof Error ? error.constructor.name : 'Unknown'
-        })
+        sensor.error(finalAction.id, errorMessage, 'path-indexing-failed')
 
         // Continue with registration even if path indexing fails
         crossValidation.warnings.push(`Path indexing failed: ${errorMessage}`)
@@ -296,13 +277,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
-      const registrationTime = performance.now() - startTime
 
-      sensor.error(finalAction.id, errorMessage, 'action-storage-failed', {
-        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
-        registrationTime,
-        compilationTime: compilation.compilationTime
-      })
+      sensor.error(finalAction.id, errorMessage, 'action-storage-failed')
 
       return {
         ok: false,
@@ -377,14 +353,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
     sensor.error(
       action?.id || 'unknown',
       errorMessage,
-      'action-registration-exception',
-      {
-        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : undefined,
-        registrationTime,
-        actionProvided: !!action,
-        actionId: action?.id
-      }
+      'action-registration-exception'
     )
 
     return {

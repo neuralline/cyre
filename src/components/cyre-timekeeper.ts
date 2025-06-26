@@ -473,14 +473,14 @@ const createFormation = (
 
 // Result type for functional error handling
 export type Result<T, E = Error> =
-  | {kind: 'ok'; value: T}
-  | {kind: 'error'; error: E}
+  | {ok: 'ok'; value: T}
+  | {ok: 'error'; error: E}
 
 // Main TimeKeeper API
 export const TimeKeeper = {
   keep: (
     interval: number | TimerDuration,
-    callback: () => void | Promise<void>,
+    callback: () => Promise<any>,
     repeat?: TimerRepeat,
     id: string = `timer-${Date.now()}-${Math.random()
       .toString(36)
@@ -521,11 +521,11 @@ export const TimeKeeper = {
         QuartzEngine.start()
       }
 
-      return {kind: 'ok', value: formation}
+      return {ok: 'ok', value: formation}
     } catch (error) {
       sensor.error(id, String(error), 'TimeKeeper/Keep')
       return {
-        kind: 'error',
+        ok: 'error',
         error: error instanceof Error ? error : new Error(String(error))
       }
     }
@@ -550,7 +550,7 @@ export const TimeKeeper = {
         id
       )
 
-      if (result.kind === 'error') {
+      if (result.ok === 'error') {
         reject(result.error)
       }
     })

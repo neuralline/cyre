@@ -341,7 +341,7 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
         delay
       )
 
-      if (timerResult.kind === 'ok') {
+      if (timerResult.ok === 'ok') {
         timerIds.push(triggerId)
         sensor.log(task.id, 'info', 'task-trigger-scheduled', {
           triggerId,

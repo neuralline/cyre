@@ -1,6 +1,8 @@
 // src/types/core.ts
 // IO: channel interface with additional
 
+import {Schema} from '../schema/cyre-schema'
+
 export type * from './timer'
 export type * from './orchestration'
 

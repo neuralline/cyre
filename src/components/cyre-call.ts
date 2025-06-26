@@ -54,7 +54,7 @@ export async function processCall(
         action.delay
       )
 
-      if (result.kind === 'error') {
+      if (result.ok === 'error') {
         return {
           ok: false,
           payload: undefined,
