@@ -61,27 +61,21 @@ async function runTaskManager() {
   cyre.init()
 
   // Create task manager using Cyre hooks
-  const taskManager = useCyre<TaskState>(
-    {
-      protection: {
-        debounce: 100, // Collapse rapid updates
-        detectChanges: true, // Only update when state actually changes
-        throttle: 200 // Minimum time between executions
-      },
-      priority: {level: 'high'}, // Use high priority for responsiveness
-      initialPayload: {
-        // Initial state
-        tasks: [],
-        loading: false
-      },
-      debug: true // Enable debug logging
+  const taskManager = useCyre<TaskState>(cyre, {
+    id: 'task-manager',
+    protection: {
+      debounce: 100, // Collapse rapid updates
+      detectChanges: true, // Only update when state actually changes
+      throttle: 200 // Minimum time between executions
     },
-    'task-manager'
-  ) // Channel prefix
-
-  // Add middleware
-  taskManager.middleware(loggingMiddleware)
-  taskManager.middleware(errorHandlingMiddleware)
+    priority: {level: 'high'}, // Use high priority for responsiveness
+    initialPayload: {
+      // Initial state
+      tasks: [],
+      loading: false
+    },
+    debug: true // Enable debug logging
+  }) // Channel prefix
 
   // Subscribe to updates
   const subscription = taskManager.on(payload => {
@@ -192,27 +186,11 @@ async function runTaskManager() {
     if (!currentState) return
 
     // Use safeCall for better error handling
-    const result = await taskManager.safeCall({
+    const result = await taskManager.call({
       ...currentState,
       tasks: currentState.tasks.filter(task => task.id !== id),
       lastUpdated: Date.now()
     })
-
-    if (!result.success) {
-      console.error(`Failed to delete task: ${result.error.message}`)
-    }
-  }
-
-  // Monitor breathing state (system health)
-  function monitorSystemHealth() {
-    const breathingState = taskManager.getBreathingState()
-    console.log(`\nSystem Health:`)
-    console.log(`  Stress level: ${(breathingState.stress * 100).toFixed(1)}%`)
-    console.log(`  Breathing rate: ${breathingState.currentRate}ms`)
-    console.log(`  Pattern: ${breathingState.pattern}`)
-    console.log(
-      `  Recuperation: ${breathingState.isRecuperating ? 'Active' : 'Inactive'}`
-    )
   }
 
   // Demo operations
@@ -223,7 +201,6 @@ async function runTaskManager() {
     await addTask('Test middleware functionality', 'low')
 
     // Show system health
-    monitorSystemHealth()
 
     // Mark a task as completed
     const state = taskManager.get()?.payload as TaskState
@@ -240,23 +217,6 @@ async function runTaskManager() {
     await addTask('Deploy to production', 'high')
 
     // Show metrics
-    const metrics = taskManager.metrics()
-    console.log('\nChannel Metrics:')
-    console.log(`  Active formations: ${metrics.activeFormations}`)
-    console.log(
-      `  Breathing stress: ${(metrics.breathing.stress * 100).toFixed(1)}%`
-    )
-
-    // Show execution history
-    const history = taskManager.getHistory()
-    console.log('\nRecent Operations:')
-    history.forEach((entry, i) => {
-      console.log(
-        `  ${i + 1}. ${new Date(entry.timestamp).toLocaleTimeString()} - ${
-          entry.response.ok ? 'Success' : 'Failed'
-        }`
-      )
-    })
 
     // Cleanup
     console.log('\nCleaning up...')

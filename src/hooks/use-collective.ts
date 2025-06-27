@@ -251,7 +251,6 @@ export const useCollective = (
     id: collectiveId,
     config: fullConfig,
 
-    // Core operations
     join: async (participantId: string, role = 'member', metadata = {}) => {
       try {
         // Check permissions
@@ -263,6 +262,20 @@ export const useCollective = (
         if (collective.participants.size >= fullConfig.maxParticipants!) {
           return {success: false, error: 'Collective at maximum capacity'}
         }
+
+        // AUTO-CREATE PARTICIPANT CHANNEL
+        const channelId = `participant://${participantId}`
+        cyre.action({id: channelId})
+        cyre.on(channelId, message => {
+          // Handle messages sent to this participant
+
+          return {
+            participantId,
+            received: true,
+            messageType: message.type,
+            timestamp: Date.now()
+          }
+        })
 
         const participant: Participant = {
           id: participantId,
@@ -279,7 +292,7 @@ export const useCollective = (
         collective.metrics.activeParticipants = collective.participants.size
         collective.lastActivity = Date.now()
 
-        // Broadcast join notification
+        // Broadcast join notification (now this will work!)
         if (fullConfig.notifications !== 'none') {
           await instance.broadcast({
             type: 'participant-joined',
@@ -309,11 +322,15 @@ export const useCollective = (
           return {success: false, error: 'Participant not found'}
         }
 
+        // CLEANUP PARTICIPANT CHANNEL
+        const channelId = `participant://${participantId}`
+        cyre.forget(channelId)
+
         collective.participants.delete(participantId)
         collective.metrics.activeParticipants = collective.participants.size
         collective.lastActivity = Date.now()
 
-        // Broadcast leave notification
+        // Broadcast leave notification (to remaining participants)
         if (fullConfig.notifications !== 'none') {
           await instance.broadcast({
             type: 'participant-left',
