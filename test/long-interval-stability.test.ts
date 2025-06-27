@@ -18,7 +18,7 @@ describe('Cyre Long Interval Stability', () => {
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    cyre.initialize()
+    cyre.init()
     testActionIds.length = 0
   })
 

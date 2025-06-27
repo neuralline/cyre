@@ -23,7 +23,7 @@ import {cyre} from '../src/app'
 */
 
 // Initialize Cyre
-await cyre.initialize()
+await cyre.init()
 
 console.log('=== Channel Creation Examples ===')
 

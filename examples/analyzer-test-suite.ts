@@ -55,7 +55,7 @@ async function initializeTest(): Promise<void> {
   console.log('🚀 Initializing Cyre Analyzer Test Suite')
   console.log('=' + '='.repeat(50))
 
-  await cyre.initialize()
+  await cyre.init()
   cyre.clear() // Start fresh
 
   console.log('✅ Cyre initialized and cleared')

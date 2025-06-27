@@ -55,7 +55,7 @@ async function runAuthDemo() {
   console.log('='.repeat(50))
 
   // Initialize Cyre
-  await cyre.initialize()
+  await cyre.init()
 
   // 1. Register authenticator function
   console.log('\n📋 1. Registering authenticator...')

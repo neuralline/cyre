@@ -9,7 +9,7 @@ import {useCollective} from '../src/hooks/use-collective'
 import {cyre, log} from '../src'
 
 // Initialize Cyre
-cyre.initialize()
+cyre.init()
 
 /**
  * Example 1: Real-time Chat Room

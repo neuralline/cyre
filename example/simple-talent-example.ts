@@ -20,7 +20,7 @@ async function demonstrateSimpleTalentSystem() {
   console.log('🚀 CYRE Simple Talent System Demonstration\n')
 
   // Initialize CYRE
-  await cyre.initialize()
+  await cyre.init()
 
   // ===========================================
   // 1. PROTECTION TALENTS (Pre-pipeline checks)

@@ -25,7 +25,7 @@ import {TimeKeeper} from '../src/components/cyre-timekeeper'
 
 describe('TimeKeeper Comprehensive Testing', () => {
   beforeEach(async () => {
-    await cyre.initialize()
+    await cyre.init()
     cyre.clear()
     TimeKeeper.reset()
   })

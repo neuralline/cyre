@@ -21,7 +21,7 @@ import {cyre} from '../src/app'
 describe('Protection Features Integration', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {

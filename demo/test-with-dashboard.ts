@@ -8,7 +8,7 @@ async function testCyreWithDashboard() {
 
   try {
     // Initialize clean Cyre
-    const result = await cyre.initialize()
+    const result = await cyre.init()
     console.log('✅ Cyre initialized:', result.ok)
 
     // Start metrics writer for dashboard

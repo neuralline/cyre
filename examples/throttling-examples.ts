@@ -1285,7 +1285,7 @@ export async function runComprehensiveThrottlingTests() {
 
   try {
     // Initialize Cyre
-    cyre.initialize()
+    cyre.init()
 
     const allResults: TestResult[] = []
     const sectionResults: Record<string, TestResult[]> = {}
@@ -1433,7 +1433,7 @@ export const comprehensiveThrottlingDemo = {
   // Run specific test sections
   testBasics: async () => {
     console.log('🧪 Running basic throttling tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await basicThrottlingTests()
     cyre.clear()
     return results
@@ -1441,7 +1441,7 @@ export const comprehensiveThrottlingDemo = {
 
   testEdgeCases: async () => {
     console.log('🧪 Running edge case tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await edgeCaseTests()
     cyre.clear()
     return results
@@ -1449,7 +1449,7 @@ export const comprehensiveThrottlingDemo = {
 
   testErrors: async () => {
     console.log('🧪 Running error handling tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await errorHandlingTests()
     cyre.clear()
     return results
@@ -1457,7 +1457,7 @@ export const comprehensiveThrottlingDemo = {
 
   testIntegration: async () => {
     console.log('🧪 Running integration tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await integrationTests()
     cyre.clear()
     return results
@@ -1465,7 +1465,7 @@ export const comprehensiveThrottlingDemo = {
 
   testPerformance: async () => {
     console.log('🧪 Running performance tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await performanceTests()
     cyre.clear()
     return results
@@ -1473,7 +1473,7 @@ export const comprehensiveThrottlingDemo = {
 
   testTiming: async () => {
     console.log('🧪 Running timing precision tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await timingPrecisionTests()
     cyre.clear()
     return results
@@ -1481,7 +1481,7 @@ export const comprehensiveThrottlingDemo = {
 
   testRealWorld: async () => {
     console.log('🧪 Running enhanced real-world tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await enhancedRealWorldTests()
     cyre.clear()
     return results
@@ -1489,7 +1489,7 @@ export const comprehensiveThrottlingDemo = {
 
   testLifecycle: async () => {
     console.log('🧪 Running lifecycle tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await lifecycleTests()
     cyre.clear()
     return results
@@ -1503,7 +1503,7 @@ export const comprehensiveThrottlingDemo = {
   // Quick validation
   quickValidation: async () => {
     console.log('⚡ Quick throttling validation...')
-    cyre.initialize()
+    cyre.init()
 
     try {
       let execCount = 0
@@ -2125,7 +2125,7 @@ export async function runThrottlingExamples() {
 
   try {
     // Initialize Cyre
-    cyre.initialize()
+    cyre.init()
 
     // Run examples sequentially
     await apiRateLimitingExample()

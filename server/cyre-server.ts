@@ -20,7 +20,7 @@ const PORT = 3000
 
 // Initialize CYRE
 console.log('🚀 Initializing CYRE...')
-cyre.initialize()
+cyre.init()
 
 // Register HTTP routes as CYRE channels
 const routes = [

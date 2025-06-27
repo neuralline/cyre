@@ -8,7 +8,7 @@ import {useCollective} from '../src/hooks/use-collective'
 import {cyre, log} from '../src'
 
 // Initialize Cyre
-cyre.initialize()
+cyre.init()
 
 /**
  * STRESS TEST 1: Massive Participant Load

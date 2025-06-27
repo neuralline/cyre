@@ -1,5 +1,5 @@
 // src/hooks/use-branch.ts
-// Branch system with React component-like isolation
+// Branch system with dual addressing: full id + localId system
 // No parent/sibling access, strict hierarchy, cascade destruction
 
 import type {Branch, BranchConfig, BranchSetup} from '../types/hooks'
@@ -19,6 +19,7 @@ export interface UseBranchConfig extends BranchConfig {
 
 /**
  * Create isolated branch like React component
+ * - Uses dual addressing: full id + localId system
  * - No access to parent or siblings
  * - Only parent can call children
  * - Cascade destruction when parent destroyed
@@ -47,7 +48,8 @@ export function useBranch(
       `Branch ID "${branchId}" cannot contain path separators. Use clean IDs like "sensor" or "user-validator"`
     )
   }
-  // Build path from parent instance + branch ID only (never uses name)
+
+  // Build hierarchical path from parent
   const path = finalConfig.parent
     ? `${finalConfig.parent.path}/${branchId}`
     : branchId
@@ -66,55 +68,14 @@ export function useBranch(
   const childBranches = new Set<string>()
 
   /**
-   * Get branch storage namespace
+   * Get all channels belonging to this branch
    */
-  const getBranchStorage = (): Record<string, IO> => {
-    const state = (targetCyre as any).getState?.() || {}
-
-    if (!state.branches) {
-      state.branches = {}
-    }
-    if (!state.branches[path]) {
-      state.branches[path] = {}
-    }
-
-    return state.branches[path]
-  }
-
-  /**
-   * Store action in branch namespace
-   */
-  const storeBranchAction = (actionConfig: IO): void => {
-    const branchStorage = getBranchStorage()
-    branchStorage[actionConfig.id] = actionConfig
-  }
-
-  /**
-   * Get action from branch namespace
-   */
-  const getBranchAction = (id: string): IO | undefined => {
-    const branchStorage = getBranchStorage()
-    return branchStorage[id]
-  }
-
-  /**
-   * Remove action from branch namespace
-   */
-  const removeBranchAction = (id: string): boolean => {
-    const branchStorage = getBranchStorage()
-    if (branchStorage[id]) {
-      delete branchStorage[id]
-      return true
-    }
-    return false
-  }
-
-  /**
-   * List all actions in branch
-   */
-  const listBranchActions = (): IO[] => {
-    const branchStorage = getBranchStorage()
-    return Object.values(branchStorage)
+  const getBranchChannels = (): IO[] => {
+    const allChannels = (targetCyre as any).getAll?.() || []
+    return allChannels.filter(
+      (channel: IO) =>
+        channel.id.startsWith(`${path}/`) && channel.path === path
+    )
   }
 
   /**
@@ -133,17 +94,33 @@ export function useBranch(
     path,
     parent: finalConfig.parent,
 
-    // Core action management
+    // Core action management with dual addressing
     action: (actionConfig: IO) => {
       try {
-        // Validate clean ID (no slashes)
+        // Validate local channel ID
+        if (!actionConfig.id) {
+          throw new Error('Channel ID is required')
+        }
 
-        // Enhanced config with branch context
+        if (actionConfig.id.includes('/') || actionConfig.id.includes('\\')) {
+          throw new Error(
+            `Channel ID "${actionConfig.id}" cannot contain path separators. Use simple IDs like "create-user" or "validator"`
+          )
+        }
+
+        // Store original local ID
+        const localChannelId = actionConfig.id
+
+        // Compute full address for io store
+        const fullAddress = `${path}/${localChannelId}`
+
+        // Enhanced config with dual addressing
         const enhancedConfig: IO = {
           ...actionConfig,
-          id: actionConfig.id,
-          path: `${path}/${actionConfig.id}`,
-          _branchId: branchId,
+          id: fullAddress, // Full address for io store uniqueness
+          localId: localChannelId, // Local ID for branch operations
+          path: path, // Branch path for organization
+          _branchId: branchId, // Branch foreign key
           tags: [
             ...(actionConfig.tags || []),
             `branch:${branchId}`,
@@ -151,19 +128,10 @@ export function useBranch(
           ]
         }
 
-        // Register with core cyre
-        const result = targetCyre.action({
-          ...enhancedConfig,
-          id: `${path}/${actionConfig.id}`
-        })
+        // Register with core cyre using full address
+        const result = targetCyre.action(enhancedConfig)
 
         if (result.ok) {
-          storeBranchAction(enhancedConfig)
-          sensor.log(branchId, 'success', 'branch-action-registered', {
-            cleanId: actionConfig.id,
-            fullPath: `${path}/${actionConfig.id}`,
-            branchPath: path
-          })
         }
 
         return result
@@ -178,20 +146,12 @@ export function useBranch(
       }
     },
 
-    // Subscribe to branch channel
-    on: (channelId: string, handler: any) => {
+    // Subscribe to branch channel using local ID
+    on: (localChannelId: string, handler: any) => {
       try {
-        const fullPath = `${path}/${channelId}`
-        const result = targetCyre.on(fullPath, handler)
-
-        if (result.ok) {
-          sensor.log(branchId, 'success', 'branch-subscription', {
-            cleanId: channelId,
-            fullPath,
-            branchPath: path
-          })
-        }
-
+        // Compute full address for subscription
+        const fullAddress = `${path}/${localChannelId}`
+        const result = targetCyre.on(fullAddress, handler)
         return result
       } catch (error) {
         const errorMessage =
@@ -204,42 +164,28 @@ export function useBranch(
       }
     },
 
-    // Call - strict hierarchy only (like React data flow)
+    // Call with strict hierarchy and path resolution
     call: async (target: string, payload?: any) => {
       try {
-        let targetPath: string
+        let targetAddress: string
 
-        // Block sibling communication (like React components)
-        if (target.includes('../')) {
-          throw new Error(
-            'Sibling/parent communication not allowed. Use parent coordination pattern.'
-          )
-        }
-
-        // Only allow parent → child calls
+        // Determine target type and resolve address
         if (target.includes('/')) {
-          // Ensure it's a child path
-
-          targetPath = target
+          // Child path call - ensure it's within our hierarchy
+          if (target.startsWith(`${path}/`)) {
+            // Direct child path
+            targetAddress = target
+          } else {
+            // Relative child path - append to our path
+            targetAddress = `${path}/${target}`
+          }
         } else {
-          // Local channel call
-          targetPath = `${path}/${target}`
+          // Local channel call - compute full address
+          targetAddress = `${path}/${target}`
         }
 
-        const result = await targetCyre.call(targetPath, payload)
-
-        sensor.log(
-          branchId,
-          'success',
-          'call from a branch',
-          'use-branch',
-          false,
-          {
-            target,
-            targetPath,
-            branchPath: path
-          }
-        )
+        // Execute call with computed address
+        const result = await targetCyre.call(targetAddress, payload)
 
         return result
       } catch (error) {
@@ -255,64 +201,80 @@ export function useBranch(
       }
     },
 
-    // Get action from branch storage
-    get: (channelId: string) => {
+    // Get channel using local ID
+    get: (localChannelId: string) => {
       try {
-        return getBranchAction(channelId)
+        const fullAddress = `${path}/${localChannelId}`
+        return targetCyre.get ? targetCyre.get(fullAddress) : undefined
       } catch (error) {
         sensor.error(branchId, 'Instance get failed', 'use-branch')
         return undefined
       }
     },
 
-    // Remove action from branch
-    forget: (channelId: string) => {
+    // Remove channel using local ID
+    forget: (localChannelId: string) => {
       try {
-        const fullPath = `${path}/${channelId}`
-        const coreResult = targetCyre.forget(fullPath)
-        const branchResult = removeBranchAction(channelId)
-        return coreResult && branchResult
+        const fullAddress = `${path}/${localChannelId}`
+        return targetCyre.forget(fullAddress)
       } catch (error) {
-        sensor.error(branchId, 'Forget failed', {channelId, error})
+        sensor.error(branchId, 'Forget failed', {localChannelId, error})
         return false
       }
     },
 
-    // Destroy entire branch (React unmount-like)
+    // Destroy entire branch with cascade
     destroy: () => {
       try {
-        const branchActions = listBranchActions()
+        const branchChannels = getBranchChannels()
         let removedCount = 0
 
-        // Remove all actions in this branch
-        branchActions.forEach(action => {
-          const fullPath = `${path}/${action.id}`
-          if (targetCyre.forget(fullPath)) {
+        // Remove all channels in this branch
+        branchChannels.forEach(channel => {
+          if (targetCyre.forget(channel.id)) {
             removedCount++
           }
         })
 
-        // CASCADE: Destroy all child branches (like React unmount)
-        childBranches.forEach(childPath => {
-          const state = (targetCyre as any).getState?.() || {}
-          if (state.branches && state.branches[childPath]) {
-            // Remove all channels in child branch
-            const childStorage = state.branches[childPath]
-            Object.keys(childStorage).forEach(channelId => {
-              const fullPath = `${childPath}/${channelId}`
-              targetCyre.forget(fullPath)
-              removedCount++
-            })
-            // Remove child branch storage
-            delete state.branches[childPath]
-          }
-        })
+        // CASCADE: Destroy all child branches recursively
+        const destroyChildBranch = (childPath: string): number => {
+          let childRemovedCount = 0
 
-        // Remove this branch storage
-        const state = (targetCyre as any).getState?.() || {}
-        if (state.branches && state.branches[path]) {
-          delete state.branches[path]
+          // Find all channels in child branch
+          const allChannels = (targetCyre as any).getAll?.() || []
+          const childChannels = allChannels.filter((channel: IO) =>
+            channel.id.startsWith(`${childPath}/`)
+          )
+
+          // Remove child channels
+          childChannels.forEach((channel: IO) => {
+            if (targetCyre.forget(channel.id)) {
+              childRemovedCount++
+            }
+          })
+
+          // Find and destroy grandchildren
+          const grandchildPaths = Array.from(childBranches).filter(
+            grandchildPath => grandchildPath.startsWith(`${childPath}/`)
+          )
+
+          grandchildPaths.forEach(grandchildPath => {
+            childRemovedCount += destroyChildBranch(grandchildPath)
+            childBranches.delete(grandchildPath)
+          })
+
+          return childRemovedCount
         }
+
+        // Destroy all child branches
+        const childPaths = Array.from(childBranches).filter(childPath =>
+          childPath.startsWith(`${path}/`)
+        )
+
+        childPaths.forEach(childPath => {
+          removedCount += destroyChildBranch(childPath)
+          childBranches.delete(childPath)
+        })
 
         // Remove from parent's child tracking
         if (finalConfig.parent) {
@@ -322,13 +284,6 @@ export function useBranch(
           }
         }
 
-        sensor.log(branchId, 'success', 'branch-destroyed', {
-          branchId,
-          path,
-          removedChannels: removedCount,
-          destroyedChildren: childBranches.size
-        })
-
         return removedCount > 0
       } catch (error) {
         sensor.error(branchId, 'Destroy failed', {error})
@@ -336,26 +291,31 @@ export function useBranch(
       }
     },
 
-    // Check if branch is active
+    // Check if branch is active (has channels)
     isActive: () => {
-      const branchActions = listBranchActions()
-      return branchActions.length > 0
+      const branchChannels = getBranchChannels()
+      return branchChannels.length > 0
     },
 
     // Get branch statistics
     getStats: () => {
-      const branchActions = listBranchActions()
+      const branchChannels = getBranchChannels()
+      const childCount = Array.from(childBranches).filter(
+        childPath =>
+          childPath.startsWith(`${path}/`) &&
+          childPath.split('/').length === path.split('/').length + 1
+      ).length
 
       return {
         id: branchId,
         path,
-        channelCount: branchActions.length,
+        channelCount: branchChannels.length,
         subscriberCount: 0, // Would need tracking
         timerCount: 0, // Would need tracking
-        childCount: childBranches.size,
+        childCount,
         depth: path.split('/').filter(Boolean).length,
         createdAt: Date.now(),
-        isActive: branchActions.length > 0
+        isActive: branchChannels.length > 0
       }
     },
 
@@ -366,7 +326,7 @@ export function useBranch(
         let errorCount = 0
         const errors: string[] = []
 
-        // Setup actions
+        // Setup actions with local IDs
         if (config.actions) {
           config.actions.forEach(actionConfig => {
             if (actionConfig.id) {
@@ -381,7 +341,7 @@ export function useBranch(
           })
         }
 
-        // Setup subscriptions
+        // Setup subscriptions with local IDs
         if (config.subscriptions) {
           config.subscriptions.forEach(sub => {
             try {
@@ -421,12 +381,6 @@ export function useBranch(
   ;(branch as any).childBranches = childBranches
 
   // Log branch creation
-  sensor.log(branchId, 'success', 'branch-created', {
-    branchId,
-    path,
-    parentPath: finalConfig.parent?.path,
-    name: finalConfig.name
-  })
 
   return branch
 }

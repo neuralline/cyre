@@ -82,7 +82,7 @@ export async function runPayloadStateTests(): Promise<PayloadTestResults> {
   console.log('\n🧪 Payload/State Behavior Tests')
   console.log('================================')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const results: PayloadTestResults = {
     changeDetection: 0,

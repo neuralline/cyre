@@ -31,7 +31,7 @@ async function analyzeMixedIntervals(): Promise<TestAnalysis> {
   console.log('🔍 Analyzing Mixed Intervals Test Failure')
   console.log('='.repeat(50))
 
-  await cyre.initialize()
+  await cyre.init()
 
   const actionId = 'mixed-intervals-analysis'
   let executionCount = 0

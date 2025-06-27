@@ -11,7 +11,6 @@ import {sensor} from './context/metrics-report'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 
-import schema from './schema/cyre-schema'
 import {groupOperations, removeChannelFromGroups} from './components/cyre-group'
 import payloadState from './context/payload-state'
 
@@ -19,8 +18,6 @@ import payloadState from './context/payload-state'
 import {orchestration} from './orchestration/orchestration-engine'
 import {query} from './query/cyre-query'
 import type {OrchestrationConfig} from './types/orchestration'
-
-import {pathPlugin} from './schema/path-plugin'
 
 import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
@@ -44,17 +41,13 @@ import {useDispatch} from './components/cyre-dispatch'
     - Dynamic load balancing and adaptive optimization
 
         example use:
-        cyre.action({id: 'uber', payload: 44085648634})
-        cyre.on('uber', number => {
-            console.log('Calling Uber @', number)
+        cyre.action({id: 'taxi', payload: 44085648634})
+        cyre.on('taxi', number => {
+            console.log('Calling taxi @', number)
         })
-        cyre.call('uber') 
+        cyre.call('taxi') 
 
-        // System orchestrations run automatically:
-        // - Breathing adapts to system stress
-        // - Memory cleanup happens intelligently
-        // - Performance issues are detected and resolved
-        // - Health checks prevent system degradation
+       
 
         Path System Features:
         - Hierarchical channel organization: 'app/users/profile/settings'
@@ -64,18 +57,14 @@ import {useDispatch} from './components/cyre-dispatch'
         - Backward compatibility with existing flat IDs
 
         example use:
-        // ID-based
         cyre.action({id: 'user-profile', payload: userData})
         cyre.on('user-profile', handler)
         cyre.call('user-profile', newData)
 
         // path-based  
         cyre.action({id: 'user-profile', path: 'app/users/profile', payload: userData})
-        cyre.path.call('app/users/*', newData)  // Call all user channels
-        cyre.path.on('app/*', handler)          // Subscribe to all app events
 
     Flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
-    Path: pathEngine indexes → pattern matching → foreign key lookups → batch operations
 
 
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
@@ -280,151 +269,69 @@ export const call = async (
     }
 
     // STEP 5: Debounce check (most complex protection)
-    else if (
-      action.debounce &&
-      action.debounce > 0 &&
-      !action._bypassDebounce
-    ) {
-      const timerId = `${action.id}-debounce-${Date.now()}`
+    // In call() function - simplified debounce check
+    else if (action.debounce && action.debounce > 0) {
+      const debounceId = `debounce-${action.id}`
 
-      if (!action._debounceTimer) {
-        // First time debounce - execute immediately and set up debounce window
-
-        action._debounceTimer = timerId
-
-        // Store the payload for debounced calls
-        payloadState.set(action.id, req, 'call')
-
-        // Update action state
-        io.set({
-          ...action,
-          _debounceTimer: timerId
-        })
-
-        return await processCall(action, req)
-      } else {
-        // Subsequent calls within debounce window
-
-        // Clear existing debounce timer
-        TimeKeeper.forget(action._debounceTimer)
+      // Check if already in debounce state
+      if (timeline.get(debounceId)) {
+        // Cancel existing debounce timer
+        TimeKeeper.forget(debounceId)
 
         // Check maxWait constraint
-
         if (
           action.maxWait &&
-          Date.now() - action._timestamp >= action.maxWait
+          Date.now() - action._debounceStart >= action.maxWait
         ) {
-          // MaxWait exceeded - execute immediately and reset debounce
+          // MaxWait exceeded - execute immediately
+          io.set({...action, _debounceStart: undefined})
+          return await processCall(action, payload)
+        }
+      } else {
+        // First debounce call - set start time
+        io.set({...action, _debounceStart: Date.now()})
+      }
 
-          action._debounceTimer = undefined
+      // Store latest payload and schedule debounced execution
+      payloadState.set(action.id, payload, 'call')
 
-          // Update action state
-          io.set({
-            ...action,
-            _debounceTimer: undefined
-          })
+      // In the TimeKeeper.keep() callback, ensure the action object is complete:
+      TimeKeeper.keep(
+        action.debounce,
+        async () => {
+          try {
+            const latestPayload = payloadState.get(action.id) || payload
+            const currentAction = io.get(action.id) // Get the FULL action object
 
-          // Execute immediately due to maxWait
+            if (!currentAction) {
+              console.error(
+                'Action not found during debounce execution:',
+                action.id
+              )
+              return
+            }
 
-          return await processCall(action, req)
-        } else {
-          // Set up new debounce delay with latest payload
-          action._debounceTimer = timerId
-
-          // Update stored payload with latest data
-          payloadState.set(action.id, req, 'call')
-
-          // Update action state
-          io.set({
-            ...action,
-            _debounceTimer: timerId
-          })
-
-          // Schedule delayed execution using TimeKeeper
-          const timerResult = TimeKeeper.keep(
-            action.debounce,
-            async () => {
-              try {
-                // Get the latest payload that was stored
-                const latestPayload = payloadState.get(action.id) || req
-
-                // Clear timer reference since we're executing now
-                const currentAction = io.get(action.id)
-                if (currentAction) {
-                  currentAction._debounceTimer = undefined
-
-                  // Update action state
-                  io.set({
-                    ...currentAction,
-                    _debounceTimer: undefined
-                  })
-                }
-
-                // Execute with the latest payload
-                const result = await processCall(
-                  currentAction || action,
-                  latestPayload
-                )
-
-                return result
-              } catch (error) {
-                const errorMessage =
-                  error instanceof Error ? error.message : String(error)
-
-                sensor.error(
-                  action.id,
-                  errorMessage,
-                  'debounce-delayed-execution-error'
-                )
-
-                return {
-                  ok: false,
-                  payload: null,
-                  message: `Debounce execution failed: ${errorMessage}`,
-                  error: errorMessage
-                }
-              }
-            },
-            1, // Execute only once
-            timerId
-          )
-
-          if (timerResult.ok === 'error') {
-            sensor.error(
-              action.id,
-              '  timerResult.error',
-              'debounce-timer-creation-failed'
-            )
-
-            // Clear debounce state on timer creation failure
-            action._debounceTimer = undefined
-
+            // Clear debounce state PROPERLY
             io.set({
-              ...action,
-              _debounceTimer: undefined
+              ...currentAction, // Use the complete action object
+              _debounceStart: undefined
             })
 
-            return {
-              ok: false,
-              payload: null,
-              message: `Debounce timer creation failed: ${timerResult.error}`,
-              error: timerResult.error
-            }
+            // Execute with the complete action
+            return await processCall(currentAction, latestPayload)
+          } catch (error) {
+            // Handle error properly
           }
+        },
+        1,
+        debounceId
+      )
 
-          // Return debounced response
-          return {
-            ok: true,
-            payload: req,
-            message: `Debounced - will execute in ${action.debounce}ms with latest payload`,
-            metadata: {
-              debounced: true,
-              delay: action.debounce,
-              timerId: timerId.slice(-8),
-              executionPath: 'debounce-delayed'
-            }
-          }
-        }
+      return {
+        ok: true,
+        payload,
+        message: `Debounced - executing in ${action.debounce}ms`,
+        metadata: {debounced: true, delay: action.debounce}
       }
     }
 
@@ -551,11 +458,13 @@ export const cyre = Object.freeze({
 
   // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
-  schema,
 
   // SEAMLESS QUERY INTEGRATION
-  query,
-  path: pathPlugin,
+  //query,
+  path: id => {
+    const path = io.get(id) || {path: ''}
+    return path.path || ''
+  },
   // DEVELOPER EXPERIENCE HELPERS
   dev,
 

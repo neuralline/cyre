@@ -35,7 +35,7 @@ const serverState: SimpleServerState = {
 }
 
 // Initialize Cyre
-cyre.initialize()
+cyre.init()
 
 /**
  * Register server route actions

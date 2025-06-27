@@ -24,7 +24,7 @@ import {TimeKeeper} from '../src/components/cyre-timekeeper'
 describe('Cyre Action Operators/Talents - Comprehensive Suite', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
-    await cyre.initialize()
+    await cyre.init()
     cyre.clear()
     TimeKeeper.reset()
   })

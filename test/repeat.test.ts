@@ -16,7 +16,7 @@ describe('CYRE Repeat and Timing Behavior with New TimeKeeper', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {

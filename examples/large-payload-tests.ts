@@ -332,7 +332,7 @@ export async function runLargePayloadTests(): Promise<LargePayloadResults> {
   console.log('===================================')
   console.log('Testing how Cyre handles realistic large JSON payloads...')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const results: LargePayloadResults = {
     smallPayload: await testPayloadSize(

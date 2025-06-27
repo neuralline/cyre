@@ -61,7 +61,7 @@ async function runDetailedLoggingTest() {
 
   // Initialize Cyre
   logger.step(1, 'Initializing Cyre system')
-  await cyre.initialize()
+  await cyre.init()
   cyre.clear()
 
   // TEST 1: Basic State Talents Pipeline

@@ -16,7 +16,7 @@ import {cyre} from '../src/app'
 */
 
 // Initialize Cyre
-await cyre.initialize()
+await cyre.init()
 
 // Example 1: Battery Management System
 console.log('=== Battery Management Example ===')

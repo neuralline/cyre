@@ -58,7 +58,7 @@ async function runDataFlowTests() {
   console.log('🚀 Starting Cyre Data Flow Tests\n')
 
   // Initialize Cyre
-  await cyre.initialize()
+  await cyre.init()
 
   // TEST 1: Simple Data Return
   console.log('📝 TEST 1: Simple Data Return')

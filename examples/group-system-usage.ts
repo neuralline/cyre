@@ -488,7 +488,7 @@ export const runGroupSystemDemo = async () => {
   console.log('🚀 Starting Cyre Group System Demo...\n')
 
   // Initialize Cyre
-  await cyre.initialize()
+  await cyre.init()
 
   console.log('1️⃣ Setting up Building Sensor Management...')
   setupBuildingSensors()

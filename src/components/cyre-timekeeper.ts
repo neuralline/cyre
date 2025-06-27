@@ -162,11 +162,6 @@ const QuartzEngine = {
       // Fallback to setInterval for browsers
       this.quartzTimer = setInterval(() => this.tick(), this.quartzInterval)
     }
-
-    sensor.info('quartz', 'Quartz engine started', {
-      mode: TimerEnvironment.isNode ? 'setImmediate' : 'setInterval',
-      interval: this.quartzInterval
-    })
   },
 
   stop(): void {
@@ -180,7 +175,7 @@ const QuartzEngine = {
     this.executionGroups.clear()
     this.precisionGroups.clear()
 
-    sensor.info('quartz', 'Quartz engine stopped', this.metrics)
+    sensor.info('quartz', 'Quartz engine stopped')
   },
 
   tick(): void {
@@ -239,13 +234,6 @@ const QuartzEngine = {
       // Calculate drift
       const drift = currentTime - formation.nextExecutionTime
 
-      sensor.debug(formation.id, 'Timer execution starting', {
-        scheduledTime: formation.nextExecutionTime,
-        actualTime: currentTime,
-        drift,
-        executionCount: formation.executionCount
-      })
-
       // Execute callback
       await Promise.resolve(formation.callback())
 
@@ -294,11 +282,6 @@ const QuartzEngine = {
         // Formation completed
         this.removeFromGroups(updatedFormation)
         getTimeline().forget(updatedFormation.id)
-
-        sensor.info(updatedFormation.id, 'Timer completed', {
-          totalExecutions: updatedFormation.executionCount,
-          averageExecutionTime: updatedFormation.metrics?.averageExecutionTime
-        })
       }
     } catch (error) {
       this.metrics.executionErrors++
@@ -456,15 +439,6 @@ const createFormation = (
     interval,
     hasExecutedOnce: false
   }
-
-  sensor.info(id, 'Timer created', {
-    interval,
-    delay,
-    repeat,
-    adaptedDuration,
-    stressFactor,
-    precisionTier: tier
-  })
 
   return formation
 }

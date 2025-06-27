@@ -747,7 +747,7 @@ export const runIndustryBenchmarks = async (): Promise<void> => {
 
   // Initialize Cyre
   if (!cyre.status()) {
-    await cyre.initialize()
+    await cyre.init()
   }
 
   const results: BenchmarkMetrics[] = []

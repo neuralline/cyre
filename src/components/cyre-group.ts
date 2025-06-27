@@ -111,10 +111,6 @@ export const createGroup = (
 
     groupStore.set(groupId, groupState)
 
-    sensor.log(groupId, 'success', 'group-created', {
-      matchedChannels: matchedChannels.length
-    })
-
     return {
       ok: true,
       message: `Group created with ${matchedChannels.length} matched channels`,
@@ -144,11 +140,6 @@ export const addChannelToGroups = (channelId: string): void => {
       group.matchedChannels.add(channelId)
       applySharedConfig(channelId, group.config.shared)
       groupStore.set(group.id, group)
-
-      sensor.log(group.id, 'info', 'channel-added-to-group', {
-        channelId,
-        groupSize: group.matchedChannels.size
-      })
     }
   })
 }
@@ -163,11 +154,6 @@ export const removeChannelFromGroups = (channelId: string): void => {
     if (group.matchedChannels.has(channelId)) {
       group.matchedChannels.delete(channelId)
       groupStore.set(group.id, group)
-
-      sensor.log(group.id, 'info', 'channel-removed-from-group', {
-        channelId,
-        groupSize: group.matchedChannels.size
-      })
     }
   })
 }
@@ -214,10 +200,6 @@ export const updateGroup = (
     group.config = newConfig
     groupStore.set(groupId, group)
 
-    sensor.log(groupId, 'info', 'group-updated', {
-      channelCount: group.matchedChannels.size
-    })
-
     return {ok: true, message: 'Group updated successfully'}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -234,10 +216,6 @@ export const removeGroup = (groupId: string): boolean => {
 
   group.isActive = false
   const removed = groupStore.forget(groupId)
-
-  sensor.log(groupId, 'info', 'group-removed', {
-    channelCount: group.matchedChannels.size
-  })
 
   return removed
 }

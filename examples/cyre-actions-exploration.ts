@@ -777,7 +777,7 @@ export async function exploreCyreActions(): Promise<ExplorationSummary> {
 
   // Initialize cyre if needed
   if (!cyre.status) {
-    await cyre.initialize()
+    await cyre.init()
   }
 
   // Clear any existing state

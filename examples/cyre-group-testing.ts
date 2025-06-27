@@ -1653,7 +1653,7 @@ async function runComprehensiveDemo() {
 
   try {
     // Initialize Cyre
-    await cyre.initialize({
+    await cyre.init({
       autoSave: true,
       saveKey: 'cyre-group-demo'
     })

@@ -393,31 +393,3 @@ const formatMessage = (event: SensorEvent): string => {
 
   return msg
 }
-
-/**
- * Send to appropriate log level
- */
-const sendToLog = (logLevel: LogLevel, message: string): void => {
-  switch (logLevel) {
-    case LogLevel.ERROR:
-      log.error(message)
-      break
-    case LogLevel.WARN:
-      log.warn(message)
-      break
-    case LogLevel.SUCCESS:
-      log.success(message)
-      break
-    case LogLevel.CRITICAL:
-      log.critical(message)
-      break
-    case LogLevel.SYS:
-      log.sys(message)
-      break
-    case LogLevel.DEBUG:
-      log.debug(message)
-      break
-    default:
-      log.info(message)
-  }
-}

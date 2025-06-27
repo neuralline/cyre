@@ -58,7 +58,7 @@ async function runTaskManager() {
   console.log('Starting Task Manager with Cyre 4.0 Hooks...')
 
   // Initialize Cyre (though this happens automatically in most cases)
-  cyre.initialize()
+  cyre.init()
 
   // Create task manager using Cyre hooks
   const taskManager = useCyre<TaskState>(

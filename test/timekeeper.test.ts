@@ -7,7 +7,7 @@ import {cyre} from '../src'
 describe('TimeKeeper with Redesigned API - Updated Tests', () => {
   beforeEach(() => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {

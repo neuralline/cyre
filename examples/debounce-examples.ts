@@ -1449,7 +1449,7 @@ export async function runComprehensiveDebounceTests() {
 
   try {
     // Initialize Cyre
-    cyre.initialize()
+    cyre.init()
 
     const allResults: TestResult[] = []
     const sectionResults: Record<string, TestResult[]> = {}
@@ -1602,7 +1602,7 @@ export const comprehensiveDebounceDemo = {
   // Run specific test sections
   testBasics: async () => {
     console.log('🧪 Running basic debounce tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await basicDebounceTests()
     cyre.clear()
     return results
@@ -1610,7 +1610,7 @@ export const comprehensiveDebounceDemo = {
 
   testMaxWait: async () => {
     console.log('🧪 Running maxWait tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await maxWaitTests()
     cyre.clear()
     return results
@@ -1618,7 +1618,7 @@ export const comprehensiveDebounceDemo = {
 
   testEdgeCases: async () => {
     console.log('🧪 Running edge case tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await edgeCaseTests()
     cyre.clear()
     return results
@@ -1626,7 +1626,7 @@ export const comprehensiveDebounceDemo = {
 
   testErrors: async () => {
     console.log('🧪 Running error handling tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await errorHandlingTests()
     cyre.clear()
     return results
@@ -1634,7 +1634,7 @@ export const comprehensiveDebounceDemo = {
 
   testIntegration: async () => {
     console.log('🧪 Running integration tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await integrationTests()
     cyre.clear()
     return results
@@ -1642,7 +1642,7 @@ export const comprehensiveDebounceDemo = {
 
   testPerformance: async () => {
     console.log('🧪 Running performance tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await performanceTests()
     cyre.clear()
     return results
@@ -1650,7 +1650,7 @@ export const comprehensiveDebounceDemo = {
 
   testRealWorld: async () => {
     console.log('🧪 Running real-world tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await realWorldTests()
     cyre.clear()
     return results
@@ -1658,7 +1658,7 @@ export const comprehensiveDebounceDemo = {
 
   testLifecycle: async () => {
     console.log('🧪 Running lifecycle tests...')
-    cyre.initialize()
+    cyre.init()
     const results = await lifecycleTests()
     cyre.clear()
     return results
@@ -1672,7 +1672,7 @@ export const comprehensiveDebounceDemo = {
   // Quick validation
   quickValidation: async () => {
     console.log('⚡ Quick debounce validation...')
-    cyre.initialize()
+    cyre.init()
 
     try {
       let execCount = 0
@@ -1714,7 +1714,7 @@ export const comprehensiveDebounceDemo = {
   // Demo specific scenarios
   demoSearchAsType: async () => {
     console.log('🔍 Demo: Search-as-you-type...')
-    cyre.initialize()
+    cyre.init()
 
     try {
       let searchCount = 0
@@ -1747,7 +1747,7 @@ export const comprehensiveDebounceDemo = {
 
   demoAutoSave: async () => {
     console.log('💾 Demo: Auto-save functionality...')
-    cyre.initialize()
+    cyre.init()
 
     try {
       let saveCount = 0

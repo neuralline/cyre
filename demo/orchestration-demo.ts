@@ -636,7 +636,7 @@ export const runOrchestrationDemo = async () => {
   console.log('===========================')
 
   // Initialize Cyre
-  cyre.initialize()
+  cyre.init()
 
   // Register all demo channels for complete workflow execution
   const demoChannels = [

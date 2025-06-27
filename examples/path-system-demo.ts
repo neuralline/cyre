@@ -19,7 +19,7 @@ async function securePathDemo() {
   console.log('🔒 SECURE PATH SYSTEM DEMO')
   console.log('='.repeat(40))
 
-  await cyre.initialize()
+  await cyre.init()
 
   // ===========================================
   // Setup Test Environment

@@ -47,7 +47,7 @@ async function initializeTest(): Promise<void> {
   console.log('🚀 Initializing Corrected Analyzer Test Suite')
   console.log('=' + '='.repeat(50))
 
-  await cyre.initialize()
+  await cyre.init()
   cyre.clear()
 
   // Initialize metrics system

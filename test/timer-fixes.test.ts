@@ -8,7 +8,7 @@ import {TimeKeeper} from '../src/components/cyre-timekeeper'
 describe('Working Timer Implementation', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
-    await cyre.initialize()
+    await cyre.init()
     cyre.clear()
   })
 

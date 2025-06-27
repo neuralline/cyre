@@ -12,7 +12,7 @@ describe('Throttle Protection Pipeline', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {

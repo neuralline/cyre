@@ -367,7 +367,7 @@ cyre.call(id: string, payload?: any)  // Trigger action
 cyre.forget(id: string)               // Remove action
 
 // System control
-cyre.initialize(config?: CyreConfig)  // Initialize system
+cyre.init(config?: CyreConfig)  // Initialize system
 cyre.pause(id?: string)               // Pause actions
 cyre.resume(id?: string)              // Resume actions
 cyre.clear()                          // Clear all actions

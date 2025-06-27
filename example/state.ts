@@ -13,7 +13,7 @@ import {cyre} from '../src/'
 // Example 1: Basic initialization with auto-save
 async function basicPersistentApp() {
   // Initialize with auto-save enabled
-  await cyre.initialize({
+  await cyre.init({
     autoSave: true,
     saveKey: 'my-app-state'
   })
@@ -50,7 +50,7 @@ async function basicPersistentApp() {
 // Example 2: Manual state management
 async function manualStateApp() {
   // Initialize without auto-save
-  await cyre.initialize({autoSave: false})
+  await cyre.init({autoSave: false})
 
   // Set up app
   cyre.action({id: 'game-state', payload: {level: 1, score: 0}})
@@ -95,7 +95,7 @@ async function loadFromExistingState() {
   }
 
   // Initialize with existing state
-  await cyre.initialize({
+  await cyre.init({
     persistentState: existingState,
     autoSave: true,
     saveKey: 'restored-app'
@@ -118,7 +118,7 @@ async function loadFromExistingState() {
 
 // Example 4: Export/Import state
 async function exportImportExample() {
-  await cyre.initialize({autoSave: false})
+  await cyre.init({autoSave: false})
 
   // Set up some state
   cyre.action({
@@ -138,7 +138,7 @@ async function exportImportExample() {
 
   // Later, in another session or different device
   const importedState = JSON.parse(stateJson)
-  await cyre.initialize({
+  await cyre.init({
     persistentState: importedState,
     autoSave: true
   })

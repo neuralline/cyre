@@ -25,7 +25,7 @@ import {cyre} from '../src'
 */
 
 // Initialize Cyre system
-cyre.initialize()
+cyre.init()
 
 /**
  * Example 1: Basic Stream Creation and Subscription

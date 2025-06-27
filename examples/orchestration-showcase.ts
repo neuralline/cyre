@@ -27,7 +27,7 @@ async function setupDemoSystem(): Promise<void> {
   console.log('🚀 Setting up Orchestration Integration Showcase...\n')
 
   // Initialize Cyre
-  await cyre.initialize({autoSave: false})
+  await cyre.init({autoSave: false})
 
   console.log('📊 Creating sensor system...')
 

@@ -7,7 +7,7 @@ const runDebugTest = async () => {
   console.log('=== TimeKeeper Debug Test ===')
 
   // Initialize
-  cyre.initialize()
+  cyre.init()
 
   // Test 1: delay → interval transition
   console.log('\n--- Test 1: Delay → Interval Transition ---')

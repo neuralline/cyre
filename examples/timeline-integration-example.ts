@@ -179,7 +179,7 @@ export async function runTimelineIntegrationExample() {
   console.log('🚀 Timeline Integration Example')
   console.log('Showing orchestration using timeline as one true source\n')
 
-  await cyre.initialize()
+  await cyre.init()
 
   // Setup some basic channels
   cyre.action({id: 'data-extract', payload: {}})

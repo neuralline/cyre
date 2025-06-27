@@ -4,7 +4,7 @@
 import {cyre} from '../src'
 
 console.log('🧪 Testing Streams After Cyre Fix')
-cyre.initialize()
+cyre.init()
 
 /**
  * Test 1: Manual Interval (should start with 0 now)

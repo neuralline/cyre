@@ -111,8 +111,6 @@ export const useDispatch = async (
 
       sensor.error(action.id, errorMessage, 'consolidated-dispatch')
 
-      log.critical(io.get(action.id))
-
       return {
         ok: false,
         payload: null,

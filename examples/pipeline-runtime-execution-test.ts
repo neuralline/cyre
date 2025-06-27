@@ -684,7 +684,7 @@ export async function testPipelineRuntimeExecution(): Promise<PipelineTestSummar
 
   // Initialize cyre
   if (!cyre.status) {
-    await cyre.initialize()
+    await cyre.init()
   }
 
   // Clear any existing state

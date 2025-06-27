@@ -52,7 +52,7 @@ const forceGC = () => {
 async function investigateTalentSpeedMystery() {
   separator('TALENT SPEED MYSTERY - Why are talents faster?')
 
-  await cyre.initialize()
+  await cyre.init()
 
   // Create pure fast path channel
   const fastId = 'pure-fast-path'
@@ -156,7 +156,7 @@ async function investigateTalentSpeedMystery() {
 async function huntMemoryLeaks() {
   separator('MEMORY LEAK INVESTIGATION - Hunt down every byte')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const channelId = 'memory-hunter'
   let executionCount = 0
@@ -252,7 +252,7 @@ async function huntMemoryLeaks() {
 async function concurrencyChaos() {
   separator('CONCURRENCY CHAOS - Push concurrent limits')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const results: Array<{
     concurrency: number
@@ -363,7 +363,7 @@ async function concurrencyChaos() {
 async function branchSystemStress() {
   separator('BRANCH SYSTEM STRESS TEST - Isolation under extreme load')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const branchCount = 100
   const channelsPerBranch = 50
@@ -496,7 +496,7 @@ async function branchSystemStress() {
 async function schemaPerformanceStress() {
   separator('SCHEMA PERFORMANCE STRESS - Validation at scale')
 
-  await cyre.initialize()
+  await cyre.init()
 
   // Create complex schemas
   const simpleSchema = schema.object({

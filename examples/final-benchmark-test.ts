@@ -588,7 +588,7 @@ const runFinalBenchmarks = async (): Promise<void> => {
 
   try {
     // Initialize CYRE
-    await cyre.initialize()
+    await cyre.init()
 
     const results: BenchmarkResult[] = []
 

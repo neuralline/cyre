@@ -27,7 +27,7 @@ import {Branch} from '../src/types/hooks'
  * Initialize Cyre system with actual orchestration
  */
 const initializeSystem = async (): Promise<void> => {
-  await cyre.initialize()
+  await cyre.init()
 
   // Register system orchestrations using actual API
   const systemMonitor = orchestration.keep({

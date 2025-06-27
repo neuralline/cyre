@@ -520,7 +520,7 @@ async function executeAdvancedAttacks() {
 // Initialize and execute
 async function main() {
   try {
-    await cyre.initialize()
+    await cyre.init()
     console.log('Cyre initialized for advanced attacks')
 
     await executeAdvancedAttacks()

@@ -25,7 +25,7 @@ async function nodeGroupDemo() {
 
   try {
     // Initialize Cyre
-    await cyre.initialize({
+    await cyre.init({
       autoSave: false, // Disable localStorage in Node.js
       saveKey: 'node-demo'
     })

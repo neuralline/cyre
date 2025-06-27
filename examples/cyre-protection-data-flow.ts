@@ -39,7 +39,7 @@ async function runProtectionDataFlowTests() {
   console.log('🔧 Starting Cyre Protection Talents Data Flow Tests\n')
 
   // Initialize Cyre
-  await cyre.initialize()
+  await cyre.init()
 
   // TEST 1: Debounce with Data Preservation
   console.log('📝 TEST 1: Debounce with Data Preservation')

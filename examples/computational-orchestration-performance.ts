@@ -558,7 +558,7 @@ export const runBreathingAwareOrchestrationTest = async (): Promise<void> => {
     'Orchestration that adapts to system breathing and stress patterns\n'
   )
 
-  await cyre.initialize()
+  await cyre.init()
 
   const results: BreathingAwareResult[] = []
 

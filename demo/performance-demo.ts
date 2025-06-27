@@ -303,7 +303,7 @@ const runPerformanceDemo = async () => {
   try {
     // Initialize Cyre
     log.info('Initializing Cyre with performance monitoring...')
-    const init = await cyre.initialize({
+    const init = await cyre.init({
       systemOrchestrations: {
         enabled: true,
         adaptiveScheduling: true

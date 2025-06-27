@@ -17,7 +17,7 @@ interface AdvancedBenchmarkResults {
   }
 }
 
-await cyre.initialize()
+await cyre.init()
 
 // Memory measurement helper
 const measureMemory = (): number => {
@@ -52,7 +52,7 @@ export async function runAdvancedBenchmarks(): Promise<AdvancedBenchmarkResults>
   console.log('\n🚀 Advanced Cyre Performance Benchmarks')
   console.log('=========================================')
 
-  await cyre.initialize()
+  await cyre.init()
 
   const results: AdvancedBenchmarkResults = {
     protectionPipeline: 0,

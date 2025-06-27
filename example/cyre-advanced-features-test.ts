@@ -884,7 +884,7 @@ export async function runAdvancedFeaturesTest(): Promise<void> {
 
   // Initialize system
   if (!cyre.status) {
-    await cyre.initialize()
+    await cyre.init()
   }
 
   const results: AdvancedBenchmarkResult[] = []

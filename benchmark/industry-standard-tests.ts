@@ -672,7 +672,7 @@ export async function runIndustryStandardTests(): Promise<void> {
 
   // Initialize system
   if (!cyre.status) {
-    await cyre.initialize()
+    await cyre.init()
   }
 
   const results: BenchmarkResult[] = []

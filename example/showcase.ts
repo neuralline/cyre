@@ -11,7 +11,7 @@ async function demonstrateCore() {
   console.log('\n=== CORE CYRE DEMONSTRATION ===')
 
   // Initialize Cyre
-  await cyre.initialize()
+  await cyre.init()
 
   // 1. Basic action with throttling
   cyre.action({

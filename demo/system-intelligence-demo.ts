@@ -225,7 +225,7 @@ const runSystemIntelligenceDemo = async () => {
 
     // Initialize Cyre
     log.info('Initializing Cyre with system intelligence...')
-    const init = await cyre.initialize()
+    const init = await cyre.init()
 
     if (!init.ok) {
       log.warn(`Initialization failed: ${init.message}`)

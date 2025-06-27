@@ -63,7 +63,7 @@ const setupProductionLine = async () => {
   console.log('🏭 Setting up Smart Factory with Cyre...\n')
 
   // Initialize Cyre
-  await cyre.initialize({autoSave: true, saveKey: 'smart-factory'})
+  await cyre.init({autoSave: true, saveKey: 'smart-factory'})
 
   // 1. Setup Groups with Coordination
   console.log('📊 Creating production groups...')

@@ -6,7 +6,7 @@ import {describe, test, expect, beforeEach, vi, afterEach} from 'vitest'
 
 describe('State Features Integration', () => {
   beforeEach(async () => {
-    await cyre.initialize()
+    await cyre.init()
     cyre.clear()
   })
 

@@ -31,7 +31,7 @@ describe('CYRE Interval Behavior', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
+    cyre.init()
 
     // Clear our tracking array
     testActionIds.length = 0

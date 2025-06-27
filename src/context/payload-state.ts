@@ -249,13 +249,7 @@ export const payloadState = {
 
       // Defer expensive logging operations to next tick to avoid blocking
       if (hasChanged) {
-        process.nextTick(() => {
-          sensor.log(channelId, 'info', 'payload-updated', {
-            source,
-            updateCount,
-            hasChanged: true
-          })
-        })
+        process.nextTick(() => {})
       }
     } catch (error) {
       // Defer error logging to avoid blocking call path
@@ -319,7 +313,6 @@ export const payloadState = {
       const transformed = transformFn(entry.current)
       payloadState.set(channelId, transformed, 'pipeline')
 
-      sensor.log(channelId, 'info', 'payload-transformed')
       return transformed
     } catch (error) {
       log.error(`Payload transform failed for ${channelId}: ${error}`)
@@ -349,7 +342,6 @@ export const payloadState = {
 
       payloadState.set(channelId, merged, 'external')
 
-      sensor.log(channelId, 'info', 'payload-merged')
       return merged
     } catch (error) {
       log.error(`Payload merge failed for ${channelId}: ${error}`)
@@ -514,11 +506,6 @@ export const advancedPayloadOps = {
         }
       })
 
-      sensor.log(source, 'info', 'payload-synced', {
-        targetChannels: channelIds.filter(id => id !== source),
-        syncCount: channelIds.length - 1
-      })
-
       return true
     } catch (error) {
       log.error(`Failed to sync payloads: ${error}`)
@@ -543,10 +530,6 @@ export const advancedPayloadOps = {
       // const result = validate(schema, payload)
       // For now, simple validation
       const valid = payload !== null && payload !== undefined
-      sensor.log(channelId, 'info', 'payload-validated', {
-        valid,
-        hasSchema: !!schema
-      })
 
       return {valid, errors: valid ? undefined : ['Validation failed']}
     } catch (error) {

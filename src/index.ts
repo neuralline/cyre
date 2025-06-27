@@ -78,7 +78,32 @@ CYRE TODO:
     - Natural parent-child relationships
     - Path-based navigation like URLs
     - Cross-branch communication in same instance
-*/
+
+
+    API: most of them follow these apis protocols. 
+
+      keep/Set(id, new) add new entry. keep for main functions, set for state and small functions
+      Get(id string) retrieve by id
+      Forget(id string) remove by id
+      Clear() clear all entries
+      GetAll() retrieve all entries
+
+      //function specific not all should have these
+      Status() // provides status information of the function
+      GetMetrics()  //only few should have this, returns metrics data, optional id
+
+      //system and lifecycle
+      init() // initializes functions that needs init 
+      Reset() // rest the app to default, clear all entries specific to main App
+      Hibernate() // go to sleep. specific to TimeKeeper
+      ShutDown() // clear everything, initiate system shutdown then exit
+
+      action/on/call cyre main methods also know as a channel. they use channel id to communicate to and from.
+
+      outside of these there needs to be priority critical level big table discussion to add new api
+  
+   
+      */
 
 // Import the cyre instance and related utilities from app.ts
 import {cyre} from './app'

@@ -145,7 +145,7 @@ class ProductionApp {
     console.log('🚀 Initializing Production CYRE Application...')
 
     // Initialize CYRE
-    await cyre.initialize({
+    await cyre.init({
       autoSave: true,
       saveKey: 'production-app-state'
     })

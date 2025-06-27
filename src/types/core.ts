@@ -133,8 +133,11 @@ export interface BranchStore {
  * IO interface - Enhanced action configuration with channel organization fields
  */
 export interface IO {
-  /** Unique identifier for this action */
+  /** Unique channel identifier */
   id: string
+
+  /** local channel identifier for this action */
+  localId: string
 
   /** Human-readable name for the channel */
   name?: string

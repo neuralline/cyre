@@ -581,7 +581,7 @@ const runPerformanceAnalysis = async (): Promise<void> => {
 
   try {
     // Initialize CYRE
-    await cyre.initialize()
+    await cyre.init()
 
     // Run diagnostic tests
     console.log('🧪 RUNNING DIAGNOSTIC TESTS...')

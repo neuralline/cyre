@@ -60,7 +60,7 @@ const logResult = (label: string, data: any) => {
 }
 
 async function runComprehensiveExample() {
-  await cyre.initialize()
+  await cyre.init()
 
   logSection('CYRE DATA FLOW ANALYSIS')
 

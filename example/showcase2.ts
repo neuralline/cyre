@@ -672,7 +672,7 @@ async function runComprehensiveShowcase() {
 
   try {
     // Initialize Cyre
-    await cyre.initialize()
+    await cyre.init()
 
     // Run all demonstrations
     await demonstrateHooksIntegration()

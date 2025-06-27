@@ -348,7 +348,7 @@ async function executeAllAttacks() {
 async function main() {
   // Initialize Cyre
   try {
-    await cyre.initialize()
+    await cyre.init()
     console.log('Cyre initialized successfully')
 
     // Execute all stress tests

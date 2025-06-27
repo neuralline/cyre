@@ -21,7 +21,7 @@ async function pathTreeDemo() {
   console.log('🌳 PATH SYSTEM - TREE & HIERARCHICAL CAPABILITIES')
   console.log('='.repeat(60))
 
-  await cyre.initialize()
+  await cyre.init()
 
   // ===========================================
   // EXAMPLE 1: Corporate Organizational Tree

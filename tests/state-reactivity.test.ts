@@ -6,7 +6,7 @@ import {cyre} from '../src/app'
 
 describe('State Reactivity Examples', () => {
   beforeEach(async () => {
-    await cyre.initialize()
+    await cyre.init()
     cyre.clear()
   })
 

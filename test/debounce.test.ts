@@ -11,7 +11,7 @@ import {cyre} from '../src'
 
 describe('Debounce Tests', () => {
   beforeEach(() => {
-    cyre.initialize()
+    cyre.init()
   })
 
   afterEach(() => {

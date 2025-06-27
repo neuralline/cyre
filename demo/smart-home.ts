@@ -538,7 +538,7 @@ const runFunctionalDemo = async () => {
 
   try {
     // Initialize Cyre
-    await cyre.initialize()
+    await cyre.init()
 
     // Setup systems functionally
     const chat = await setupChatSystem()
