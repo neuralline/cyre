@@ -3,9 +3,8 @@
 // File location: demonstrates branch system with real functional TypeScript patterns
 
 import {cyre, useBranch, orchestration} from '../src'
-import {sensor} from '../src/context/metrics-report'
+import {sensor} from '../src/components/sensor'
 import {schedule} from '../src/components/cyre-schedule'
-import type {IO} from '../src/types/core'
 import {Branch} from '../src/types/hooks'
 
 /*
@@ -46,8 +45,8 @@ const initializeSystem = async (): Promise<void> => {
         targets: 'system-health-log',
         payload: () => ({
           timestamp: Date.now(),
-          systemHealth: cyre.getSystemHealth(),
-          performanceState: cyre.getPerformanceState()
+          systemHealth: {},
+          performanceState: {}
         })
       }
     ]
@@ -84,16 +83,14 @@ const createUserManagementBranch = (): Branch => {
   userBranch.action({
     id: 'authenticate',
     required: true,
+    debounce: 1000,
     maxWait: 5000, // Authentication timeout
     payload: null
   })
 
   // Setup event handlers with proper typing and real sensor usage
   userBranch.on('register-user', (userData: typeof UserDataSchema._type) => {
-    sensor.success('user-registration', `User registered: ${userData.email}`, {
-      userId: userData.id,
-      email: userData.email
-    })
+    sensor.success('user-registration', `User registered: ${userData.email}`)
 
     // Trigger welcome flow using actual orchestration
     orchestration.trigger('user-welcome-flow', 'user-registered', {
@@ -117,14 +114,9 @@ const createUserManagementBranch = (): Branch => {
         credentials.email.includes('@') && credentials.password.length >= 8
 
       if (authenticated) {
-        sensor.success('user-authentication', 'Authentication successful', {
-          email: credentials.email
-        })
+        sensor.success('user-authentication', 'Authentication successful')
       } else {
-        sensor.warn('user-authentication', 'Authentication failed', {
-          email: credentials.email,
-          reason: 'Invalid credentials'
-        })
+        sensor.warn('user-authentication', 'Authentication failed')
       }
 
       return {
@@ -164,6 +156,7 @@ const createEcommerceBranch = (): Branch => {
   commerceBranch.action({
     id: 'process-order',
     required: true,
+    debounce: 500,
     maxWait: 10000, // Order processing timeout
     payload: null
   })
@@ -179,10 +172,7 @@ const createEcommerceBranch = (): Branch => {
   commerceBranch.on(
     'add-to-cart',
     (item: {productId: string; quantity: number}) => {
-      sensor.info('shopping-cart', `Item added to cart: ${item.productId}`, {
-        productId: item.productId,
-        quantity: item.quantity
-      })
+      sensor.info('shopping-cart', `Item added to cart: ${item.productId}`)
 
       // Cross-branch call to check inventory
       commerceBranch.call('update-inventory', {
@@ -204,11 +194,7 @@ const createEcommerceBranch = (): Branch => {
     async (orderData: {items: any[]; userId: string}) => {
       sensor.info(
         'order-processing',
-        `Processing order for user: ${orderData.userId}`,
-        {
-          userId: orderData.userId,
-          itemCount: orderData.items.length
-        }
+        `Processing order for user: ${orderData.userId}`
       )
 
       // Trigger order fulfillment orchestration
@@ -223,14 +209,9 @@ const createEcommerceBranch = (): Branch => {
       )
 
       if (fulfillmentResult.ok) {
-        sensor.success('order-fulfillment', 'Order processed successfully', {
-          orderId: fulfillmentResult.result?.orderId,
-          userId: orderData.userId
-        })
+        sensor.success('order-fulfillment', 'Order processed successfully')
       } else {
-        sensor.error('order-fulfillment', fulfillmentResult.message, {
-          userId: orderData.userId
-        })
+        sensor.error('order-fulfillment', fulfillmentResult.message)
       }
 
       return {
@@ -282,11 +263,7 @@ const createNotificationBranch = (): Branch => {
     (broadcast: {message: string; recipients: string[]}) => {
       sensor.info(
         'notification-broadcast',
-        `Broadcasting to ${broadcast.recipients.length} recipients`,
-        {
-          recipientCount: broadcast.recipients.length,
-          message: broadcast.message.substring(0, 50) + '...'
-        }
+        `Broadcasting to ${broadcast.recipients.length} recipients`
       )
 
       // Schedule individual notifications using actual schedule API

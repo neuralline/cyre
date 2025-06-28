@@ -9,7 +9,7 @@ import type {
   SubscriptionResponse
 } from '../types/core'
 import {log} from './cyre-log'
-import {sensor} from '../metrics'
+import {sensor} from './sensor'
 
 /* 
 
@@ -205,19 +205,12 @@ export const subscribe = (
   if (Array.isArray(id)) {
     const result = addMultipleSubscribers(id)
     if (result.ok) {
-      sensor.debug('addMultipleSubscribers', 'Subscription successful', {
-        subscriptionSuccess: true,
-        timestamp: Date.now()
-      })
+      sensor.debug('addMultipleSubscribers', 'Subscription successful')
     } else {
       sensor.error(
         'addMultipleSubscribers',
         result.message,
-        'subscription-failed',
-        {
-          subscriptionFailed: true,
-          reason: result
-        }
+        'subscription-failed'
       )
     }
     return result
@@ -227,29 +220,15 @@ export const subscribe = (
   if (typeof id === 'string' && handler) {
     const result = addSingleSubscriber(id, handler)
     if (result.ok) {
-      sensor.debug('addSingleSubscriber', 'Subscription successful', {
-        subscriptionSuccess: true,
-        timestamp: Date.now()
-      })
+      sensor.debug('addSingleSubscriber', 'Subscription successful')
     } else {
-      sensor.error(
-        'addSingleSubscriber',
-        result.message,
-        'subscription-failed',
-        {
-          subscriptionFailed: true,
-          reason: result
-        }
-      )
+      sensor.error('addSingleSubscriber', result.message, 'subscription-failed')
     }
     return result
   }
 
   // Invalid parameters
-  sensor.error(id, MSG.SUBSCRIPTION_INVALID_PARAMS, '.on/subscribe', {
-    subscriptionFailed: true,
-    reason: 'unknown fields'
-  })
+  sensor.error(id, MSG.SUBSCRIPTION_INVALID_PARAMS, '.on/subscribe')
   log.error(MSG.SUBSCRIPTION_INVALID_PARAMS)
   return {
     ok: false,

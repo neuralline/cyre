@@ -3,7 +3,7 @@
 
 import {pathEngine, type PathMatch} from './path-engine'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 
 /*
 
@@ -126,9 +126,7 @@ const callByExactPath = async (
 ): Promise<PathCallResult[]> => {
   // Validate that path contains no wildcards
   if (exactPath.includes('*')) {
-    sensor.log('path-system', 'error', 'wildcard-in-exact-call', {
-      path: exactPath
-    })
+    sensor.debug('path-system', 'error', 'wildcard-in-exact-call')
 
     return [
       {
@@ -156,9 +154,7 @@ const callByExactPath = async (
     const matches = pathEngine.match(exactPath)
 
     if (matches.length === 0) {
-      sensor.log('path-system', 'info', 'exact-path-not-found', {
-        path: exactPath
-      })
+      sensor.debug('path-system', 'info', 'exact-path-not-found')
 
       return [
         {
@@ -171,10 +167,7 @@ const callByExactPath = async (
     }
 
     if (matches.length > 1) {
-      sensor.log('path-system', 'warn', 'multiple-channels-same-path', {
-        path: exactPath,
-        channelCount: matches.length
-      })
+      sensor.debug('path-system', 'warn', 'multiple-channels-same-path')
     }
 
     // Execute calls to all channels at this exact path
@@ -214,11 +207,7 @@ const callByExactPath = async (
       })
     )
 
-    sensor.log('path-system', 'success', 'exact-path-call-complete', {
-      path: exactPath,
-      totalCalls: results.length,
-      successfulCalls: results.filter(r => r.ok).length
-    })
+    sensor.debug('path-system', 'success', 'exact-path-call-complete')
 
     return results
   } catch (error) {
@@ -256,9 +245,7 @@ const bulkCallByPattern = async (
     const matches = pathEngine.match(pattern)
 
     if (matches.length === 0) {
-      sensor.log('path-system', 'info', 'bulk-call-no-matches', {
-        pattern
-      })
+      sensor.debug('path-system', 'info', 'bulk-call-no-matches')
 
       return {
         ok: false,
@@ -272,11 +259,7 @@ const bulkCallByPattern = async (
 
     // Safety checks
     if (!force && matches.length > maxChannels) {
-      sensor.log('path-system', 'warn', 'bulk-call-exceeds-limit', {
-        pattern,
-        matchCount: matches.length,
-        maxChannels
-      })
+      sensor.debug('path-system', 'warn', 'bulk-call-exceeds-limit')
 
       return {
         ok: false,
@@ -291,10 +274,7 @@ const bulkCallByPattern = async (
     // Large operation confirmation - CRITICAL SECURITY CHECK
     if (!force && confirmLargeOperation && matches.length > 5) {
       // Lowered threshold for security
-      sensor.log('path-system', 'warn', 'bulk-call-large-operation', {
-        pattern,
-        matchCount: matches.length
-      })
+      sensor.debug('path-system', 'warn', 'bulk-call-large-operation')
 
       return {
         ok: false,
@@ -308,11 +288,7 @@ const bulkCallByPattern = async (
 
     // Additional safety check - require BOTH force AND confirmation disabled for large ops
     if (!force && matches.length > 5) {
-      sensor.log('path-system', 'error', 'bulk-call-security-block', {
-        pattern,
-        matchCount: matches.length,
-        securityViolation: true
-      })
+      sensor.debug('path-system', 'error', 'bulk-call-security-block')
 
       return {
         ok: false,
@@ -351,12 +327,7 @@ const bulkCallByPattern = async (
       }
     }
 
-    sensor.log('path-system', 'info', 'bulk-call-start', {
-      pattern,
-      matchCount: matches.length,
-      maxChannels,
-      force
-    })
+    sensor.debug('path-system', 'info', 'bulk-call-start')
 
     // Execute bulk calls
     const results = await Promise.all(
@@ -399,13 +370,6 @@ const bulkCallByPattern = async (
 
     const successfulCalls = results.filter(r => r.ok).length
     const failedCalls = results.length - successfulCalls
-
-    sensor.log('path-system', 'success', 'bulk-call-complete', {
-      pattern,
-      totalCalls: results.length,
-      successfulCalls,
-      failedCalls
-    })
 
     return {
       ok: successfulCalls > 0,
@@ -468,12 +432,6 @@ const subscribeByPath = async (
     const resolvedSubscriptions = await Promise.all(subscriptions)
     const successfulSubs = resolvedSubscriptions.filter(sub => sub.ok)
 
-    sensor.log('path-system', 'info', 'path-subscription', {
-      pattern: pathPattern,
-      totalMatches: matches.length,
-      successfulSubscriptions: successfulSubs.length
-    })
-
     return {
       ok: successfulSubs.length > 0,
       message: `Subscribed to ${successfulSubs.length}/${matches.length} channels`,
@@ -500,10 +458,7 @@ const subscribeByPath = async (
 const findByPath = (pathPattern: string): PathMatch[] => {
   try {
     const matches = pathEngine.match(pathPattern)
-    sensor.log('path-system', 'info', 'path-find', {
-      pattern: pathPattern,
-      matchCount: matches.length
-    })
+
     return matches
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)

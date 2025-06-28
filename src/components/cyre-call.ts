@@ -2,7 +2,7 @@
 
 import {useDispatch} from './cyre-dispatch'
 import {TimeKeeper} from './cyre-timekeeper'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import type {IO, ActionPayload, CyreResponse} from '../types/core'
 import {executePipeline} from '../schema/compile-pipeline'
 import payloadState from '../context/payload-state'

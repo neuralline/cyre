@@ -2,7 +2,7 @@
 // Comprehensive test of CYRE's unique features: debounce, repeat, intralink, delay
 
 import {cyre} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 /*
     CYRE Advanced Features Performance Test

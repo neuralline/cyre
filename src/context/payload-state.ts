@@ -4,7 +4,7 @@
 import type {ActionPayload, StateKey} from '../types/core'
 import {createStore} from './create-store'
 import {log} from '../components/cyre-log'
-import {sensor} from './metrics-report'
+import {sensor} from '../components/sensor'
 import {isEqual} from '../libs/utils'
 import {PAYLOAD_CONFIG} from '../config/cyre-config'
 
@@ -360,7 +360,6 @@ export const payloadState = {
       entry.metadata.frozen = true
       payloadStore.set(channelId, entry)
 
-      sensor.log(channelId, 'info', 'payload-frozen')
       return true
     } catch (error) {
       log.error(`Failed to freeze payload for ${channelId}: ${error}`)
@@ -379,7 +378,6 @@ export const payloadState = {
       entry.metadata.frozen = false
       payloadStore.set(channelId, entry)
 
-      sensor.log(channelId, 'info', 'payload-unfrozen')
       return true
     } catch (error) {
       log.error(`Failed to unfreeze payload for ${channelId}: ${error}`)

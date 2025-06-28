@@ -1,3 +1,4 @@
+import {sensor} from '../components/sensor'
 // src/context/metrics-state.ts
 // Metrics state with breathing system integration
 
@@ -405,21 +406,20 @@ export type {MetricsState, StateKey}
 export const calculateSystemStress = async (): Promise<number> => {
   try {
     // Use dynamic ES module import to avoid circular dependency
-    const {metrics} = await import('../metrics/integration.js')
-    const systemMetrics = metrics.getSystemMetrics()
+    // const systemMetrics = metrics.getSystemMetrics()
 
     // Simple stress calculation based on available metrics
-    const callRateStress = Math.min(systemMetrics.callRate / 100, 1) // 100 calls/sec = 100% stress
-    const errorRateStress =
-      systemMetrics.totalErrors > 0
-        ? Math.min(
-            (systemMetrics.totalErrors /
-              Math.max(systemMetrics.totalCalls, 1)) *
-              10,
-            1
-          )
-        : 0
-    const uptimeStress = systemMetrics.uptime > 0 ? 0 : 0.2 // No uptime = some stress
+    // const callRateStress = Math.min(systemMetrics.callRate / 100, 1) // 100 calls/sec = 100% stress
+    // const errorRateStress =
+    //   systemMetrics.totalErrors > 0
+    //     ? Math.min(
+    //         (systemMetrics.totalErrors /
+    //           Math.max(systemMetrics.totalCalls, 1)) *
+    //           10,
+    //         1
+    //       )
+    //     : 0
+    // const uptimeStress = systemMetrics.uptime > 0 ? 0 : 0.2 // No uptime = some stress
 
     // Combined stress calculation
     const combinedStress = Math.min(
@@ -461,19 +461,12 @@ export const updateBreathingFromMetrics = async (): Promise<void> => {
     const breathing = metricsState.get().breathing
     if (stress > BREATHING.STRESS.HIGH) {
       // Get metrics safely
-      const {metrics} = await import('../metrics/integration.js')
-      const systemMetrics = metrics.getSystemMetrics()
 
-      // Import sensor safely
-      const {sensor} = await import('../context/metrics-report.js')
+      // const systemMetrics = metrics.getSystemMetrics()
+
       sensor.warn(
         'system',
-        `High stress detected: ${(stress * 100).toFixed(1)}%`,
-        {
-          callRate: systemMetrics.callRate,
-          totalErrors: systemMetrics.totalErrors,
-          breathingRate: newRate
-        }
+        `High stress detected: ${(stress * 100).toFixed(1)}%`
       )
     }
   } catch (error) {

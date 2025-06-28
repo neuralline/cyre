@@ -2,7 +2,7 @@
 // Schema validation with proper method chaining and pipe functionality
 
 import type {ActionPayload} from '../types/core'
-import {sensor} from '../metrics'
+import {sensor} from '../components/sensor'
 
 /*
 

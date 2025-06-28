@@ -5,7 +5,7 @@ import {subscribers, io} from '../context/state'
 import {ActionPayload, CyreResponse, IO} from '../types/core'
 import {MSG} from '../config/cyre-config'
 import {log} from './cyre-log'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import payloadState from '../context/payload-state'
 
 /*

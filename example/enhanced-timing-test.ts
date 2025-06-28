@@ -2,7 +2,7 @@
 // Enhanced test to better analyze CYRE timing issues
 
 import {cyre} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 

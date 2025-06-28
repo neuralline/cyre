@@ -4,7 +4,7 @@
 import {createBranch} from '../src/hooks/create-branch'
 import type {Branch} from '../src/types/branch'
 import type {IO} from '../src/types/core'
-import {sensor} from '../src/context/metrics-report'
+import {sensor} from '../src/components/sensor'
 import {executeTalent} from '../src/schema/talent-definitions'
 import {dataDefinitions} from '../src/schema/data-definitions'
 import {orchestration} from '../src'

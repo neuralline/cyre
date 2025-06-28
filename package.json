@@ -84,8 +84,8 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "bun run clean && bun run build:types && bun run build:esm && bun run build:cjs",
-    "build:vite": " bun run clean &&  vite build &&  vite build:types ",
+    "build": "bun run clean && bun run build:types && bun run build:esm ",
+    "build:vite": "   vite build ",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
     "build:esm": "bun build ./src/index.ts --outdir ./dist --format esm --splitting --chunk-naming '[name]-[hash].js'",
     "build:cjs": "bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs",
@@ -96,7 +96,6 @@
     "test:coverage": "bun test --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "bun run typecheck",
-    "prepublishOnly": "bun run build && bun run test",
     "benchmark": "bun run example/industry-standard-tests.ts",
     "dev": "tsx scripts/cyre-server.ts"
   },

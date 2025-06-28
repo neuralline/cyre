@@ -13,7 +13,7 @@ import type {
   TaskFilter
 } from '../types/timeline'
 import {metricsState} from '../context/metrics-state'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import {TimeKeeper} from './cyre-timekeeper'
 
 /*
@@ -157,15 +157,6 @@ const executeTrigger = async (
   const startTime = performance.now()
 
   try {
-    sensor.log(task.id, 'info', 'task-trigger-execution', {
-      triggerId: context.triggerId,
-      triggerType: trigger.time
-        ? 'time'
-        : trigger.interval
-        ? 'interval'
-        : 'other'
-    })
-
     let results: any[] = []
 
     // Execute channels if specified
@@ -219,18 +210,6 @@ const executeTrigger = async (
         nextExecution = Date.now() + trigger.interval
       }
     }
-
-    sensor.log(
-      task.id,
-      allSuccessful ? 'success' : 'error',
-      'task-trigger-complete',
-      {
-        duration,
-        channelCount: trigger.channels?.length || 0,
-        orchestrationId: trigger.orchestration,
-        nextExecution
-      }
-    )
 
     return {
       ok: allSuccessful,
@@ -287,10 +266,6 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
           if (task.breathing?.adaptToStress) {
             const breathing = metricsState.get().breathing
             if (breathing.stress > (task.breathing.pauseThreshold || 0.9)) {
-              sensor.log(task.id, 'info', 'task-paused-stress', {
-                stress: breathing.stress,
-                threshold: task.breathing.pauseThreshold
-              })
               return
             }
           }
@@ -306,7 +281,7 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
             })
 
             if (!conditionsMet) {
-              sensor.log(task.id, 'skip', 'task-conditions-not-met')
+              sensor.debug(task.id, 'skip', 'task-conditions-not-met')
               return
             }
           }
@@ -327,7 +302,7 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
           // Handle result
           if (!result.ok && result.shouldRetry && task.retry?.enabled) {
             // Schedule retry (could implement retry logic here)
-            sensor.log(task.id, 'info', 'task-retry-scheduled')
+            sensor.debug(task.id, 'info', 'task-retry-scheduled')
           }
 
           // Schedule next execution if needed
@@ -343,12 +318,7 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
 
       if (timerResult.ok === 'ok') {
         timerIds.push(triggerId)
-        sensor.log(task.id, 'info', 'task-trigger-scheduled', {
-          triggerId,
-          delay,
-          repeat,
-          nextExecution
-        })
+        sensor.debug(task.id, 'info', 'task-trigger-scheduled')
       } else {
         sensor.error(
           task.id,
@@ -437,11 +407,7 @@ export const schedule = {
       taskTimers.set(task.id, timerIds)
       triggerRegistry.set(task.id, task.triggers)
 
-      sensor.log(task.id, 'success', 'task-scheduled', {
-        triggerCount: task.triggers.length,
-        timerCount: timerIds.length,
-        type: task.type
-      })
+      sensor.debug(task.id, 'success', 'task-scheduled')
 
       return {
         ok: true,
@@ -562,7 +528,6 @@ export const schedule = {
       activeTasks.delete(taskId)
       triggerRegistry.delete(taskId)
 
-      sensor.log(taskId, 'info', 'task-cancelled')
       return true
     } catch (error) {
       sensor.error(taskId, String(error), 'task-cancel-error')
@@ -575,7 +540,6 @@ export const schedule = {
       const timerIds = taskTimers.get(taskId)
       if (timerIds) {
         timerIds.forEach(timerId => TimeKeeper.pause(timerId))
-        sensor.log(taskId, 'info', 'task-paused')
         return true
       }
       return false
@@ -589,7 +553,6 @@ export const schedule = {
       const timerIds = taskTimers.get(taskId)
       if (timerIds) {
         timerIds.forEach(timerId => TimeKeeper.resume(timerId))
-        sensor.log(taskId, 'info', 'task-resumed')
         return true
       }
       return false

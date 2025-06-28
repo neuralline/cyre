@@ -1,7 +1,7 @@
 // example/cyre-accurate-performance-test.ts
 
 import {cyre} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 /* 
     CYRE Accurate Performance Analysis

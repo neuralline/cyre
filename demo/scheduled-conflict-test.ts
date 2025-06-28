@@ -1,4 +1,4 @@
-// scheduled-conflict-test.ts
+// demo/scheduled-conflict-test.ts
 // Test scheduled task conflicts - where actual conflicts occur in Cyre
 
 import {cyre} from '../src'

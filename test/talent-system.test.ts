@@ -41,7 +41,7 @@ vi.mock('../src/context/metrics-state', () => ({
   }
 }))
 
-vi.mock('../src/context/metrics-report', () => ({
+vi.mock('../src/components/sensor', () => ({
   sensor: {
     log: vi.fn(),
     error: vi.fn()

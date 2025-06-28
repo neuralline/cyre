@@ -36,7 +36,9 @@ export default [
   {
     // Ignore certain files/directories
     ignores: [
-      'dist/**/*',
+      'dist/*',
+      'dev/*',
+      'server/**/*',
       'node_modules/**/*',
       'coverage/**/*',
       '**/*.test.ts',

@@ -2,7 +2,7 @@
 // Quick validation to ensure our calculations and sensor readings are accurate
 
 import {cyre} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 /*
     CYRE Sensor Accuracy Validation

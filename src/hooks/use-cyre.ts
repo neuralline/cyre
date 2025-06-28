@@ -5,7 +5,7 @@
 import type {IO, EventHandler, ActionPayload} from '../types/core'
 import type {CyreInstance, UseCyreConfig, CyreChannel} from '../types/hooks'
 import {cyre} from '../app'
-import {sensor} from '../metrics'
+import {sensor} from '../components/sensor'
 
 /**
  * Beautiful simple single channel management
@@ -50,19 +50,6 @@ export function useCyre<TPayload = ActionPayload>(
 
   const channelName = finalConfig.name || channelId
 
-  sensor.log(channelId, 'info', 'useCyre-creating', {
-    channelId,
-    channelName,
-    hasThrottle: !!finalConfig.throttle,
-    hasDebounce: !!finalConfig.debounce,
-    hasTalents: !!(
-      finalConfig.schema ||
-      finalConfig.condition ||
-      finalConfig.transform ||
-      finalConfig.selector
-    )
-  })
-
   // Build core action config - clean and simple
   const actionConfig: IO = {
     id: channelId,
@@ -102,12 +89,6 @@ export function useCyre<TPayload = ActionPayload>(
     sensor.error(channelId, error, 'useCyre-registration-failed')
   }
 
-  sensor.log(channelId, 'success', 'useCyre-created', {
-    channelId,
-    channelName,
-    message: registrationResult.message
-  })
-
   // Build simple channel interface
   const channel: CyreChannel<TPayload> = {
     id: channelId,
@@ -118,26 +99,10 @@ export function useCyre<TPayload = ActionPayload>(
         // Use the same instance for everything!
         const subscription = targetInstance.on(channelId, handler)
 
-        sensor.log(
-          channelId,
-          subscription.ok ? 'success' : 'error',
-          'useCyre-subscription',
-          {
-            channelName,
-            success: subscription.ok,
-            message: subscription.message
-          }
-        )
-
         return {
           ...subscription,
           unsubscribe: () => {
             const result = targetInstance.forget(channelId)
-
-            sensor.log(channelId, 'info', 'useCyre-unsubscribe', {
-              channelName,
-              success: result
-            })
 
             return result
           }
@@ -157,24 +122,8 @@ export function useCyre<TPayload = ActionPayload>(
 
     call: async (payload?: TPayload) => {
       try {
-        sensor.log(channelId, 'call', 'useCyre-calling', {
-          channelName,
-          hasPayload: payload !== undefined
-        })
-
         // Use the same instance for everything!
         const result = await targetInstance.call(channelId, payload)
-
-        sensor.log(
-          channelId,
-          result.ok ? 'success' : 'error',
-          'useCyre-call-complete',
-          {
-            channelName,
-            success: result.ok,
-            message: result.message
-          }
-        )
 
         return result
       } catch (error) {
@@ -249,10 +198,6 @@ export function useCyre<TPayload = ActionPayload>(
 
         if (updateResult.ok) {
           finalConfig = updatedConfig
-          sensor.log(channelId, 'success', 'useCyre-updated', {
-            channelName,
-            updatedFields: Object.keys(newConfig)
-          })
         } else {
           sensor.error(channelId, updateResult.message, 'useCyre-update-failed')
         }
@@ -286,9 +231,7 @@ export function useCyre<TPayload = ActionPayload>(
         const result = targetInstance.forget(channelId)
 
         if (result) {
-          sensor.log(channelId, 'info', 'useCyre-destroyed', {
-            channelName
-          })
+          sensor.info(channelId, 'info', 'useCyre-destroyed')
         }
 
         return result

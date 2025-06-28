@@ -1,7 +1,7 @@
 // src/components/cyre-actions.ts
 // Streamlined action registration with compile-pipeline integration
 
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import type {IO} from '../types/core'
 import payloadState from '../context/payload-state'
 import {log} from './cyre-log'

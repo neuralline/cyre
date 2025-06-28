@@ -4,7 +4,7 @@
 import {performance} from 'perf_hooks'
 import {cpus, totalmem, platform, arch} from 'os'
 import {cyre, schema} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 /*
 

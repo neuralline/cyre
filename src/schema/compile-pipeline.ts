@@ -2,7 +2,7 @@
 
 import type {IO, ChannelOperator} from '../types/core'
 import {dataDefinitions} from './data-definitions'
-import {talentOperators} from './talent-definitions' // Import the Map
+import {talentOperators, type TalentFunction} from './talent-definitions' // Import the Map and type
 
 export const compileAction = (
   action: Partial<IO>
@@ -95,7 +95,7 @@ export const compileAction = (
   }
 
   // RUST-STYLE OPTIMIZATION: Pre-compile function references into _pipeline
-  let compiledPipeline: Array<(action: IO, payload: any) => any> | undefined
+  let compiledPipeline: TalentFunction[] | undefined
 
   if (processingPipeline.length > 0) {
     // Pre-compile function references for maximum hot path performance

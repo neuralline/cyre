@@ -1,7 +1,7 @@
 // example/cyre-extreme-test.ts
 
 import {cyre} from '../src'
-import {metricsReport} from '../src/context/metrics-report'
+import {metricsReport} from '../src/components/sensor'
 
 /* 
     Neural Line

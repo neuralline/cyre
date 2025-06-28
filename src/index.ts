@@ -112,7 +112,7 @@ import {useCyre} from './hooks/use-cyre'
 import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
 import {log} from './components/cyre-log'
-import {metrics} from './metrics/integration'
+import {metrics} from '../dev/integration'
 
 // Import schema system
 

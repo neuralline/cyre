@@ -2,6 +2,7 @@
 // IO: channel interface with additional
 
 import {Schema} from '../schema/cyre-schema'
+import type {TalentFunction} from '../schema/talent-definitions'
 
 export type * from './timer'
 export type * from './orchestration'
@@ -137,7 +138,7 @@ export interface IO {
   id: string
 
   /** local channel identifier for this action */
-  localId: string
+  localId?: string
 
   /** Human-readable name for the channel */
   name?: string
@@ -212,7 +213,7 @@ export interface IO {
   /** True if action has no protections and can use fast path */
   _hasFastPath?: boolean
   /** save Pre-compiled channel operators list here */
-  _pipeline?: ChannelOperator[]
+  _pipeline?: TalentFunction[]
   /** Active debounce timer ID */
   _debounceTimer?: string
 

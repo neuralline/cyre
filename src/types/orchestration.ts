@@ -29,6 +29,8 @@ export interface OrchestrationTrigger {
   debounce?: number
   throttle?: number
   enabled?: boolean
+  repeat?: boolean | number
+  delay?: number
 }
 
 export interface WorkflowStep {

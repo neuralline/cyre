@@ -7,22 +7,18 @@ import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
-import {sensor} from './context/metrics-report'
+import {sensor} from './components/sensor'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 
-import {groupOperations, removeChannelFromGroups} from './components/cyre-group'
 import payloadState from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
-import {query} from './query/cyre-query'
 import type {OrchestrationConfig} from './types/orchestration'
 
 import {schedule} from './components/cyre-schedule'
 import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
-import {dev} from './dev/dev'
-import {metrics} from './metrics'
 import {useDispatch} from './components/cyre-dispatch'
 
 /* 
@@ -80,9 +76,11 @@ let sysInitialize = false
 /**
  * Initialize with standardized system intelligence
  */
-const init = async (
-  config: CyreConfig = {}
-): Promise<{ok: boolean; payload: number; message: string}> => {
+const init = async (): Promise<{
+  ok: boolean
+  payload: number | null
+  message: string
+}> => {
   try {
     if (sysInitialize || metricsState._init) {
       log.sys('System already initialized')
@@ -112,7 +110,7 @@ const init = async (
     log.critical(`Cyre failed to initialize : ${errorMessage}`)
     sensor.critical('system', errorMessage, 'system-initialization')
     shutdown()
-    return {ok: false, payload: undefined, message: errorMessage}
+    return {ok: false, payload: null, message: errorMessage}
   }
 }
 
@@ -257,13 +255,7 @@ export const call = async (
         return {
           ok: false,
           payload: undefined,
-          message: `Throttled - ${remaining}ms remaining`,
-          metadata: {
-            throttled: true,
-            remaining,
-            lastExecTime,
-            elapsed: elapsedSinceLastExec
-          }
+          message: `Throttled - ${remaining}ms remaining`
         }
       }
     }
@@ -331,7 +323,7 @@ export const call = async (
         ok: true,
         payload,
         message: `Debounced - executing in ${action.debounce}ms`,
-        metadata: {debounced: true, delay: action.debounce}
+        metadata: {delay: action.debounce}
       }
     }
 
@@ -369,7 +361,7 @@ const forget = (id: string): boolean => {
     timeline.forget(id)
 
     // Remove from groups
-    removeChannelFromGroups(id)
+    //removeChannelFromGroups(id)
 
     if (actionRemoved || subscriberRemoved) {
       sensor.info(id, 'Action removal successful')
@@ -421,14 +413,14 @@ const reset = (): void => {
     io.clear()
     subscribers.clear()
     timeline.clear()
-    metrics.reset()
+    //metrics.reset()
     metricsState.reset()
     payloadState.clear()
 
     // Clear all groups
-    groupOperations.getAll().forEach(group => {
-      groupOperations.remove(group.id)
-    })
+    // groupOperations.getAll().forEach(group => {
+    //   groupOperations.remove(group.id)
+    // })
 
     // Clear orchestrations
     orchestration.list().forEach(runtime => {
@@ -436,7 +428,7 @@ const reset = (): void => {
     })
 
     // Clear query cache
-    query.cache.clear()
+    // query.cache.clear()
 
     log.success('System cleared')
   } catch (error) {
@@ -455,7 +447,7 @@ export const cyre = Object.freeze({
   call,
   forget,
   clear: reset,
-
+  reset,
   // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
 
@@ -466,12 +458,11 @@ export const cyre = Object.freeze({
     return path.path || ''
   },
   // DEVELOPER EXPERIENCE HELPERS
-  dev,
 
   schedule,
   // ENHANCED METRICS SYSTEM
   // Add metrics interface
-  metrics,
+
   get: (id: string): IO | undefined => io.get(id),
   // Add this to the main cyre object, right before the closing brace
 

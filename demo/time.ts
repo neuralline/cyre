@@ -1,3 +1,5 @@
+// demo/time.ts
+
 import {log} from '../src'
 import TimeKeeper from '../src/components/cyre-timekeeper'
 

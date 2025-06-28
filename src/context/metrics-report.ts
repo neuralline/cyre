@@ -1,2 +1,2 @@
-import {sensor} from './../metrics/sensor'
+import {sensor} from '../components/sensor'
 export {sensor}

@@ -11,7 +11,7 @@ import type {
   ExecutionStrategy,
   ErrorStrategy
 } from '../types/hooks'
-import {sensor} from '../metrics'
+import {sensor} from '../components/sensor'
 
 /**
  * Beautiful simple channel coordination
@@ -50,14 +50,6 @@ export function useGroup<TPayload = ActionPayload>(
     )
   }
 
-  sensor.log(groupId, 'success', 'use-group-created', {
-    groupName,
-    channelCount: channels.length,
-    channelIds: channels.map(c => c.id),
-    strategy,
-    errorStrategy
-  })
-
   /**
    * Execute single channel with timing and error handling
    */
@@ -69,28 +61,9 @@ export function useGroup<TPayload = ActionPayload>(
     const startTime = performance.now()
 
     try {
-      sensor.log(groupId, 'call', 'channel-execution-start', {
-        channelId: channel.id,
-        executionOrder,
-        strategy
-      })
-
       // Execute channel - doesn't matter if it's main, branch, or custom!
       const result = await channel.call(payload)
       const executionTime = performance.now() - startTime
-
-      sensor.log(
-        groupId,
-        result.ok ? 'success' : 'error',
-        'channel-execution-complete',
-        {
-          channelId: channel.id,
-          executionOrder,
-          success: result.ok,
-          executionTime,
-          message: result.message
-        }
-      )
 
       return {
         ...result,
@@ -104,11 +77,7 @@ export function useGroup<TPayload = ActionPayload>(
       const errorMessage =
         error instanceof Error ? error.message : String(error)
 
-      sensor.error(groupId, errorMessage, 'channel-execution-error', {
-        channelId: channel.id,
-        executionOrder,
-        executionTime
-      })
+      sensor.error(groupId, errorMessage, 'channel-execution-error')
 
       return {
         ok: false,
@@ -158,13 +127,6 @@ export function useGroup<TPayload = ActionPayload>(
 
       lastExecutionTime = performance.now() - startTime
       successfulExecutions += results.every(r => r.ok) ? 1 : 0
-
-      sensor.log(groupId, 'success', 'group-execution-complete', {
-        channelCount: activeChannels.length,
-        successful: results.filter(r => r.ok).length,
-        failed: results.filter(r => !r.ok).length,
-        executionTime: lastExecutionTime
-      })
 
       return results
     } catch (error) {
@@ -273,9 +235,7 @@ export function useGroup<TPayload = ActionPayload>(
           try {
             return channel.on!(handler)
           } catch (error) {
-            sensor.error(groupId, String(error), 'group-subscription-error', {
-              channelId: channel.id
-            })
+            sensor.error(groupId, String(error), 'group-subscription-error')
             return {
               ok: false,
               message: `Subscription failed for ${channel.id}`,
@@ -286,12 +246,6 @@ export function useGroup<TPayload = ActionPayload>(
 
       const successful = subscriptions.filter(sub => sub.ok)
 
-      sensor.log(groupId, 'success', 'group-subscription', {
-        totalChannels: activeChannels.length,
-        subscriptionsAttempted: subscriptions.length,
-        subscriptionsSuccessful: successful.length
-      })
-
       return {
         ok: successful.length > 0,
         message: `Subscribed to ${successful.length}/${subscriptions.length} channels`,
@@ -301,11 +255,6 @@ export function useGroup<TPayload = ActionPayload>(
           )
           const successfulUnsubscribes =
             unsubscribeResults.filter(Boolean).length
-
-          sensor.log(groupId, 'info', 'group-unsubscribe', {
-            successful: successfulUnsubscribes,
-            total: subscriptions.length
-          })
 
           return successfulUnsubscribes > 0
         }
@@ -318,22 +267,12 @@ export function useGroup<TPayload = ActionPayload>(
       }
 
       activeChannels.push(channel)
-
-      sensor.log(groupId, 'info', 'channel-added', {
-        channelId: channel.id,
-        totalChannels: activeChannels.length
-      })
     },
 
     forget: (channelId: string) => {
       const index = activeChannels.findIndex(c => c.id === channelId)
       if (index !== -1) {
         activeChannels.splice(index, 1)
-
-        sensor.log(groupId, 'info', 'channel-removed', {
-          channelId,
-          totalChannels: activeChannels.length
-        })
 
         return true
       }

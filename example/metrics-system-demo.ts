@@ -1,7 +1,7 @@
 // example/metrics-system-demo.ts
 // Comprehensive example demonstrating the refined metrics system
 
-import {metricsReport, type RawMetricEvent} from '../src/context/metrics-report'
+import {metricsReport, type RawMetricEvent} from '../src/components/sensor'
 
 /*
 

@@ -2,7 +2,7 @@
 // Updated orchestration engine with clean functional API
 
 import {timeline} from '../context/state'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import {metricsState} from '../context/metrics-state'
 import {call as cyreCall} from '../app'
 import {TimeKeeper} from '../components/cyre-timekeeper'
@@ -104,11 +104,7 @@ const keep = (config: OrchestrationConfig): {ok: boolean; message: string} => {
 
     orchestrationRuntimes.set(config.id, runtime)
 
-    sensor.log(config.id, 'info', 'orchestration-created', {
-      triggers: config.triggers?.length || 0,
-      workflow: config.workflow?.length || 0,
-      actions: config.actions?.length || 0
-    })
+    sensor.info(config.id, 'info', 'orchestration-created')
 
     return {ok: true, message: 'Orchestration created'}
   } catch (error) {
@@ -143,9 +139,7 @@ const activate = (
       runtime.status = 'active'
       orchestrationRuntimes.set(orchestrationId, runtime)
 
-      sensor.log(orchestrationId, 'info', 'orchestration-activated', {
-        triggersRegistered: triggerIds.length
-      })
+      sensor.info(orchestrationId, 'info', 'orchestration-activated')
 
       return {
         ok: true,
@@ -175,7 +169,7 @@ const activate = (
       runtime.triggerIds = []
       orchestrationRuntimes.set(orchestrationId, runtime)
 
-      sensor.log(orchestrationId, 'info', 'orchestration-deactivated')
+      sensor.info(orchestrationId, 'info', 'orchestration-deactivated')
 
       return {ok: true, message: 'Orchestration deactivated'}
     }
@@ -263,7 +257,7 @@ const forget = (orchestrationId: string): boolean => {
   // Remove runtime
   orchestrationRuntimes.delete(orchestrationId)
 
-  sensor.log(orchestrationId, 'info', 'orchestration-forgotten')
+  sensor.debug(orchestrationId, 'info', 'orchestration-forgotten')
   return true
 }
 
@@ -352,19 +346,19 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
         // TODO: Implement condition-based triggers
         // This should periodically evaluate the condition function
         // and trigger orchestration when condition becomes true
-        sensor.warn(config.id, 'condition-trigger-not-implemented', {
-          triggerId,
-          triggerName: trigger.name
-        })
+        sensor.error(config.id, 'condition-trigger-not-implemented')
         break
 
       case 'external':
         // External triggers are handled via the call() method
         // No registration needed
-        sensor.warn(config.id, 'external-trigger-registered', {
+        sensor.warn(
+          'external-trigger-registered',
+          config.id,
           triggerId,
-          triggerName: trigger.name
-        })
+          'warning',
+          {triggerName: trigger.name}
+        )
         break
     }
   })

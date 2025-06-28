@@ -12,7 +12,7 @@ import {metricsState, type MetricsState} from './metrics-state'
 import {payloadState} from './payload-state'
 import type {StateKey} from '../types/core'
 import {createStore} from './create-store'
-import {sensor} from '../metrics'
+import {sensor} from '../components/sensor'
 
 /*
 

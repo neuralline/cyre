@@ -4,7 +4,7 @@
 import type {Timer, TimerDuration, TimerRepeat} from '../types/timer'
 import {TIMING} from '../config/cyre-config'
 import {log} from './cyre-log'
-import {sensor} from '../context/metrics-report'
+import {sensor} from '../components/sensor'
 import {timeline} from '../context/state'
 import {metricsState} from '../context/metrics-state'
 
@@ -368,13 +368,7 @@ const QuartzEngine = {
     // Save to timeline
     getTimeline().add(updatedFormation)
 
-    sensor.debug(updatedFormation.id, 'Next execution scheduled', {
-      baseInterval,
-      adaptedInterval: finalInterval,
-      stressFactor,
-      nextExecutionTime,
-      driftCompensation: previousDrift !== 0
-    })
+    sensor.debug(updatedFormation.id, 'Next execution scheduled')
   },
 
   addToGroups(formation: Timer): void {
