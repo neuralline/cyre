@@ -112,7 +112,7 @@ import {useCyre} from './hooks/use-cyre'
 import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
 import {log} from './components/cyre-log'
-import {metrics} from '../dev/integration'
+//import {metrics} from '../dev/integration'
 
 // Import schema system
 
@@ -127,8 +127,8 @@ export {
   useBranch,
   useCollective,
   orchestration, //advanced task setup// not sure to expose this
-  log, //utility logger function
-  metrics //Cyre stats fro external live stat monitors
+  log //utility logger function
+  // metrics //Cyre stats fro external live stat monitors
 }
 
 // Version information
