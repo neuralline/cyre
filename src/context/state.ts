@@ -189,7 +189,7 @@ export const stores = Object.freeze({
   io: ioStore,
   subscribers: subscriberStore,
   timeline: timelineStore,
-  quantum: metricsState,
+  //quantum: metricsState,
   branch: branchStore
 })
 

@@ -508,11 +508,12 @@ export const TimeKeeper = {
     return new Promise((resolve, reject) => {
       const result = TimeKeeper.keep(
         duration,
-        () => {
+        async () => {
           TimeKeeper.forget(id)
           resolve()
+          return undefined // ✅ Explicit return for consistency
         },
-        1, // Execute once
+        1,
         id
       )
 

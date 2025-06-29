@@ -13,12 +13,11 @@
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@types/bun": "latest",
-    "@types/node": "^24.0.4",
+    "@types/node": "^24.0.7",
     "@typescript-eslint/eslint-plugin": "^8.35.0",
     "@typescript-eslint/parser": "^8.35.0",
     "@vitest/coverage-v8": "^3.2.4",
-    "autocannon": "^8.0.0",
-    "eslint": "^9.29.0",
+    "eslint": "^9.30.0",
     "rimraf": "^6.0.1",
     "rollup-plugin-dts": "^6.2.1",
     "terser": "^5.43.1",
@@ -32,39 +31,17 @@
   },
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
-    },
-    "./hooks": {
-      "import": "./dist/hooks/index.js",
-      "types": "./dist/hooks/index.d.ts"
-    },
-    "./schema": {
-      "import": "./dist/schema/index.js",
-      "types": "./dist/schema/index.d.ts"
-    },
-    "./stream": {
-      "import": "./dist/stream/index.js",
-      "types": "./dist/stream/index.d.ts"
-    },
-    "./state-machine": {
-      "import": "./dist/state-machine/index.js",
-      "types": "./dist/state-machine/index.d.ts"
+      "require": "./dist/index.cjs"
     }
   },
   "bugs": {
     "url": "https://github.com/neuralline/cyre/issues"
   },
-  "bundlesize": [
-    {
-      "path": "./dist/index.js",
-      "maxSize": "50kb"
-    }
-  ],
   "description": "Neural Line - Reactive event manager with zero dependencies",
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=20.0.0",
     "bun": ">=1.0.0"
   },
   "files": [
@@ -84,10 +61,10 @@
   ],
   "license": "MIT",
   "scripts": {
-    "build": "bun run clean && bun run build:types && bun run build:esm ",
-    "build:vite": "   vite build ",
+    "build": "bun run clean && bun run build:types && bun run build:esm",
+    "build:vite": "vite build",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
-    "build:esm": "bun build ./src/index.ts --outdir ./dist --format esm --splitting --chunk-naming '[name]-[hash].js'",
+    "build:esm": "bun build ./src/index.ts --outfile ./dist/index.js --format esm",
     "build:cjs": "bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs",
     "clean": "rm -rf dist",
     "test": "bun test",

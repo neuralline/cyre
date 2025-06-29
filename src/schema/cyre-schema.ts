@@ -17,14 +17,14 @@ import {sensor} from '../components/sensor'
 
 */
 
-// Core validation types
+// Core validation types with proper type inference
 export type ValidationResult<T = unknown> =
   | {ok: true; data: T}
   | {ok: false; errors: string[]}
 
 export type Validator<T = unknown> = (value: unknown) => ValidationResult<T>
 
-// Schema builder with type inference
+// Schema builder with proper type inference for optional/nullable
 export interface Schema<T = unknown> {
   (value: unknown): ValidationResult<T>
   optional(): Schema<T | undefined>
@@ -41,8 +41,8 @@ export interface NumberSchema extends Schema<number> {
   max(maxVal: number): NumberSchema
   int(): NumberSchema
   positive(): NumberSchema
-  optional(): NumberSchema
-  nullable(): NumberSchema
+  optional(): Schema<number | undefined>
+  nullable(): Schema<number | null>
   default(value: number): NumberSchema
   transform<U>(fn: (value: number) => U): Schema<U>
   refine(fn: (value: number) => boolean, message?: string): NumberSchema
@@ -56,8 +56,8 @@ export interface StringSchema extends Schema<string> {
   pattern(regex: RegExp): StringSchema
   email(): StringSchema
   url(): StringSchema
-  optional(): StringSchema
-  nullable(): StringSchema
+  optional(): Schema<string | undefined>
+  nullable(): Schema<string | null>
   default(value: string): StringSchema
   transform<U>(fn: (value: string) => U): Schema<U>
   refine(fn: (value: string) => boolean, message?: string): StringSchema
@@ -68,22 +68,29 @@ const createSchema = <T>(validator: Validator<T>): Schema<T> => {
   const schema = validator as Schema<T>
 
   schema.optional = () =>
-    createSchema<T | undefined>(value =>
-      value === undefined ? {ok: true, data: undefined} : validator(value)
+    createSchema<T | undefined>(
+      (value): ValidationResult<T | undefined> =>
+        value === undefined
+          ? {ok: true, data: undefined}
+          : (validator(value) as ValidationResult<T | undefined>)
     )
 
   schema.nullable = () =>
-    createSchema<T | null>(value =>
-      value === null ? {ok: true, data: null} : validator(value)
+    createSchema<T | null>(
+      (value): ValidationResult<T | null> =>
+        value === null
+          ? {ok: true, data: null}
+          : (validator(value) as ValidationResult<T | null>)
     )
 
   schema.default = (defaultValue: T) =>
-    createSchema<T>(value =>
-      value === undefined ? {ok: true, data: defaultValue} : validator(value)
+    createSchema<T>(
+      (value): ValidationResult<T> =>
+        value === undefined ? {ok: true, data: defaultValue} : validator(value)
     )
 
   schema.transform = <U>(fn: (value: T) => U) =>
-    createSchema<U>(value => {
+    createSchema<U>((value): ValidationResult<U> => {
       const result = validator(value)
       if (!result.ok) return result
       try {
@@ -94,7 +101,7 @@ const createSchema = <T>(validator: Validator<T>): Schema<T> => {
     })
 
   schema.refine = (fn: (value: T) => boolean, message = 'Validation failed') =>
-    createSchema<T>(value => {
+    createSchema<T>((value): ValidationResult<T> => {
       const result = validator(value)
       if (!result.ok) return result
       return fn(result.data) ? result : {ok: false, errors: [message]}
@@ -108,7 +115,7 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
   const baseSchema = createSchema(validator)
   const numberSchema = Object.assign(baseSchema, {
     min: (minVal: number): NumberSchema =>
-      createNumberSchema(value => {
+      createNumberSchema((value): ValidationResult<number> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data >= minVal
@@ -117,7 +124,7 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
       }),
 
     max: (maxVal: number): NumberSchema =>
-      createNumberSchema(value => {
+      createNumberSchema((value): ValidationResult<number> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data <= maxVal
@@ -126,7 +133,7 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
       }),
 
     int: (): NumberSchema =>
-      createNumberSchema(value => {
+      createNumberSchema((value): ValidationResult<number> => {
         const result = validator(value)
         if (!result.ok) return result
         return Number.isInteger(result.data)
@@ -135,7 +142,7 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
       }),
 
     positive: (): NumberSchema =>
-      createNumberSchema(value => {
+      createNumberSchema((value): ValidationResult<number> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data > 0
@@ -143,24 +150,33 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
           : {ok: false, errors: ['Must be positive']}
       }),
 
-    // Override base methods to maintain NumberSchema type
-    optional: (): NumberSchema =>
-      createNumberSchema(value =>
-        value === undefined ? {ok: true, data: undefined} : validator(value)
-      ) as any,
+    // Override base methods to maintain proper types
+    optional: (): Schema<number | undefined> =>
+      createSchema<number | undefined>(
+        (value): ValidationResult<number | undefined> =>
+          value === undefined
+            ? {ok: true, data: undefined}
+            : (validator(value) as ValidationResult<number | undefined>)
+      ),
 
-    nullable: (): NumberSchema =>
-      createNumberSchema(value =>
-        value === null ? {ok: true, data: null} : validator(value)
-      ) as any,
+    nullable: (): Schema<number | null> =>
+      createSchema<number | null>(
+        (value): ValidationResult<number | null> =>
+          value === null
+            ? {ok: true, data: null}
+            : (validator(value) as ValidationResult<number | null>)
+      ),
 
     default: (defaultValue: number): NumberSchema =>
-      createNumberSchema(value =>
-        value === undefined ? {ok: true, data: defaultValue} : validator(value)
+      createNumberSchema(
+        (value): ValidationResult<number> =>
+          value === undefined
+            ? {ok: true, data: defaultValue}
+            : validator(value)
       ),
 
     transform: <U>(fn: (value: number) => U): Schema<U> =>
-      createSchema<U>(value => {
+      createSchema<U>((value): ValidationResult<U> => {
         const result = validator(value)
         if (!result.ok) return result
         try {
@@ -174,7 +190,7 @@ const createNumberSchema = (validator: Validator<number>): NumberSchema => {
       fn: (value: number) => boolean,
       message = 'Validation failed'
     ): NumberSchema =>
-      createNumberSchema(value => {
+      createNumberSchema((value): ValidationResult<number> => {
         const result = validator(value)
         if (!result.ok) return result
         return fn(result.data) ? result : {ok: false, errors: [message]}
@@ -189,7 +205,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
   const baseSchema = createSchema(validator)
   const stringSchema = Object.assign(baseSchema, {
     len: (len: number): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data.length === len
@@ -198,7 +214,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       }),
 
     minLength: (len: number): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data.length >= len
@@ -207,7 +223,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       }),
 
     maxLength: (len: number): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         return result.data.length <= len
@@ -216,7 +232,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       }),
 
     pattern: (regex: RegExp): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         return regex.test(result.data)
@@ -225,7 +241,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       }),
 
     email: (): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -235,7 +251,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       }),
 
     url: (): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         try {
@@ -246,24 +262,33 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
         }
       }),
 
-    // Override base methods to maintain StringSchema type
-    optional: (): StringSchema =>
-      createStringSchema(value =>
-        value === undefined ? {ok: true, data: undefined} : validator(value)
-      ) as any,
+    // Override base methods to maintain proper types
+    optional: (): Schema<string | undefined> =>
+      createSchema<string | undefined>(
+        (value): ValidationResult<string | undefined> =>
+          value === undefined
+            ? {ok: true, data: undefined}
+            : (validator(value) as ValidationResult<string | undefined>)
+      ),
 
-    nullable: (): StringSchema =>
-      createStringSchema(value =>
-        value === null ? {ok: true, data: null} : validator(value)
-      ) as any,
+    nullable: (): Schema<string | null> =>
+      createSchema<string | null>(
+        (value): ValidationResult<string | null> =>
+          value === null
+            ? {ok: true, data: null}
+            : (validator(value) as ValidationResult<string | null>)
+      ),
 
     default: (defaultValue: string): StringSchema =>
-      createStringSchema(value =>
-        value === undefined ? {ok: true, data: defaultValue} : validator(value)
+      createStringSchema(
+        (value): ValidationResult<string> =>
+          value === undefined
+            ? {ok: true, data: defaultValue}
+            : validator(value)
       ),
 
     transform: <U>(fn: (value: string) => U): Schema<U> =>
-      createSchema<U>(value => {
+      createSchema<U>((value): ValidationResult<U> => {
         const result = validator(value)
         if (!result.ok) return result
         try {
@@ -277,7 +302,7 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
       fn: (value: string) => boolean,
       message = 'Validation failed'
     ): StringSchema =>
-      createStringSchema(value => {
+      createStringSchema((value): ValidationResult<string> => {
         const result = validator(value)
         if (!result.ok) return result
         return fn(result.data) ? result : {ok: false, errors: [message]}
@@ -289,62 +314,75 @@ const createStringSchema = (validator: Validator<string>): StringSchema => {
 
 // Primitive validators
 export const string = (): StringSchema =>
-  createStringSchema(value =>
-    typeof value === 'string'
-      ? {ok: true, data: value}
-      : {ok: false, errors: ['Expected string']}
+  createStringSchema(
+    (value): ValidationResult<string> =>
+      typeof value === 'string'
+        ? {ok: true, data: value}
+        : {ok: false, errors: ['Expected string']}
   )
 
 export const number = (): NumberSchema =>
-  createNumberSchema(value =>
-    typeof value === 'number' && !isNaN(value)
-      ? {ok: true, data: value}
-      : {ok: false, errors: ['Expected number']}
+  createNumberSchema(
+    (value): ValidationResult<number> =>
+      typeof value === 'number' && !isNaN(value)
+        ? {ok: true, data: value}
+        : {ok: false, errors: ['Expected number']}
   )
 
 export const boolean = () =>
-  createSchema<boolean>(value =>
-    typeof value === 'boolean'
-      ? {ok: true, data: value}
-      : {ok: false, errors: ['Expected boolean']}
+  createSchema<boolean>(
+    (value): ValidationResult<boolean> =>
+      typeof value === 'boolean'
+        ? {ok: true, data: value}
+        : {ok: false, errors: ['Expected boolean']}
   )
 
-export const any = () => createSchema<any>(value => ({ok: true, data: value}))
+export const any = () =>
+  createSchema<any>((value): ValidationResult<any> => ({ok: true, data: value}))
 
-// Object validation with proper default value handling
+// Object validation with proper type inference
 export const object = <T extends Record<string, Schema>>(shape: T) =>
   createSchema<{
-    [K in keyof T]: ReturnType<T[K]> extends ValidationResult<infer U>
-      ? U
-      : never
-  }>(value => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return {ok: false, errors: ['Expected object']}
-    }
-
-    const obj = value as Record<string, unknown>
-    const result: Record<string, unknown> = {}
-    const errors: string[] = []
-
-    for (const [key, schema] of Object.entries(shape)) {
-      const fieldValue = obj[key]
-      const fieldResult = schema(fieldValue)
-
-      if (fieldResult.ok) {
-        result[key] = fieldResult.data
-      } else {
-        errors.push(...fieldResult.errors.map(err => `${key}: ${err}`))
+    [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+  }>(
+    (
+      value
+    ): ValidationResult<{
+      [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+    }> => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return {ok: false, errors: ['Expected object']}
       }
+
+      const obj = value as Record<string, unknown>
+      const result: Record<string, unknown> = {}
+      const errors: string[] = []
+
+      for (const [key, schema] of Object.entries(shape)) {
+        const fieldValue = obj[key]
+        const fieldResult = schema(fieldValue)
+
+        if (fieldResult.ok) {
+          result[key] = fieldResult.data
+        } else {
+          errors.push(...fieldResult.errors.map(err => `${key}: ${err}`))
+        }
+      }
+
+      return errors.length > 0
+        ? {ok: false, errors}
+        : {
+            ok: true,
+            data: result as {
+              [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+            }
+          }
     }
+  )
 
-    return errors.length > 0
-      ? {ok: false, errors}
-      : {ok: true, data: result as any}
-  })
-
-// Array validation
+// Array validation with proper type inference
 export const array = <T>(itemSchema: Schema<T>) =>
-  createSchema<T[]>(value => {
+  createSchema<T[]>((value): ValidationResult<T[]> => {
     if (!Array.isArray(value)) {
       return {ok: false, errors: ['Expected array']}
     }
@@ -364,30 +402,39 @@ export const array = <T>(itemSchema: Schema<T>) =>
     return errors.length > 0 ? {ok: false, errors} : {ok: true, data: result}
   })
 
-// Union validation
+// Union validation with proper type inference
 export const union = <T extends readonly Schema[]>(...schemas: T) =>
-  createSchema<T[number] extends Schema<infer U> ? U : never>(value => {
-    for (const schema of schemas) {
-      const result = schema(value)
-      if (result.ok) return result
+  createSchema<T[number] extends Schema<infer U> ? U : never>(
+    (
+      value
+    ): ValidationResult<T[number] extends Schema<infer U> ? U : never> => {
+      for (const schema of schemas) {
+        const result = schema(value)
+        if (result.ok)
+          return result as ValidationResult<
+            T[number] extends Schema<infer U> ? U : never
+          >
+      }
+      return {ok: false, errors: ['No union variant matched']}
     }
-    return {ok: false, errors: ['No union variant matched']}
-  })
+  )
 
 // Literal validation
 export const literal = <T extends string | number | boolean>(val: T) =>
-  createSchema<T>(value =>
-    value === val
-      ? {ok: true, data: val}
-      : {ok: false, errors: [`Expected ${val}`]}
+  createSchema<T>(
+    (value): ValidationResult<T> =>
+      value === val
+        ? {ok: true, data: val}
+        : {ok: false, errors: [`Expected ${val}`]}
   )
 
 // Enum validation
 export const enums = <T extends readonly string[]>(...values: T) =>
-  createSchema<T[number]>(value =>
-    typeof value === 'string' && values.includes(value as T[number])
-      ? {ok: true, data: value as T[number]}
-      : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
+  createSchema<T[number]>(
+    (value): ValidationResult<T[number]> =>
+      typeof value === 'string' && values.includes(value as T[number])
+        ? {ok: true, data: value as T[number]}
+        : {ok: false, errors: [`Expected one of: ${values.join(', ')}`]}
   )
 
 // Standalone transform functions
@@ -472,23 +519,34 @@ export const pipe = <T>(
 export const all = <T extends readonly Schema[]>(
   ...schemas: T
 ): Schema<{[K in keyof T]: T[K] extends Schema<infer U> ? U : never}> =>
-  createSchema(value => {
-    const results: any[] = []
-    const errors: string[] = []
+  createSchema(
+    (
+      value
+    ): ValidationResult<{
+      [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+    }> => {
+      const results: any[] = []
+      const errors: string[] = []
 
-    for (let i = 0; i < schemas.length; i++) {
-      const result = schemas[i](value)
-      if (result.ok) {
-        results[i] = result.data
-      } else {
-        errors.push(...result.errors.map(err => `Schema ${i}: ${err}`))
+      for (let i = 0; i < schemas.length; i++) {
+        const result = schemas[i](value)
+        if (result.ok) {
+          results[i] = result.data
+        } else {
+          errors.push(...result.errors.map(err => `Schema ${i}: ${err}`))
+        }
       }
-    }
 
-    return errors.length > 0
-      ? {ok: false, errors}
-      : {ok: true, data: results as any}
-  })
+      return errors.length > 0
+        ? {ok: false, errors}
+        : {
+            ok: true,
+            data: results as {
+              [K in keyof T]: T[K] extends Schema<infer U> ? U : never
+            }
+          }
+    }
+  )
 
 // Pre-built validators
 export const email = (): StringSchema => string().email()
@@ -509,7 +567,7 @@ export const fast = <T>(schema: Schema<T>): Schema<T> => {
     return fastValidatorCache.get(cacheKey) as Schema<T>
   }
 
-  const fastValidator = createSchema<T>(value => {
+  const fastValidator = createSchema<T>((value): ValidationResult<T> => {
     // For fast path, skip complex validations in production
     if (process.env.NODE_ENV === 'production') {
       return {ok: true, data: value as T}
@@ -522,7 +580,7 @@ export const fast = <T>(schema: Schema<T>): Schema<T> => {
 }
 
 // Memoization for expensive validations
-const memoCache = new WeakMap<Schema, Map<any, ValidationResult>>()
+const memoCache = new WeakMap<Schema, Map<any, ValidationResult<any>>>()
 
 export const memoize = <T>(schema: Schema<T>): Schema<T> => {
   let cache = memoCache.get(schema)
@@ -531,9 +589,9 @@ export const memoize = <T>(schema: Schema<T>): Schema<T> => {
     memoCache.set(schema, cache)
   }
 
-  return createSchema<T>(value => {
+  return createSchema<T>((value): ValidationResult<T> => {
     if (cache!.has(value)) {
-      return cache!.get(value)!
+      return cache!.get(value)! as ValidationResult<T>
     }
 
     const result = schema(value)

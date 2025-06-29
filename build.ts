@@ -2,69 +2,33 @@
 // Bun build configuration for Cyre library
 
 import {build} from 'bun'
-import {readdirSync, statSync} from 'fs'
-import {join} from 'path'
+import {statSync} from 'fs'
 
 /*
 
       C.Y.R.E - B.U.N - B.U.I.L.D
       
       Zero-dependency build system using Bun:
-      - ESM and CJS outputs
+      - ESM and CJS outputs (single entry point)
       - Type declarations
-      - Tree shaking support
       - Bundle analysis
       - Performance optimized
+      - Fixed: No chunking to prevent duplicate exports
 
 */
 
-const srcDir = './src'
 const distDir = './dist'
-
-// Get all entry points for modular exports
-const getEntryPoints = (dir: string, base = ''): Record<string, string> => {
-  const entries: Record<string, string> = {}
-  const items = readdirSync(dir)
-
-  for (const item of items) {
-    const fullPath = join(dir, item)
-    const stat = statSync(fullPath)
-
-    if (stat.isDirectory() && !item.startsWith('.')) {
-      // Check if directory has index.ts
-      const indexPath = join(fullPath, 'index.ts')
-      try {
-        statSync(indexPath)
-        const entryName = base ? `${base}/${item}` : item
-        entries[entryName] = indexPath
-      } catch {
-        // No index.ts, recurse into subdirectories
-        Object.assign(
-          entries,
-          getEntryPoints(fullPath, base ? `${base}/${item}` : item)
-        )
-      }
-    }
-  }
-
-  return entries
-}
 
 const buildESM = async () => {
   console.log('🔨 Building ESM...')
 
-  const entryPoints = {
-    index: './src/index.ts',
-    ...getEntryPoints(srcDir)
-  }
-
   const result = await build({
-    entrypoints: Object.values(entryPoints),
+    entrypoints: ['./src/index.ts'], // ✅ Single entry point only
     outdir: distDir,
     format: 'esm',
     target: 'es2022',
     minify: false,
-    splitting: true,
+    splitting: false, // ✅ No splitting to prevent duplicate exports
     sourcemap: 'external',
     naming: '[name].js',
     external: [] // No external dependencies
@@ -82,7 +46,7 @@ const buildCJS = async () => {
   console.log('🔨 Building CJS...')
 
   const result = await build({
-    entrypoints: ['./src/index.ts'],
+    entrypoints: ['./src/index.ts'], // ✅ Single entry point only
     outfile: './dist/index.cjs',
     format: 'cjs',
     target: 'es2022',
@@ -130,7 +94,7 @@ const analyzeBundles = async () => {
     console.log(`   CJS: ${(cjsStats.size / 1024).toFixed(2)}kb`)
 
     // Check if bundle size is within limits
-    const maxSize = 50 * 1024 // 50kb
+    const maxSize = 100 * 1024 // 100kb limit (increased for single bundle)
     if (esmStats.size > maxSize) {
       console.warn(`⚠️  ESM bundle exceeds ${maxSize / 1024}kb limit`)
     }
@@ -142,7 +106,7 @@ const analyzeBundles = async () => {
 const main = async () => {
   const startTime = performance.now()
 
-  console.log('🚀 Starting Cyre build...')
+  console.log('🚀 Starting Cyre build (single entry point)...')
 
   try {
     // Clean dist directory
@@ -161,6 +125,7 @@ const main = async () => {
     const duration = ((endTime - startTime) / 1000).toFixed(2)
 
     console.log(`✨ Build completed in ${duration}s`)
+    console.log('📦 Output: Single bundle (no chunks)')
   } catch (error) {
     console.error('❌ Build failed:', error)
     process.exit(1)

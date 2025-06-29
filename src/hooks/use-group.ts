@@ -13,6 +13,31 @@ import type {
 } from '../types/hooks'
 import {sensor} from '../components/sensor'
 
+/*
+
+      U.S.E - G.R.O.U.P
+      
+      Beautiful simple channel coordination
+      Works with ANY channel-like objects - main cyre, branches, anything!
+
+*/
+
+/**
+ * Helper function to safely convert unknown error to Error | string
+ */
+const normalizeError = (error: unknown): Error | string => {
+  if (error instanceof Error) {
+    return error
+  }
+  if (typeof error === 'string') {
+    return error
+  }
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String(error.message)
+  }
+  return String(error)
+}
+
 /**
  * Beautiful simple channel coordination
  * Works with ANY channel-like objects - main cyre, branches, anything!
@@ -74,8 +99,11 @@ export function useGroup<TPayload = ActionPayload>(
       }
     } catch (error) {
       const executionTime = performance.now() - startTime
+      const normalizedError = normalizeError(error)
       const errorMessage =
-        error instanceof Error ? error.message : String(error)
+        normalizedError instanceof Error
+          ? normalizedError.message
+          : normalizedError
 
       sensor.error(groupId, errorMessage, 'channel-execution-error')
 
@@ -88,7 +116,7 @@ export function useGroup<TPayload = ActionPayload>(
         channelName: channel.name || channel.id,
         executionOrder,
         executionTime,
-        originalError: error
+        originalError: normalizedError
       }
     }
   }
@@ -130,8 +158,12 @@ export function useGroup<TPayload = ActionPayload>(
 
       return results
     } catch (error) {
+      const normalizedError = normalizeError(error)
       const errorMessage =
-        error instanceof Error ? error.message : String(error)
+        normalizedError instanceof Error
+          ? normalizedError.message
+          : normalizedError
+
       sensor.error(groupId, errorMessage, 'group-execution-error')
 
       // Return error results for all channels
@@ -144,7 +176,7 @@ export function useGroup<TPayload = ActionPayload>(
         channelName: channel.name || channel.id,
         executionOrder: index,
         executionTime: 0,
-        originalError: error
+        originalError: normalizedError
       }))
     }
   }
@@ -214,8 +246,12 @@ export function useGroup<TPayload = ActionPayload>(
           }
         }
       } catch (error) {
+        const normalizedError = normalizeError(error)
         const errorMessage =
-          error instanceof Error ? error.message : String(error)
+          normalizedError instanceof Error
+            ? normalizedError.message
+            : normalizedError
+
         sensor.error(groupId, errorMessage, 'group-call-error')
 
         return {
@@ -235,7 +271,13 @@ export function useGroup<TPayload = ActionPayload>(
           try {
             return channel.on!(handler)
           } catch (error) {
-            sensor.error(groupId, String(error), 'group-subscription-error')
+            const normalizedError = normalizeError(error)
+            const errorMessage =
+              normalizedError instanceof Error
+                ? normalizedError.message
+                : normalizedError
+
+            sensor.error(groupId, errorMessage, 'group-subscription-error')
             return {
               ok: false,
               message: `Subscription failed for ${channel.id}`,
@@ -273,7 +315,6 @@ export function useGroup<TPayload = ActionPayload>(
       const index = activeChannels.findIndex(c => c.id === channelId)
       if (index !== -1) {
         activeChannels.splice(index, 1)
-
         return true
       }
       return false

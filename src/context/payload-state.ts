@@ -189,8 +189,8 @@ export const payloadState = {
     if (existing?.metadata.frozen) {
       // Defer expensive logging to avoid blocking call path
       process.nextTick(() => {
-        log.warn(`Payload for ${channelId} is frozen - update blocked`)
-        sensor.log(channelId, 'blocked', 'payload-frozen', {source})
+        sensor.warn(`Payload for ${channelId} is frozen - update blocked`)
+        sensor.warn(channelId, 'blocked', 'payload-frozen')
       })
       return
     }

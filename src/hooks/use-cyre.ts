@@ -2,7 +2,12 @@
 // Beautiful simple single channel management
 // Instance-agnostic - works with any cyre-like object
 
-import type {IO, EventHandler, ActionPayload} from '../types/core'
+import type {
+  IO,
+  EventHandler,
+  ActionPayload,
+  PriorityConfig
+} from '../types/core'
 import type {CyreInstance, UseCyreConfig, CyreChannel} from '../types/hooks'
 import {cyre} from '../app'
 import {sensor} from '../components/sensor'
@@ -30,12 +35,12 @@ export function useCyre<TPayload = ActionPayload>(
       targetInstance = instance as CyreInstance
     } else {
       // useCyre(id, config) or useCyre(id, config, instance)
-      finalConfig = (instance as UseCyreConfig<TPayload>) || {}
+      finalConfig = (instance as UseCyreConfig<TPayload> | undefined) || {}
       targetInstance = instance || cyre
     }
   } else {
     // useCyre(config) or useCyre(config, instance)
-    finalConfig = configOrId
+    finalConfig = configOrId || {}
     channelId =
       finalConfig.id ||
       finalConfig.name ||
@@ -64,11 +69,12 @@ export function useCyre<TPayload = ActionPayload>(
     ...(finalConfig.delay !== undefined && {delay: finalConfig.delay}),
     ...(finalConfig.interval !== undefined && {interval: finalConfig.interval}),
     ...(finalConfig.repeat !== undefined && {repeat: finalConfig.repeat}),
-    ...(finalConfig.priority !== undefined && {priority: finalConfig.priority}),
+    ...(finalConfig.priority !== undefined && {
+      priority: {level: finalConfig.priority}
+    }),
     ...(finalConfig.required !== undefined && {required: finalConfig.required}),
     ...(finalConfig.block !== undefined && {block: finalConfig.block}),
     ...(finalConfig.path !== undefined && {path: finalConfig.path}),
-    ...(finalConfig.schema !== undefined && {schema: finalConfig.schema}),
     ...(finalConfig.condition !== undefined && {
       condition: finalConfig.condition
     }),
@@ -170,7 +176,7 @@ export function useCyre<TPayload = ActionPayload>(
             repeat: updatedConfig.repeat
           }),
           ...(updatedConfig.priority !== undefined && {
-            priority: updatedConfig.priority
+            priority: {level: updatedConfig.priority}
           }),
           ...(updatedConfig.required !== undefined && {
             required: updatedConfig.required
@@ -179,9 +185,6 @@ export function useCyre<TPayload = ActionPayload>(
             block: updatedConfig.block
           }),
           ...(updatedConfig.path !== undefined && {path: updatedConfig.path}),
-          ...(updatedConfig.schema !== undefined && {
-            schema: updatedConfig.schema
-          }),
           ...(updatedConfig.condition !== undefined && {
             condition: updatedConfig.condition
           }),

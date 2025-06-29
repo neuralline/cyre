@@ -1,5 +1,7 @@
+// src/types/system.ts - Updated with clear separation of concerns
+
 import {subscribers, timeline} from './../context/state'
-// src/types/system.ts
+
 // System performance and monitoring types
 
 export type SystemMetrics = {
@@ -7,6 +9,7 @@ export type SystemMetrics = {
   memory: number
   eventLoop: number
   isOverloaded: boolean
+  startTime?: number // Track system start time for uptime calculations
 }
 
 export type SystemStress = {
@@ -47,15 +50,18 @@ export type BreathingMetrics = {
   pattern: keyof typeof import('../config/cyre-config').BREATHING.PATTERNS
 }
 
+// Main system state interface with clear authority separation
 export interface QuantumState {
   system: SystemMetrics
   breathing: BreathingState
   performance: PerformanceMetrics
   stress: SystemStress
   lastUpdate: number
-  inRecuperation: boolean
-  hibernating: boolean
-  recuperationInterval?: NodeJS.Timeout
+
+  // AUTHORITY SEPARATION:
+  inRecuperation: boolean // Breathing system authority (system-wide)
+  hibernating: boolean // TimeKeeper authority only
+
   activeFormations: number
   store: {
     channels: number
@@ -64,7 +70,9 @@ export interface QuantumState {
     tasks: number
     timeline: number
   }
-  _Locked: boolean
+
+  // System flags
+  _isLocked: boolean // Changed from _Locked to _isLocked for consistency
   _shutdown: boolean
   _init: boolean
 }
@@ -79,9 +87,87 @@ export interface ActionMetrics {
   error?: string
 }
 
-// src/types/metrics.ts
-// Shared metrics types to prevent circular imports
+// Metrics API types for cyre.getMetrics()
+export interface ChannelMetricsResult {
+  channelId: string
+  executionCount: number
+  lastExecutionTime: number
+  executionDuration: number
+  errorCount: number
+  timeOfCreation: number
+  isBlocked: boolean
+  hasFastPath: boolean
+  hasProtections: boolean
+  hasProcessing: boolean
+  hasScheduling: boolean
+  available: boolean
+  error?: string
+}
 
+export interface SystemMetricsResult {
+  system: {
+    stress: SystemStress
+    breathing: {
+      currentRate: number
+      stress: number
+      isRecuperating: boolean
+      pattern: string
+      breathCount: number
+    }
+    performance: PerformanceMetrics
+    health: {
+      isHealthy: boolean
+      isLocked: boolean
+      hibernating: boolean
+      inRecuperation: boolean
+    }
+    uptime: number
+    lastUpdate: number
+  }
+  stores: {
+    channels: number
+    subscribers: number
+    timeline: number
+    activeFormations: number
+  }
+  available: boolean
+  error?: string
+}
+
+export interface MetricsExportFilter {
+  includeChannels?: boolean
+  includeSystem?: boolean
+  includeBreathing?: boolean
+  channelPattern?: string
+}
+
+export interface MetricsExportResult {
+  system?: SystemMetricsResult['system']
+  breathing?: BreathingMetrics & {
+    stressThresholds: Record<string, number>
+    rateRange: Record<string, number>
+  }
+  channels?: Array<{
+    id: string
+    type?: string
+    executionCount: number
+    lastExecutionTime: number
+    executionDuration: number
+    errorCount: number
+    isBlocked: boolean
+    hasFastPath: boolean
+    protections: {
+      throttle?: number
+      debounce?: number
+      detectChanges?: boolean
+    }
+  }>
+  timestamp: number
+  available: boolean
+  error?: string
+}
+
+// Shared metrics types to prevent circular imports
 import type {ActionId, Priority} from './core'
 import {LogLevel} from '../components/cyre-log'
 

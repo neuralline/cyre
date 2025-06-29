@@ -117,7 +117,7 @@ import {log} from './components/cyre-log'
 // Import schema system
 
 // Import orchestration system
-import {orchestration} from './orchestration/orchestration-engine'
+//import {orchestration} from './orchestration/orchestration-engine'
 
 // Main exports with branch system
 export {
@@ -126,7 +126,7 @@ export {
   useGroup,
   useBranch,
   useCollective,
-  orchestration, //advanced task setup// not sure to expose this
+  //orchestration, //advanced task setup// not sure to expose this
   log //utility logger function
   // metrics //Cyre stats fro external live stat monitors
 }
@@ -136,8 +136,3 @@ export const version = '4.6.0'
 
 // Also export cyre as the default export for maximum compatibility
 export default cyre
-
-// Global availability for UMD builds
-if (typeof window !== 'undefined') {
-  ;(window as any).cyre = cyre
-}

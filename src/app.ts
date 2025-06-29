@@ -82,7 +82,7 @@ const init = async (): Promise<{
   message: string
 }> => {
   try {
-    if (sysInitialize || metricsState._init) {
+    if (sysInitialize || metricsState.init()) {
       log.sys('System already initialized')
       return {ok: true, payload: Date.now(), message: MSG.ONLINE}
     }
@@ -119,19 +119,21 @@ const init = async (): Promise<{
  */
 const initializeBreathing = (): void => {
   TimeKeeper.keep(
-    1000, // reputation interval
+    1000,
     async () => {
       //callback on each reputation
       try {
         await updateBreathingFromMetrics()
+        return undefined // ✅ Explicit return for async function
       } catch (error) {
         // Silent fail to prevent log spam
         sensor.error('system', 'Breathing update error:', 'initialize')
+        return undefined // ✅ Return in catch block too
       }
     },
-    true, //repeat infinity or number to count down
-    'system-breathing', // id for tracking progress and cancellation
-    2000 // start reputation after 2s delay
+    true,
+    'system-breathing',
+    1000
   )
 
   sensor.info('system', 'Breathing system initialized with metrics integration')
@@ -287,22 +289,16 @@ export const call = async (
       // Store latest payload and schedule debounced execution
       payloadState.set(action.id, payload, 'call')
 
-      // In the TimeKeeper.keep() callback, ensure the action object is complete:
+      // Fix for the debounce callback in app.ts
+      // The catch block needs a return statement
+
       TimeKeeper.keep(
         action.debounce,
         async () => {
           try {
             const latestPayload = payloadState.get(action.id) || payload
             const currentAction = io.get(action.id) // Get the FULL action object
-
-            if (!currentAction) {
-              console.error(
-                'Action not found during debounce execution:',
-                action.id
-              )
-              return
-            }
-
+            if (!currentAction) return
             // Clear debounce state PROPERLY
             io.set({
               ...currentAction, // Use the complete action object
@@ -313,6 +309,12 @@ export const call = async (
             return await processCall(currentAction, latestPayload)
           } catch (error) {
             // Handle error properly
+            return {
+              ok: false,
+              payload: null,
+              message: `Debounced execution failed: ${error}`,
+              error: String(error)
+            } // ✅ Add explicit return in catch block
           }
         },
         1,
@@ -493,7 +495,17 @@ export const cyre = Object.freeze({
 
   shutdown,
 
-  status: (): boolean => metricsState.get().hibernating
+  status: (): boolean => metricsState.get().hibernating,
+
+  // NEW: Metrics API integration
+  /**
+   * Get metrics for system or specific channel
+   * @param channelId Optional channel ID for channel-specific metrics
+   * @returns Comprehensive metrics data
+   */
+  getMetrics: (channelId?: string) => {
+    return metricsState.getMetrics(channelId)
+  }
 })
 
 export default cyre

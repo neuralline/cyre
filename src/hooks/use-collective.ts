@@ -75,6 +75,12 @@ export interface Participant {
   metadata?: Record<string, any>
 }
 
+export interface Vote {
+  vote: any
+  weight: number
+  timestamp: number
+}
+
 export interface CollectiveState {
   id: string
   participants: Map<string, Participant>
@@ -595,7 +601,7 @@ export const useCollective = (
 
         // Calculate consensus based on type
         let consensus: any = {achieved: false, result: null}
-        const votes = Array.from(proposal.votes.values())
+        const votes: Vote[] = Array.from(proposal.votes.values())
 
         switch (fullConfig.consensus) {
           case 'majority':
