@@ -19,6 +19,7 @@ export interface CyreInstance {
   call: (id: string, payload?: any) => Promise<CyreResponse>
   get?: (id: string) => IO | undefined
   forget: (id: string) => boolean
+  path: () => string
 }
 
 /**
@@ -80,7 +81,7 @@ export interface CyreChannel<TPayload = ActionPayload> {
   /** Channel ID */
   id: string
   /** Channel name */
-  name: string
+  name?: string
 
   /** Subscribe to channel */
   on: (
@@ -91,10 +92,10 @@ export interface CyreChannel<TPayload = ActionPayload> {
   call: (payload?: TPayload) => Promise<CyreResponse>
 
   /** Update channel configuration */
-  update: (config: Partial<UseCyreConfig<TPayload>>) => {
-    ok: boolean
-    message: string
-  }
+  // update: (config: Partial<UseCyreConfig<TPayload>>) => {
+  //   ok: boolean
+  //   message: string
+  // }
 
   /** Get channel info */
   get: () => IO | undefined
@@ -217,8 +218,7 @@ export interface BranchConfig {
  */
 export interface Branch {
   id: string
-  path: string
-  parent?: Branch
+  path: () => string
 
   // Core methods (scoped to branch only)
   action: (config: IO) => {ok: boolean; message: string}
@@ -231,7 +231,6 @@ export interface Branch {
   destroy: () => boolean
   isActive: () => boolean
   getStats: () => BranchStats
-  setup: (config: BranchSetup) => {ok: boolean; message: string}
 }
 
 /**

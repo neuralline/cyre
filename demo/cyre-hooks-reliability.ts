@@ -190,16 +190,28 @@ const testCoreScreenplayPipeline = async (
     })
 
     cyre.on('screenplay-autosave', async (document: any) => {
-      runner.logger.log('info', 'screenplay-autosave', 'Auto-saving document')
+      runner.logger.log('info', 'screenplay-autosave', 'Auto-saving document', {
+        document: !!document,
+        documentType: typeof document,
+        keys: document ? Object.keys(document) : []
+      })
 
       // Simulate save with realistic delay
       await new Promise(resolve => setTimeout(resolve, 10))
 
+      // Ensure document exists before calculating size
+      const documentString = document ? JSON.stringify(document) : '{}'
+
       saveResult = {
         saved: true,
         timestamp: Date.now(),
-        size: JSON.stringify(document).length
+        size: documentString.length
       }
+
+      runner.logger.log('info', 'save-handler', 'Save result created', {
+        saveResult,
+        documentSize: documentString.length
+      })
 
       return {
         ok: true,
@@ -243,11 +255,21 @@ They walk out, debating state management.`
       version: 1
     })
 
+    // FIX: Wait for debounced operations to complete
+    await new Promise(resolve => setTimeout(resolve, 150)) // Wait longer than debounce
+
+    // Add debugging to see what's happening
+    runner.logger.log('info', 'save-debug', 'Save call details', {
+      saveCallResult: saveCall,
+      saveResultVariable: saveResult
+    })
+
     // Verify all operations succeeded
     const allCallsSucceeded = parseCall?.ok && formatCall?.ok && saveCall?.ok
     const allHandlersExecuted = parseResult && formatResult && saveResult
     const correctParsing =
       parseResult?.scenes === 2 && parseResult?.characters.length >= 2
+    const saveWorked = saveResult?.saved === true && saveResult?.size > 0
 
     runner.logger.log('info', 'core-verification', 'Core pipeline results', {
       parseCall: parseCall?.ok,
@@ -255,10 +277,16 @@ They walk out, debating state management.`
       saveCall: saveCall?.ok,
       scenesFound: parseResult?.scenes,
       charactersFound: parseResult?.characters?.length,
-      saveSize: saveResult?.size
+      saveSize: saveResult?.size,
+      saveWorked,
+      allCallsSucceeded,
+      allHandlersExecuted,
+      correctParsing
     })
 
-    return allCallsSucceeded && allHandlersExecuted && correctParsing
+    return (
+      allCallsSucceeded && allHandlersExecuted && correctParsing && saveWorked
+    )
   })
 }
 
@@ -398,14 +426,13 @@ const testProtectionMechanisms = async (
     cyre.action({id: 'throttle-test', throttle: 100})
     cyre.action({id: 'debounce-test', debounce: 50})
 
-    // Rapid throttle calls (should be limited)
-    await Promise.all([
-      cyre.call('throttle-test'),
-      cyre.call('throttle-test'),
-      cyre.call('throttle-test'),
-      cyre.call('throttle-test'),
-      cyre.call('throttle-test')
-    ])
+    // FIX: Sequential throttle calls with delays to test properly
+    await cyre.call('throttle-test')
+    await cyre.call('throttle-test') // Should be throttled
+    await cyre.call('throttle-test') // Should be throttled
+    await new Promise(resolve => setTimeout(resolve, 10)) // Small delay
+    await cyre.call('throttle-test') // Should be throttled
+    await cyre.call('throttle-test') // Should be throttled
 
     // Rapid debounce calls (should be collapsed)
     cyre.call('debounce-test')
@@ -416,7 +443,7 @@ const testProtectionMechanisms = async (
     // Wait for debounce to settle
     await new Promise(resolve => setTimeout(resolve, 100))
 
-    const throttleWorking = throttleCount < 5 // Should be throttled
+    const throttleWorking = throttleCount <= 2 // Allow some through, but not all 5
     const debounceWorking = debounceCount <= 2 // Should be debounced
 
     runner.logger.log('info', 'protection-results', 'Protection mechanisms', {

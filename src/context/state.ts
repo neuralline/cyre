@@ -31,7 +31,7 @@ const ioStore = createStore<IO>() // Channels
 const subscriberStore = createStore<ISubscriber>() // .on subscribers/listeners
 const timelineStore = createStore<Timer>() // schedules and queued tasks used by TimeKeeper
 //const actionMetrics = createStore<StateActionMetrics>()
-const branchStore = createStore<BranchStore>()
+export const branchStore = createStore<BranchStore>()
 
 /**
  * IO operations - configuration only, no payload data

@@ -31,9 +31,9 @@ async function createChatDemo() {
   await cyre.init()
 
   // Create chat rooms as branches
-  const generalRoom = useBranch(undefined, {id: 'general-chat'})
-  const techRoom = useBranch(undefined, {id: 'tech-chat'})
-  const randomRoom = useBranch(undefined, {id: 'random-chat'})
+  const generalRoom = useBranch(cyre, {id: 'general-chat'})
+  const techRoom = useBranch(cyre, {id: 'tech-chat'})
+  const randomRoom = useBranch(cyre, {id: 'random-chat'})
 
   // Setup message system for each room
   const rooms = [
@@ -119,9 +119,9 @@ async function createGamingDemo() {
   console.log('🎮 Creating Gaming System Demo...')
 
   // Create game instances as branches
-  const game1 = useBranch(undefined, {id: 'tic-tac-toe-1'})
-  const game2 = useBranch(undefined, {id: 'tic-tac-toe-2'})
-  const game3 = useBranch(undefined, {id: 'tic-tac-toe-3'})
+  const game1 = useBranch(cyre, {id: 'tic-tac-toe-1'})
+  const game2 = useBranch(cyre, {id: 'tic-tac-toe-2'})
+  const game3 = useBranch(cyre, {id: 'tic-tac-toe-3'})
 
   const games = [
     {branch: game1, id: 'Game #1'},
@@ -301,40 +301,6 @@ function startLoadTesting(chatRooms: any, games: any) {
 // PERFORMANCE MONITORING
 // ===========================================
 
-function startPerformanceMonitoring() {
-  console.log('📊 Starting performance monitoring...')
-
-  setInterval(() => {
-    console.log('\n📈 === PERFORMANCE DASHBOARD ===')
-    console.log(`🏗️  Branches: ${branchStats.active}/${branchStats.total}`)
-    console.log(`📡 Channels: ${branchStats.totalChannels}`)
-    console.log(
-      `⚡ System Stress: ${Math.round(health.breathing.stress * 100)}%`
-    )
-    console.log(`💓 Breathing Rate: ${health.breathing.rate}ms`)
-    console.log(`📞 Call Rate: ${performance.callRate}/sec`)
-    console.log(`🎯 Total Calls: ${performance.totalCalls}`)
-
-    if (health.breathing.stress > 0.6) {
-      console.log('⚠️  System under moderate stress')
-    }
-
-    if (health.breathing.stress > 0.8) {
-      console.log('🔥 High stress detected - breathing system adapting!')
-    }
-
-    if (performance.callRate > 20) {
-      console.log('🚀 High activity detected!')
-    }
-
-    if (insights.length > 0) {
-      console.log('💡 Insights:', insights.join(', '))
-    }
-
-    console.log('===============================\n')
-  }, 15000) // Every 15 seconds
-}
-
 // ===========================================
 // INTERACTIVE COMMANDS
 // ===========================================
@@ -386,31 +352,6 @@ function setupInteractiveCommands(chatRooms: any, games: any) {
     },
 
     // Get system stats
-    getStats: () => {
-      const health = cyre.getSystemHealth()
-      const performance = cyre.getPerformanceState()
-
-      console.log('📊 Current System Stats:')
-      console.log({
-        health: health,
-        performance: {
-          callRate: performance.callRate,
-          totalCalls: performance.totalCalls,
-          stress: Math.round(performance.stress * 100) + '%'
-        }
-      })
-    },
-
-    // List all branches
-    listBranches: () => {
-      const branches = cyre.dev.branch.list()
-      console.log('🌳 All Branches:')
-      branches.forEach(branch => {
-        console.log(
-          `  - ${branch.id} (${branch.path}) - ${branch.channelCount} channels`
-        )
-      })
-    },
 
     // Test cross-branch communication
     testCrossBranch: async () => {
@@ -449,12 +390,6 @@ function setupInteractiveCommands(chatRooms: any, games: any) {
       console.log(
         '✅ Stress test completed - check breathing system adaptation!'
       )
-    },
-
-    // Clean up empty branches
-    cleanup: async () => {
-      const result = await cyre.dev.triggerMemoryCleanup()
-      console.log('🧹 Cleanup result:', result)
     }
   }
 
@@ -606,7 +541,6 @@ export async function runInteractiveDemo() {
 
     // Start background systems
     startLoadTesting(chatRooms, games)
-    startPerformanceMonitoring()
     setupInteractiveCommands(chatRooms, games)
 
     console.log('\n🎉 Interactive Demo is now running!')

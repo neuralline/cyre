@@ -2,7 +2,7 @@
 // Smart Factory IoT System using Cyre hooks family
 // Demonstrates: IoT integration, industrial automation, real-time monitoring, predictive maintenance
 
-import {cyre, useCyre, useBranch, useGroup, metrics} from '../src'
+import {cyre, useBranch, useGroup} from '../src'
 
 /**
  * 🏭 SMART FACTORY IOT SYSTEM
@@ -21,64 +21,73 @@ import {cyre, useCyre, useBranch, useGroup, metrics} from '../src'
 // ========================================
 
 export const createFactoryInfrastructure = () => {
-  // Main factory system - name can be descriptive, id is path-safe
-  const smartFactory = useBranch({
+  // Main factory system - using useBranch with cyre instance
+  const smartFactory = useBranch(cyre, {
     id: 'smart-factory',
     name: 'Smart Manufacturing Facility'
   })
 
-  // Production areas - functional approach like React components
+  if (!smartFactory) {
+    throw new Error('Failed to create smart factory branch')
+  }
+
+  // Production areas - creating sub-branches
   const productionAreas = {
-    assembly: useBranch({
+    assembly: useBranch(smartFactory, {
       id: 'assembly',
-      parent: smartFactory,
       name: 'Assembly Line'
     }),
-    machining: useBranch({
+    machining: useBranch(smartFactory, {
       id: 'machining',
-      parent: smartFactory,
       name: 'Machining Department'
     }),
-    quality: useBranch({
+    quality: useBranch(smartFactory, {
       id: 'quality',
-      parent: smartFactory,
       name: 'Quality Control'
     }),
-    packaging: useBranch({
+    packaging: useBranch(smartFactory, {
       id: 'packaging',
-      parent: smartFactory,
       name: 'Packaging & Shipping'
     }),
-    warehouse: useBranch({
+    warehouse: useBranch(smartFactory, {
       id: 'warehouse',
-      parent: smartFactory,
       name: 'Automated Warehouse'
     })
   }
 
-  // Support systems - functional approach like React components
+  // Validate all production areas
+  Object.entries(productionAreas).forEach(([name, branch]) => {
+    if (!branch) {
+      throw new Error(`Failed to create ${name} production area`)
+    }
+  })
+
+  // Support systems
   const supportSystems = {
-    maintenance: useBranch({
+    maintenance: useBranch(smartFactory, {
       id: 'maintenance',
-      parent: smartFactory,
       name: 'Predictive Maintenance'
     }),
-    energy: useBranch({
+    energy: useBranch(smartFactory, {
       id: 'energy',
-      parent: smartFactory,
       name: 'Energy Management'
     }),
-    safety: useBranch({
+    safety: useBranch(smartFactory, {
       id: 'safety',
-      parent: smartFactory,
       name: 'Safety Monitoring'
     }),
-    logistics: useBranch({
+    logistics: useBranch(smartFactory, {
       id: 'logistics',
-      parent: smartFactory,
       name: 'Supply Chain & Logistics'
     })
   }
+
+  // Validate all support systems
+  Object.entries(supportSystems).forEach(([name, branch]) => {
+    if (!branch) {
+      throw new Error(`Failed to create ${name} support system`)
+    }
+  })
 
   return {
     smartFactory,
@@ -94,26 +103,77 @@ export const createFactoryInfrastructure = () => {
 export const createProductionLineMonitoring = (infrastructure: any) => {
   const {productionAreas} = infrastructure
 
-  // Assembly line sensors and controls
+  // Assembly line systems
   const assemblyLineSystems = {
-    conveyorControl: useCyre(
-      {
-        channelId: 'conveyor-control',
-        name: 'Conveyor Belt Control System'
-      },
-      productionAreas.assembly
-    ),
+    // Conveyor control system
+    conveyorControl: (() => {
+      const result = productionAreas.assembly.action({
+        id: 'conveyor-control',
+        throttle: 1000, // 1 second minimum between calls
+        schema: (data: any) => ({
+          ok: true,
+          data: {
+            speed: data?.speed || 1.0,
+            direction: data?.direction || 'forward'
+          }
+        })
+      })
 
+      if (!result.ok) {
+        throw new Error(`Failed to create conveyor control: ${result.message}`)
+      }
+
+      productionAreas.assembly.on('conveyor-control', (controlCommand: any) => {
+        const speed = controlCommand.speed || 1.0 // m/s
+        const direction = controlCommand.direction || 'forward'
+        const zones = [
+          'input',
+          'station1',
+          'station2',
+          'station3',
+          'station4',
+          'output'
+        ]
+
+        return {
+          conveyorStatus: 'running',
+          speed,
+          direction,
+          zoneStatuses: zones.map(zone => ({
+            zone,
+            occupied: Math.random() > 0.4, // 60% occupation
+            sensorStatus: Math.random() > 0.01 ? 'ok' : 'fault', // 99% sensor uptime
+            temperature: Math.random() * 15 + 20 // 20-35°C
+          })),
+          totalThroughput: Math.floor((speed * 3600) / 60), // Units per hour
+          powerConsumption: speed * 10 + 5, // kW
+          maintenanceStatus: {
+            beltWear: Math.random() * 0.3 + 0.1, // 10-40% wear
+            motorHealth: Math.random() * 0.2 + 0.8, // 80-100% health
+            nextMaintenance: Date.now() + Math.random() * 2592000000 // Next month
+          },
+          timestamp: Date.now()
+        }
+      })
+
+      return 'conveyor-control'
+    })(),
+
+    // Robotic arms array
     roboticArms: Array.from({length: 4}, (_, i) => {
-      const robot = useCyre(
-        {
-          channelId: `robot-arm-${i}`,
-          name: `Robotic Arm ${i + 1}`
-        },
-        productionAreas.assembly
-      )
+      const robotId = `robot-arm-${i}`
 
-      robot.on(command => {
+      const result = productionAreas.assembly.action({
+        id: robotId,
+        throttle: 500, // 0.5 second minimum between calls
+        detectChanges: true
+      })
+
+      if (!result.ok) {
+        throw new Error(`Failed to create robot arm ${i}: ${result.message}`)
+      }
+
+      productionAreas.assembly.on(robotId, (command: any) => {
         const operationalStatus = Math.random() > 0.05 // 95% uptime
         const currentTask = command.task || 'idle'
 
@@ -137,19 +197,26 @@ export const createProductionLineMonitoring = (infrastructure: any) => {
         }
       })
 
-      return robot
+      return robotId
     }),
 
+    // Quality sensors
     qualitySensors: Array.from({length: 6}, (_, i) => {
-      const sensor = useCyre(
-        {
-          channelId: `quality-sensor-${i}`,
-          name: `Quality Sensor ${i + 1}`
-        },
-        productionAreas.assembly
-      )
+      const sensorId = `quality-sensor-${i}`
 
-      sensor.on(measurement => {
+      const result = productionAreas.assembly.action({
+        id: sensorId,
+        throttle: 200, // 0.2 second minimum between calls
+        required: false // Measurements can be triggered without payload
+      })
+
+      if (!result.ok) {
+        throw new Error(
+          `Failed to create quality sensor ${i}: ${result.message}`
+        )
+      }
+
+      productionAreas.assembly.on(sensorId, (measurement: any) => {
         return {
           sensorId: i + 1,
           stationPosition: i,
@@ -181,56 +248,32 @@ export const createProductionLineMonitoring = (infrastructure: any) => {
         }
       })
 
-      return sensor
+      return sensorId
     })
   }
 
-  // Assembly line control logic
-  assemblyLineSystems.conveyorControl.on(controlCommand => {
-    const speed = controlCommand.speed || 1.0 // m/s
-    const direction = controlCommand.direction || 'forward'
-    const zones = [
-      'input',
-      'station1',
-      'station2',
-      'station3',
-      'station4',
-      'output'
-    ]
-
-    return {
-      conveyorStatus: 'running',
-      speed,
-      direction,
-      zoneStatuses: zones.map(zone => ({
-        zone,
-        occupied: Math.random() > 0.4, // 60% occupation
-        sensorStatus: Math.random() > 0.01 ? 'ok' : 'fault', // 99% sensor uptime
-        temperature: Math.random() * 15 + 20 // 20-35°C
-      })),
-      totalThroughput: Math.floor((speed * 3600) / 60), // Units per hour
-      powerConsumption: speed * 10 + 5, // kW
-      maintenanceStatus: {
-        beltWear: Math.random() * 0.3 + 0.1, // 10-40% wear
-        motorHealth: Math.random() * 0.2 + 0.8, // 80-100% health
-        nextMaintenance: Date.now() + Math.random() * 2592000000 // Next month
-      },
-      timestamp: Date.now()
-    }
-  })
-
   // Machining department systems
   const machiningSystemsBranch = {
+    // CNC Machines
     cncMachines: Array.from({length: 8}, (_, i) => {
-      const cnc = useCyre(
-        {
-          channelId: `cnc-machine-${i}`,
-          name: `CNC Machine ${i + 1}`
-        },
-        productionAreas.machining
-      )
+      const cncId = `cnc-machine-${i}`
 
-      cnc.on(command => {
+      const result = productionAreas.machining.action({
+        id: cncId,
+        throttle: 2000, // 2 second minimum between calls
+        schema: (data: any) => ({
+          ok: true,
+          data: {
+            program: data?.program || `PART_${Math.floor(Math.random() * 1000)}`
+          }
+        })
+      })
+
+      if (!result.ok) {
+        throw new Error(`Failed to create CNC machine ${i}: ${result.message}`)
+      }
+
+      productionAreas.machining.on(cncId, (command: any) => {
         const isOperational = Math.random() > 0.03 // 97% uptime
 
         return {
@@ -265,40 +308,46 @@ export const createProductionLineMonitoring = (infrastructure: any) => {
         }
       })
 
-      return cnc
+      return cncId
     }),
 
-    materialHandling: useCyre(
-      {
-        channelId: 'material-handling',
-        name: 'Automated Material Handling'
-      },
-      productionAreas.machining
-    )
-  }
+    // Material handling system
+    materialHandling: (() => {
+      const result = productionAreas.machining.action({
+        id: 'material-handling',
+        throttle: 1500 // 1.5 second minimum between calls
+      })
 
-  machiningSystemsBranch.materialHandling.on(request => {
-    return {
-      system: 'material_handling',
-      agvs: Array.from({length: 3}, (_, i) => ({
-        agvId: i + 1,
-        status: Math.random() > 0.1 ? 'active' : 'charging',
-        location: {
-          x: Math.random() * 1000,
-          y: Math.random() * 500
-        },
-        battery: Math.random() * 0.4 + 0.6, // 60-100%
-        cargo: Math.random() > 0.3 ? 'loaded' : 'empty',
-        destination: `Station_${Math.floor(Math.random() * 10) + 1}`
-      })),
-      inventory: {
-        rawMaterials: Math.floor(Math.random() * 1000) + 500,
-        finishedParts: Math.floor(Math.random() * 200) + 50,
-        toolInventory: Math.floor(Math.random() * 500) + 200
-      },
-      timestamp: Date.now()
-    }
-  })
+      if (!result.ok) {
+        throw new Error(`Failed to create material handling: ${result.message}`)
+      }
+
+      productionAreas.machining.on('material-handling', (request: any) => {
+        return {
+          system: 'material_handling',
+          agvs: Array.from({length: 3}, (_, i) => ({
+            agvId: i + 1,
+            status: Math.random() > 0.1 ? 'active' : 'charging',
+            location: {
+              x: Math.random() * 1000,
+              y: Math.random() * 500
+            },
+            battery: Math.random() * 0.4 + 0.6, // 60-100%
+            cargo: Math.random() > 0.3 ? 'loaded' : 'empty',
+            destination: `Station_${Math.floor(Math.random() * 10) + 1}`
+          })),
+          inventory: {
+            rawMaterials: Math.floor(Math.random() * 1000) + 500,
+            finishedParts: Math.floor(Math.random() * 200) + 50,
+            toolInventory: Math.floor(Math.random() * 500) + 200
+          },
+          timestamp: Date.now()
+        }
+      })
+
+      return 'material-handling'
+    })()
+  }
 
   return {
     assemblyLineSystems,
@@ -314,214 +363,209 @@ export const createPredictiveMaintenanceSystem = (infrastructure: any) => {
   const {supportSystems} = infrastructure
 
   // Vibration analysis system
-  const vibrationAnalyzer = useCyre(
-    {
-      channelId: 'vibration-analyzer',
-      name: 'Machine Vibration Analysis System'
-    },
-    supportSystems.maintenance
-  )
+  const vibrationAnalyzer = (() => {
+    const result = supportSystems.maintenance.action({
+      id: 'vibration-analyzer',
+      throttle: 1000,
+      required: true // Requires vibration data
+    })
 
-  // Thermal imaging system
-  const thermalImaging = useCyre(
-    {
-      channelId: 'thermal-imaging',
-      name: 'Thermal Imaging Monitoring'
-    },
-    supportSystems.maintenance
-  )
-
-  // Oil analysis system
-  const oilAnalysis = useCyre(
-    {
-      channelId: 'oil-analysis',
-      name: 'Lubricant Analysis System'
-    },
-    supportSystems.maintenance
-  )
-
-  // Maintenance scheduler
-  const maintenanceScheduler = useCyre(
-    {
-      channelId: 'maintenance-scheduler',
-      name: 'Predictive Maintenance Scheduler'
-    },
-    supportSystems.maintenance
-  )
-
-  vibrationAnalyzer.on(vibrationData => {
-    const {machineId, vibrationReadings} = vibrationData
-
-    // Simulate vibration analysis
-    const frequency = vibrationReadings?.frequency || Math.random() * 100 + 10 // 10-110 Hz
-    const amplitude = vibrationReadings?.amplitude || Math.random() * 5 + 0.5 // 0.5-5.5 mm/s
-
-    // Predictive analysis
-    const bearingCondition =
-      amplitude < 2 ? 'good' : amplitude < 4 ? 'warning' : 'critical'
-    const estimatedLifeRemaining =
-      amplitude < 2
-        ? Math.floor(Math.random() * 2000) + 1000 // 1000-3000 hours
-        : amplitude < 4
-        ? Math.floor(Math.random() * 500) + 100 // 100-600 hours
-        : Math.floor(Math.random() * 48) + 1 // 1-48 hours
-
-    return {
-      machineId,
-      analysis: {
-        dominantFrequency: frequency,
-        rmsVelocity: amplitude,
-        peakAmplitude: amplitude * 1.5,
-        bearingCondition,
-        estimatedLifeRemaining,
-        faultFrequencies:
-          frequency > 50 ? ['bearing_outer_race', 'unbalance'] : [],
-        severity:
-          bearingCondition === 'critical'
-            ? 'high'
-            : bearingCondition === 'warning'
-            ? 'medium'
-            : 'low'
-      },
-      recommendations:
-        bearingCondition !== 'good'
-          ? [
-              'Schedule bearing inspection',
-              'Increase monitoring frequency',
-              'Check lubrication levels',
-              'Review operational parameters'
-            ]
-          : ['Continue normal operation'],
-      timestamp: Date.now()
+    if (!result.ok) {
+      throw new Error(`Failed to create vibration analyzer: ${result.message}`)
     }
-  })
 
-  thermalImaging.on(thermalData => {
-    const {equipmentId, zones} = thermalData
+    supportSystems.maintenance.on(
+      'vibration-analyzer',
+      (vibrationData: any) => {
+        const {machineId, vibrationReadings} = vibrationData
 
-    return {
-      equipmentId,
-      thermalMap: zones.map((zone: any) => ({
-        zone: zone.name,
-        avgTemperature: Math.random() * 40 + 30, // 30-70°C
-        maxTemperature: Math.random() * 20 + 60, // 60-80°C
-        hotSpots: Math.random() > 0.8 ? ['bearing', 'motor'] : [],
-        temperatureTrend: Math.random() > 0.5 ? 'rising' : 'stable'
-      })),
-      alerts:
-        Math.random() > 0.9 ? ['Overheating detected in motor housing'] : [],
-      timestamp: Date.now()
-    }
-  })
+        // Simulate vibration analysis
+        const frequency =
+          vibrationReadings?.frequency || Math.random() * 100 + 10 // 10-110 Hz
+        const amplitude =
+          vibrationReadings?.amplitude || Math.random() * 5 + 0.5 // 0.5-5.5 mm/s
 
-  oilAnalysis.on(sampleData => {
-    const {machineId, sampleId} = sampleData
-
-    return {
-      machineId,
-      sampleId,
-      analysis: {
-        viscosity: Math.random() * 10 + 40, // 40-50 cSt
-        acidity: Math.random() * 2 + 0.5, // 0.5-2.5 mgKOH/g
-        waterContent: Math.random() * 500 + 100, // 100-600 ppm
-        metalParticles: {
-          iron: Math.random() * 20 + 5, // 5-25 ppm
-          copper: Math.random() * 10 + 2, // 2-12 ppm
-          aluminum: Math.random() * 5 + 1 // 1-6 ppm
-        },
-        contaminants: Math.random() > 0.7 ? ['dirt', 'fuel'] : []
-      },
-      condition:
-        Math.random() > 0.8 ? 'poor' : Math.random() > 0.6 ? 'fair' : 'good',
-      changeRecommended: Math.random() > 0.7,
-      timestamp: Date.now()
-    }
-  })
-
-  maintenanceScheduler.on(scheduleRequest => {
-    const {machineIds} = scheduleRequest
-
-    try {
-      const maintenanceSchedule = machineIds.map((machineId: string) => {
-        const hoursToFailure = Math.floor(Math.random() * 2000) + 100
-        const priority =
-          hoursToFailure < 48
-            ? 'critical'
-            : hoursToFailure < 168
-            ? 'high'
-            : hoursToFailure < 720
-            ? 'medium'
-            : 'low'
-
-        const urgency =
-          priority === 'critical'
-            ? 'immediate'
-            : priority === 'high'
-            ? 'urgent'
-            : priority === 'medium'
-            ? 'scheduled'
-            : 'routine'
+        // Predictive analysis
+        const bearingCondition =
+          amplitude < 2 ? 'good' : amplitude < 4 ? 'warning' : 'critical'
+        const estimatedLifeRemaining =
+          amplitude < 2
+            ? Math.floor(Math.random() * 2000) + 1000 // 1000-3000 hours
+            : amplitude < 4
+            ? Math.floor(Math.random() * 500) + 100 // 100-600 hours
+            : Math.floor(Math.random() * 48) + 1 // 1-48 hours
 
         return {
           machineId,
-          estimatedHoursToFailure: hoursToFailure,
-          priority,
-          urgency,
-          maintenanceType: urgency === 'immediate' ? 'emergency' : 'preventive',
-          requiredParts: ['bearing', 'oil', 'filter'].filter(
-            () => Math.random() > 0.5
-          ),
-          estimatedDuration: Math.floor(Math.random() * 4) + 2, // 2-6 hours
-          maintenanceWindow:
-            urgency === 'immediate' ? 'anytime' : 'planned_downtime'
+          analysis: {
+            dominantFrequency: frequency,
+            rmsVelocity: amplitude,
+            peakAmplitude: amplitude * 1.5,
+            bearingCondition,
+            estimatedLifeRemaining,
+            faultFrequencies:
+              frequency > 50 ? ['bearing_outer_race', 'unbalance'] : [],
+            severity:
+              bearingCondition === 'critical'
+                ? 'high'
+                : bearingCondition === 'warning'
+                ? 'medium'
+                : 'low'
+          },
+          recommendations:
+            bearingCondition !== 'good'
+              ? [
+                  'Schedule bearing inspection',
+                  'Increase monitoring frequency',
+                  'Check lubrication levels',
+                  'Review operational parameters'
+                ]
+              : ['Continue normal operation'],
+          timestamp: Date.now()
         }
-      })
+      }
+    )
+
+    return 'vibration-analyzer'
+  })()
+
+  // Thermal imaging system
+  const thermalImaging = (() => {
+    const result = supportSystems.maintenance.action({
+      id: 'thermal-imaging',
+      throttle: 2000,
+      required: true
+    })
+
+    if (!result.ok) {
+      throw new Error(`Failed to create thermal imaging: ${result.message}`)
+    }
+
+    supportSystems.maintenance.on('thermal-imaging', (thermalData: any) => {
+      const {equipmentId, zones} = thermalData
 
       return {
-        scheduleGenerated: true,
-        totalMachines: machineIds.length,
-        criticalMachines: maintenanceSchedule.filter(
-          m => m.priority === 'critical'
-        ).length,
-        immediateActions: maintenanceSchedule.filter(
-          m => m.urgency === 'immediate'
-        ).length,
-        maintenanceSchedule: maintenanceSchedule.sort(
-          (a, b) => a.estimatedHoursToFailure - b.estimatedHoursToFailure
-        ),
-        resourceRequirements: {
-          technicians: Math.ceil(
-            maintenanceSchedule.filter(m => m.urgency !== 'routine').length / 2
-          ),
-          estimatedCost: maintenanceSchedule.reduce(
-            (sum, m) =>
-              sum +
-              (m.priority === 'critical'
-                ? 5000
-                : m.priority === 'high'
-                ? 2000
-                : 500),
-            0
-          ),
-          totalDowntime: maintenanceSchedule.reduce(
-            (sum, m) => sum + m.estimatedDuration,
-            0
-          )
-        },
+        equipmentId,
+        thermalMap: zones.map((zone: any) => ({
+          zone: zone.name,
+          avgTemperature: Math.random() * 40 + 30, // 30-70°C
+          maxTemperature: Math.random() * 20 + 60, // 60-80°C
+          hotSpots: Math.random() > 0.8 ? ['bearing', 'motor'] : [],
+          temperatureTrend: Math.random() > 0.5 ? 'rising' : 'stable'
+        })),
+        alerts:
+          Math.random() > 0.9 ? ['Overheating detected in motor housing'] : [],
         timestamp: Date.now()
       }
-    } catch (error) {
-      return {
-        error: 'Maintenance scheduling failed',
-        message: error instanceof Error ? error.message : String(error)
-      }
+    })
+
+    return 'thermal-imaging'
+  })()
+
+  // Maintenance scheduler
+  const maintenanceScheduler = (() => {
+    const result = supportSystems.maintenance.action({
+      id: 'maintenance-scheduler',
+      throttle: 5000, // 5 second minimum between calls
+      required: true
+    })
+
+    if (!result.ok) {
+      throw new Error(
+        `Failed to create maintenance scheduler: ${result.message}`
+      )
     }
-  })
+
+    supportSystems.maintenance.on(
+      'maintenance-scheduler',
+      (scheduleRequest: any) => {
+        const {machineIds} = scheduleRequest
+
+        try {
+          const maintenanceSchedule = machineIds.map((machineId: string) => {
+            const hoursToFailure = Math.floor(Math.random() * 2000) + 100
+            const priority =
+              hoursToFailure < 48
+                ? 'critical'
+                : hoursToFailure < 168
+                ? 'high'
+                : hoursToFailure < 720
+                ? 'medium'
+                : 'low'
+            const urgency =
+              priority === 'critical'
+                ? 'immediate'
+                : priority === 'high'
+                ? 'urgent'
+                : priority === 'medium'
+                ? 'scheduled'
+                : 'routine'
+
+            return {
+              machineId,
+              estimatedHoursToFailure: hoursToFailure,
+              priority,
+              urgency,
+              maintenanceType:
+                urgency === 'immediate' ? 'emergency' : 'preventive',
+              requiredParts: ['bearing', 'oil', 'filter'].filter(
+                () => Math.random() > 0.5
+              ),
+              estimatedDuration: Math.floor(Math.random() * 4) + 2, // 2-6 hours
+              maintenanceWindow:
+                urgency === 'immediate' ? 'anytime' : 'planned_downtime'
+            }
+          })
+
+          return {
+            scheduleGenerated: true,
+            totalMachines: machineIds.length,
+            criticalMachines: maintenanceSchedule.filter(
+              m => m.priority === 'critical'
+            ).length,
+            immediateActions: maintenanceSchedule.filter(
+              m => m.urgency === 'immediate'
+            ).length,
+            maintenanceSchedule: maintenanceSchedule.sort(
+              (a, b) => a.estimatedHoursToFailure - b.estimatedHoursToFailure
+            ),
+            resourceRequirements: {
+              technicians: Math.ceil(
+                maintenanceSchedule.filter(m => m.urgency !== 'routine')
+                  .length / 2
+              ),
+              estimatedCost: maintenanceSchedule.reduce(
+                (sum, m) =>
+                  sum +
+                  (m.priority === 'critical'
+                    ? 5000
+                    : m.priority === 'high'
+                    ? 2000
+                    : 500),
+                0
+              ),
+              totalDowntime: maintenanceSchedule.reduce(
+                (sum, m) => sum + m.estimatedDuration,
+                0
+              )
+            },
+            timestamp: Date.now()
+          }
+        } catch (error) {
+          return {
+            error: 'Maintenance scheduling failed',
+            message: error instanceof Error ? error.message : String(error)
+          }
+        }
+      }
+    )
+
+    return 'maintenance-scheduler'
+  })()
 
   return {
     vibrationAnalyzer,
     thermalImaging,
-    oilAnalysis,
     maintenanceScheduler
   }
 }
@@ -534,106 +578,118 @@ export const createEnergyManagementSystem = (infrastructure: any) => {
   const {supportSystems} = infrastructure
 
   // Smart energy monitoring
-  const energyMonitor = useCyre(
-    {
-      channelId: 'energy-monitor',
-      name: 'Factory Energy Monitoring System'
-    },
-    supportSystems.energy
-  )
+  const energyMonitor = (() => {
+    const result = supportSystems.energy.action({
+      id: 'energy-monitor',
+      throttle: 3000 // 3 second minimum between calls
+    })
 
-  // Load balancing controller
-  const loadBalancer = useCyre(
-    {
-      channelId: 'load-balancer',
-      name: 'Electrical Load Balancing System'
-    },
-    supportSystems.energy
-  )
+    if (!result.ok) {
+      throw new Error(`Failed to create energy monitor: ${result.message}`)
+    }
 
-  energyMonitor.on(monitoringRequest => {
-    const zones = [
-      'assembly',
-      'machining',
-      'quality',
-      'packaging',
-      'warehouse',
-      'hvac',
-      'lighting'
-    ]
+    supportSystems.energy.on('energy-monitor', (monitoringRequest: any) => {
+      const zones = [
+        'assembly',
+        'machining',
+        'quality',
+        'packaging',
+        'warehouse',
+        'hvac',
+        'lighting'
+      ]
 
-    const energyData = zones.map(zone => {
-      const baseLoad =
-        {
-          assembly: 150, // kW
-          machining: 300, // kW
-          quality: 50, // kW
-          packaging: 100, // kW
-          warehouse: 75, // kW
-          hvac: 200, // kW
-          lighting: 25 // kW
-        }[zone] || 50
+      const energyData = zones.map(zone => {
+        const baseLoad =
+          {
+            assembly: 150, // kW
+            machining: 300, // kW
+            quality: 50, // kW
+            packaging: 100, // kW
+            warehouse: 75, // kW
+            hvac: 200, // kW
+            lighting: 25 // kW
+          }[zone] || 50
 
-      const currentLoad = baseLoad * (0.8 + Math.random() * 0.4) // 80-120% of base
-      const efficiency = Math.random() * 0.2 + 0.8 // 80-100%
+        const currentLoad = baseLoad * (0.8 + Math.random() * 0.4) // 80-120% of base
+        const efficiency = Math.random() * 0.2 + 0.8 // 80-100%
+
+        return {
+          zone,
+          currentLoad,
+          baseLoad,
+          efficiency,
+          powerFactor: Math.random() * 0.1 + 0.9, // 0.9-1.0
+          harmonics: Math.random() * 5 + 1, // 1-6%
+          voltage: 400 + (Math.random() * 20 - 10), // 390-410V
+          frequency: 50 + (Math.random() * 0.2 - 0.1), // 49.9-50.1 Hz
+          timestamp: Date.now()
+        }
+      })
+
+      const totalConsumption = energyData.reduce(
+        (sum, zone) => sum + zone.currentLoad,
+        0
+      )
+      const averageEfficiency =
+        energyData.reduce((sum, zone) => sum + zone.efficiency, 0) /
+        energyData.length
 
       return {
-        zone,
-        currentLoad,
-        baseLoad,
-        efficiency,
-        powerFactor: Math.random() * 0.1 + 0.9, // 0.9-1.0
-        harmonics: Math.random() * 5 + 1, // 1-6%
-        voltage: 400 + (Math.random() * 20 - 10), // 390-410V
-        frequency: 50 + (Math.random() * 0.2 - 0.1), // 49.9-50.1 Hz
+        zones: energyData,
+        summary: {
+          totalConsumption,
+          averageEfficiency,
+          peakDemand: totalConsumption * 1.2,
+          costPerHour: totalConsumption * 0.12, // $0.12/kWh
+          carbonFootprint: totalConsumption * 0.5, // 0.5 kg CO2/kWh
+          gridStability: Math.random() > 0.05 ? 'stable' : 'fluctuating'
+        },
         timestamp: Date.now()
       }
     })
 
-    const totalConsumption = energyData.reduce(
-      (sum, zone) => sum + zone.currentLoad,
-      0
-    )
-    const averageEfficiency =
-      energyData.reduce((sum, zone) => sum + zone.efficiency, 0) /
-      energyData.length
+    return 'energy-monitor'
+  })()
 
-    return {
-      zones: energyData,
-      summary: {
-        totalConsumption,
-        averageEfficiency,
-        peakDemand: totalConsumption * 1.2,
-        costPerHour: totalConsumption * 0.12, // $0.12/kWh
-        carbonFootprint: totalConsumption * 0.5, // 0.5 kg CO2/kWh
-        gridStability: Math.random() > 0.05 ? 'stable' : 'fluctuating'
-      },
-      timestamp: Date.now()
+  // Load balancing controller
+  const loadBalancer = (() => {
+    const result = supportSystems.energy.action({
+      id: 'load-balancer',
+      throttle: 2000,
+      required: false
+    })
+
+    if (!result.ok) {
+      throw new Error(`Failed to create load balancer: ${result.message}`)
     }
-  })
 
-  loadBalancer.on(balanceRequest => {
-    const {targetReduction} = balanceRequest
+    supportSystems.energy.on('load-balancer', (balanceRequest: any) => {
+      const {targetReduction} = balanceRequest
+      const actualReduction = Math.min(
+        targetReduction || 10,
+        Math.random() * 15 + 5
+      ) // 5-20%
 
-    const actualReduction = Math.min(
-      targetReduction || 10,
-      Math.random() * 15 + 5
-    ) // 5-20%
+      return {
+        balancing: {
+          targetReduction: targetReduction || 10,
+          actualReduction,
+          affectedZones: ['machining', 'hvac'].filter(
+            () => Math.random() > 0.3
+          ),
+          loadShiftedMW: actualReduction * 0.9,
+          savingsPerHour: actualReduction * 0.9 * 0.12, // $/hour
+          durationMinutes: Math.floor(Math.random() * 60) + 30 // 30-90 minutes
+        },
+        powerQualityImpact: 'minimal',
+        operationalImpact: actualReduction > 40 ? 'moderate' : 'low',
+        timestamp: Date.now()
+      }
+    })
 
-    return {
-      balancing: {
-        targetReduction: targetReduction || 10,
-        actualReduction,
-        affectedZones: ['machining', 'hvac'].filter(() => Math.random() > 0.3),
-        loadShiftedMW: actualReduction * 0.9,
-        savingsPerHour: actualReduction * 0.9 * 0.12, // $/hour
-        durationMinutes: Math.floor(Math.random() * 60) + 30 // 30-90 minutes
-      },
-      powerQualityImpact: 'minimal',
-      operationalImpact: actualReduction > 40 ? 'moderate' : 'low',
-      timestamp: Date.now()
-    }
-  })
+    return 'load-balancer'
+  })()
 
   return {
     energyMonitor,
@@ -645,153 +701,186 @@ export const createEnergyManagementSystem = (infrastructure: any) => {
 // FACTORY ORCHESTRATOR
 // ========================================
 
-export const createSmartFactoryOrchestrator = () => {
+export const createSmartFactoryOrchestrator = async () => {
+  // Initialize Cyre first
+  const initResult = await cyre.init()
+  if (!initResult.ok) {
+    throw new Error(`Failed to initialize Cyre: ${initResult.message}`)
+  }
+
   const infrastructure = createFactoryInfrastructure()
   const productionSystems = createProductionLineMonitoring(infrastructure)
   const maintenanceSystems = createPredictiveMaintenanceSystem(infrastructure)
   const energySystems = createEnergyManagementSystem(infrastructure)
 
   // Master factory coordinator
-  const factoryCoordinator = useCyre(
-    {
-      channelId: 'factory-coordinator',
-      name: 'Smart Factory Master Coordinator'
-    },
-    infrastructure.smartFactory
-  )
+  const coordinatorResult = infrastructure.smartFactory.action({
+    id: 'factory-coordinator',
+    throttle: 1000, // 1 second minimum between coordination calls
+    required: true
+  })
 
-  factoryCoordinator.on(async request => {
-    try {
-      switch (request.type) {
-        case 'production_status':
-          // Parent → Child communication (like React props)
-          // NO sibling communication: assembly can't call quality directly
-          // Parent coordinates all cross-branch operations
-          const conveyorStatus =
-            await productionSystems.assemblyLineSystems.conveyorControl.call({
-              speed: 1.2,
-              direction: 'forward'
-            })
+  if (!coordinatorResult.ok) {
+    throw new Error(
+      `Failed to create factory coordinator: ${coordinatorResult.message}`
+    )
+  }
 
-          const robotStatus = await Promise.all(
-            productionSystems.assemblyLineSystems.roboticArms.map(robot =>
-              robot.call({task: 'assembly', toolhead: 'gripper'})
+  infrastructure.smartFactory.on(
+    'factory-coordinator',
+    async (request: any) => {
+      try {
+        switch (request.type) {
+          case 'production_status':
+            // Parent → Child communication
+            const conveyorStatus = await productionAreas.assembly.call(
+              'conveyor-control',
+              {
+                speed: 1.2,
+                direction: 'forward'
+              }
             )
-          )
 
-          const qualityResults = await Promise.all(
-            productionSystems.assemblyLineSystems.qualitySensors
-              .slice(0, 3)
-              .map(sensor => sensor.call({partId: `PART-${Date.now()}`}))
-          )
+            const robotStatus = await Promise.all(
+              productionSystems.assemblyLineSystems.roboticArms.map(robotId =>
+                productionAreas.assembly.call(robotId, {
+                  task: 'assembly',
+                  toolhead: 'gripper'
+                })
+              )
+            )
 
-          return {
-            type: 'production_status_response',
-            conveyor: conveyorStatus.payload,
-            robots: robotStatus.map(r => r.payload),
-            quality: qualityResults.map(q => q.payload),
-            overallEfficiency: Math.random() * 0.1 + 0.85, // 85-95%
-            currentShift: 'Day Shift',
-            targetProduction: 1000,
-            actualProduction: Math.floor(Math.random() * 100) + 850,
-            timestamp: Date.now()
-          }
+            const qualityResults = await Promise.all(
+              productionSystems.assemblyLineSystems.qualitySensors
+                .slice(0, 3)
+                .map(sensorId =>
+                  productionAreas.assembly.call(sensorId, {
+                    partId: `PART-${Date.now()}`
+                  })
+                )
+            )
 
-        case 'maintenance_overview':
-          // Get maintenance predictions and schedule
-          const maintenanceSchedule =
-            await maintenanceSystems.maintenanceScheduler.call({
-              machineIds: [
-                'CNC-001',
-                'CNC-002',
-                'CNC-003',
-                'ROBOT-001',
-                'ROBOT-002',
-                'CONV-001'
-              ]
-            })
+            return {
+              type: 'production_status_response',
+              conveyor: conveyorStatus.payload,
+              robots: robotStatus.map(r => r.payload),
+              quality: qualityResults.map(q => q.payload),
+              overallEfficiency: Math.random() * 0.1 + 0.85, // 85-95%
+              currentShift: 'Day Shift',
+              targetProduction: 1000,
+              actualProduction: Math.floor(Math.random() * 100) + 850,
+              timestamp: Date.now()
+            }
 
-          return {
-            type: 'maintenance_overview_response',
-            schedule: maintenanceSchedule.payload,
-            systemHealth: {
-              criticalMachines: maintenanceSchedule.payload.criticalMachines,
-              immediateActions: maintenanceSchedule.payload.immediateActions,
-              totalDowntime:
-                maintenanceSchedule.payload.resourceRequirements.totalDowntime
-            },
-            timestamp: Date.now()
-          }
+          case 'maintenance_overview':
+            const maintenanceSchedule = await supportSystems.maintenance.call(
+              'maintenance-scheduler',
+              {
+                machineIds: [
+                  'CNC-001',
+                  'CNC-002',
+                  'CNC-003',
+                  'ROBOT-001',
+                  'ROBOT-002',
+                  'CONV-001'
+                ]
+              }
+            )
 
-        case 'energy_optimization':
-          // Optimize energy usage
-          const energyStatus = await energySystems.energyMonitor.call({})
-          const loadBalance = await energySystems.loadBalancer.call({
-            targetReduction: 15
-          })
+            return {
+              type: 'maintenance_overview_response',
+              schedule: maintenanceSchedule.payload,
+              systemHealth: {
+                criticalMachines: maintenanceSchedule.payload.criticalMachines,
+                immediateActions: maintenanceSchedule.payload.immediateActions,
+                totalDowntime:
+                  maintenanceSchedule.payload.resourceRequirements.totalDowntime
+              },
+              timestamp: Date.now()
+            }
 
-          return {
-            type: 'energy_optimization_response',
-            currentStatus: energyStatus.payload,
-            optimization: loadBalance.payload,
-            projectedSavings: loadBalance.payload.balancing.savingsPerHour * 24, // Daily savings
-            timestamp: Date.now()
-          }
+          case 'energy_optimization':
+            const energyStatus = await supportSystems.energy.call(
+              'energy-monitor',
+              {}
+            )
+            const loadBalance = await supportSystems.energy.call(
+              'load-balancer',
+              {targetReduction: 15}
+            )
 
-        case 'emergency_shutdown':
-          // Emergency shutdown procedure
-          return {
-            type: 'emergency_shutdown_response',
-            status: 'initiated',
-            shutdownSequence: [
-              'Stop all production lines',
-              'Safe robotic arm positions',
-              'Coolant systems shutdown',
-              'Ventilation maintained',
-              'Emergency lighting activated'
-            ],
-            estimatedShutdownTime: '5 minutes',
-            safetyStatus: 'all_systems_safe',
-            timestamp: Date.now()
-          }
+            return {
+              type: 'energy_optimization_response',
+              currentStatus: energyStatus.payload,
+              optimization: loadBalance.payload,
+              projectedSavings:
+                loadBalance.payload.balancing.savingsPerHour * 24, // Daily savings
+              timestamp: Date.now()
+            }
 
-        default:
-          return {
-            type: 'unknown_request',
-            message: 'Unknown request type',
-            timestamp: Date.now()
-          }
-      }
-    } catch (error) {
-      return {
-        type: 'error',
-        message: error instanceof Error ? error.message : String(error)
+          case 'emergency_shutdown':
+            return {
+              type: 'emergency_shutdown_response',
+              status: 'initiated',
+              shutdownSequence: [
+                'Stop all production lines',
+                'Safe robotic arm positions',
+                'Coolant systems shutdown',
+                'Ventilation maintained',
+                'Emergency lighting activated'
+              ],
+              estimatedShutdownTime: '5 minutes',
+              safetyStatus: 'all_systems_safe',
+              timestamp: Date.now()
+            }
+
+          default:
+            return {
+              type: 'unknown_request',
+              message: 'Unknown request type',
+              timestamp: Date.now()
+            }
+        }
+      } catch (error) {
+        return {
+          type: 'error',
+          message: error instanceof Error ? error.message : String(error)
+        }
       }
     }
-  })
+  )
+
+  const {productionAreas} = infrastructure
 
   return {
     infrastructure,
     productionSystems,
     maintenanceSystems,
     energySystems,
-    factoryCoordinator,
 
     // Convenience methods
     async getProductionStatus() {
-      return await factoryCoordinator.call({type: 'production_status'})
+      return await infrastructure.smartFactory.call('factory-coordinator', {
+        type: 'production_status'
+      })
     },
 
     async getMaintenanceOverview() {
-      return await factoryCoordinator.call({type: 'maintenance_overview'})
+      return await infrastructure.smartFactory.call('factory-coordinator', {
+        type: 'maintenance_overview'
+      })
     },
 
     async optimizeEnergy() {
-      return await factoryCoordinator.call({type: 'energy_optimization'})
+      return await infrastructure.smartFactory.call('factory-coordinator', {
+        type: 'energy_optimization'
+      })
     },
 
     async emergencyShutdown() {
-      return await factoryCoordinator.call({type: 'emergency_shutdown'})
+      return await infrastructure.smartFactory.call('factory-coordinator', {
+        type: 'emergency_shutdown'
+      })
     }
   }
 }
@@ -803,31 +892,461 @@ export const createSmartFactoryOrchestrator = () => {
 export const smartFactoryDemo = async () => {
   console.log('🏭 Initializing Smart Factory IoT System...')
 
-  const factory = createSmartFactoryOrchestrator()
+  try {
+    const factory = await createSmartFactoryOrchestrator()
 
-  // ✅ ALLOWED: Parent coordination (React-like data flow)
-  console.log('\n📊 Getting production status...')
-  const productionStatus = await factory.getProductionStatus()
-  console.log('Production Status:', productionStatus)
+    console.log('\n📊 Getting production status...')
+    const productionStatus = await factory.getProductionStatus()
+    console.log('Production Status:', productionStatus.payload)
 
-  console.log('\n🔧 Getting maintenance overview...')
-  const maintenanceOverview = await factory.getMaintenanceOverview()
-  console.log('Maintenance Overview:', maintenanceOverview)
+    console.log('\n🔧 Getting maintenance overview...')
+    const maintenanceOverview = await factory.getMaintenanceOverview()
+    console.log('Maintenance Overview:', maintenanceOverview.payload)
 
-  console.log('\n⚡ Optimizing energy usage...')
-  const energyOptimization = await factory.optimizeEnergy()
-  console.log('Energy Optimization:', energyOptimization)
+    console.log('\n⚡ Optimizing energy usage...')
+    const energyOptimization = await factory.optimizeEnergy()
+    console.log('Energy Optimization:', energyOptimization.payload)
 
-  console.log('\n🚨 Testing emergency shutdown...')
-  const emergencyResponse = await factory.emergencyShutdown()
-  console.log('Emergency Response:', emergencyResponse)
+    console.log('\n🚨 Testing emergency shutdown...')
+    const emergencyResponse = await factory.emergencyShutdown()
+    console.log('Emergency Response:', emergencyResponse.payload)
 
-  // ❌ BLOCKED: These would throw errors due to React-like isolation
-  // productionAreas.assembly.call('../quality/inspect', data)  // Sibling access blocked
-  // productionAreas.assembly.call('../../maintenance/schedule', data)  // Parent access blocked
-  // Only parent → child calls allowed!
+    // ✅ ALLOWED: Parent coordination (React-like data flow)
+    console.log('\n🔍 Direct sensor testing...')
 
-  return factory
+    // Test individual components through parent coordination
+    const robotTest =
+      await factory.infrastructure.productionAreas.assembly.call(
+        'robot-arm-0',
+        {
+          task: 'pick_and_place',
+          toolhead: 'vacuum_gripper'
+        }
+      )
+    console.log('Robot Test:', robotTest.payload)
+
+    const qualityTest =
+      await factory.infrastructure.productionAreas.assembly.call(
+        'quality-sensor-0',
+        {
+          partId: 'TEST-PART-001'
+        }
+      )
+    console.log('Quality Test:', qualityTest.payload)
+
+    // Test maintenance systems
+    const vibrationTest =
+      await factory.infrastructure.supportSystems.maintenance.call(
+        'vibration-analyzer',
+        {
+          machineId: 'CNC-001',
+          vibrationReadings: {
+            frequency: 45.5,
+            amplitude: 2.3
+          }
+        }
+      )
+    console.log('Vibration Analysis:', vibrationTest.payload)
+
+    // Test energy monitoring
+    const energyTest = await factory.infrastructure.supportSystems.energy.call(
+      'energy-monitor',
+      {
+        includeDetails: true
+      }
+    )
+    console.log('Energy Monitoring:', energyTest.payload)
+
+    console.log('\n📈 System Metrics...')
+    const systemMetrics = cyre.getMetrics()
+    console.log('Cyre System Metrics:', {
+      totalChannels: systemMetrics.stores.channels,
+      totalSubscribers: systemMetrics.stores.subscribers,
+      systemHealth: systemMetrics.system.health,
+      uptime: systemMetrics.system.uptime
+    })
+
+    console.log('\n🏭 Smart Factory Demo completed successfully!')
+    return factory
+  } catch (error) {
+    console.error('❌ Smart Factory Demo failed:', error)
+    throw error
+  }
 }
 
-export default smartFactoryDemo()
+// ========================================
+// ADVANCED FEATURES DEMO
+// ========================================
+
+export const advancedFactoryFeatures = async () => {
+  console.log('🔬 Testing Advanced Factory Features...')
+
+  try {
+    const factory = await createSmartFactoryOrchestrator()
+
+    // ========================================
+    // 1. GROUP OPERATIONS - Coordinate multiple robots
+    // ========================================
+    console.log('\n🤖 Testing Robot Group Coordination...')
+
+    const robotGroup = useGroup(
+      [
+        {
+          id: 'robot-arm-0',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'robot-arm-0',
+              payload
+            )
+        },
+        {
+          id: 'robot-arm-1',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'robot-arm-1',
+              payload
+            )
+        },
+        {
+          id: 'robot-arm-2',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'robot-arm-2',
+              payload
+            )
+        }
+      ],
+      {
+        strategy: 'parallel',
+        errorStrategy: 'continue',
+        timeout: 5000
+      }
+    )
+
+    const robotGroupResult = await robotGroup.call({
+      task: 'coordinate_assembly',
+      toolhead: 'precision_gripper',
+      synchronize: true
+    })
+
+    console.log('Robot Group Coordination:', {
+      successful: robotGroupResult.metadata?.successful,
+      failed: robotGroupResult.metadata?.failed,
+      executionTime: robotGroupResult.metadata?.executionTime
+    })
+
+    // ========================================
+    // 2. QUALITY SENSOR ARRAY - Parallel quality checks
+    // ========================================
+    console.log('\n🔍 Testing Quality Sensor Array...')
+
+    const qualityGroup = useGroup(
+      [
+        {
+          id: 'quality-sensor-0',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'quality-sensor-0',
+              payload
+            )
+        },
+        {
+          id: 'quality-sensor-1',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'quality-sensor-1',
+              payload
+            )
+        },
+        {
+          id: 'quality-sensor-2',
+          call: payload =>
+            factory.infrastructure.productionAreas.assembly.call(
+              'quality-sensor-2',
+              payload
+            )
+        }
+      ],
+      {
+        strategy: 'parallel',
+        errorStrategy: 'fail-fast'
+      }
+    )
+
+    const qualityResults = await qualityGroup.call({
+      batchId: 'BATCH-001',
+      qualityStandard: 'ISO-9001'
+    })
+
+    console.log('Quality Array Results:', {
+      passRate:
+        qualityResults.payload?.filter((r: any) => r.payload.passed).length /
+        qualityResults.payload?.length,
+      defectsDetected: qualityResults.payload?.flatMap(
+        (r: any) => r.payload.defectTypes
+      ).length
+    })
+
+    // ========================================
+    // 3. CNC MACHINE FLEET MANAGEMENT
+    // ========================================
+    console.log('\n⚙️ Testing CNC Fleet Management...')
+
+    const cncFleet = useGroup(
+      factory.productionSystems.machiningSystemsBranch.cncMachines.map(
+        (cncId: string, index: number) => ({
+          id: cncId,
+          call: payload =>
+            factory.infrastructure.productionAreas.machining.call(
+              cncId,
+              payload
+            )
+        })
+      ),
+      {
+        strategy: 'parallel',
+        errorStrategy: 'continue',
+        timeout: 10000
+      }
+    )
+
+    const fleetStatus = await cncFleet.call({
+      operation: 'status_check',
+      includeMetrics: true
+    })
+
+    const operationalMachines = fleetStatus.payload?.filter(
+      (r: any) => r.payload.status === 'running'
+    ).length
+    console.log('CNC Fleet Status:', {
+      totalMachines:
+        factory.productionSystems.machiningSystemsBranch.cncMachines.length,
+      operational: operationalMachines,
+      efficiency:
+        operationalMachines /
+        factory.productionSystems.machiningSystemsBranch.cncMachines.length
+    })
+
+    // ========================================
+    // 4. PREDICTIVE MAINTENANCE COORDINATION
+    // ========================================
+    console.log('\n🔧 Testing Predictive Maintenance Coordination...')
+
+    // Analyze all critical machines
+    const criticalMachines = [
+      'CNC-001',
+      'CNC-002',
+      'CNC-003',
+      'ROBOT-001',
+      'ROBOT-002',
+      'CONVEYOR-001'
+    ]
+
+    const maintenanceAnalysis = await Promise.all([
+      // Vibration analysis
+      factory.infrastructure.supportSystems.maintenance.call(
+        'vibration-analyzer',
+        {
+          machineId: 'CNC-001',
+          vibrationReadings: {frequency: 55, amplitude: 3.2}
+        }
+      ),
+      // Thermal analysis
+      factory.infrastructure.supportSystems.maintenance.call(
+        'thermal-imaging',
+        {
+          equipmentId: 'CNC-001',
+          zones: [
+            {name: 'spindle_motor'},
+            {name: 'coolant_pump'},
+            {name: 'hydraulic_system'}
+          ]
+        }
+      ),
+      // Schedule maintenance
+      factory.infrastructure.supportSystems.maintenance.call(
+        'maintenance-scheduler',
+        {
+          machineIds: criticalMachines
+        }
+      )
+    ])
+
+    console.log('Maintenance Analysis Complete:', {
+      vibrationStatus: maintenanceAnalysis[0].payload.analysis.bearingCondition,
+      thermalAlerts: maintenanceAnalysis[1].payload.alerts.length,
+      criticalMachines: maintenanceAnalysis[2].payload.criticalMachines,
+      immediateActions: maintenanceAnalysis[2].payload.immediateActions
+    })
+
+    // ========================================
+    // 5. ENERGY OPTIMIZATION CYCLE
+    // ========================================
+    console.log('\n⚡ Testing Energy Optimization Cycle...')
+
+    // Monitor baseline energy
+    const baselineEnergy =
+      await factory.infrastructure.supportSystems.energy.call(
+        'energy-monitor',
+        {}
+      )
+
+    // Apply load balancing
+    const loadBalancing =
+      await factory.infrastructure.supportSystems.energy.call('load-balancer', {
+        targetReduction: 20
+      })
+
+    // Monitor optimized energy
+    await new Promise(resolve => setTimeout(resolve, 1000)) // Simulate time passage
+    const optimizedEnergy =
+      await factory.infrastructure.supportSystems.energy.call(
+        'energy-monitor',
+        {}
+      )
+
+    console.log('Energy Optimization Results:', {
+      baselineConsumption: baselineEnergy.payload.summary.totalConsumption,
+      targetReduction: loadBalancing.payload.balancing.targetReduction,
+      actualReduction: loadBalancing.payload.balancing.actualReduction,
+      projectedSavings: loadBalancing.payload.balancing.savingsPerHour,
+      optimizedConsumption: optimizedEnergy.payload.summary.totalConsumption
+    })
+
+    // ========================================
+    // 6. BRANCH STATISTICS AND MONITORING
+    // ========================================
+    console.log('\n📊 Branch Statistics and Monitoring...')
+
+    const branchStats = {
+      smartFactory: factory.infrastructure.smartFactory.getStats(),
+      assembly: factory.infrastructure.productionAreas.assembly.getStats(),
+      machining: factory.infrastructure.productionAreas.machining.getStats(),
+      maintenance: factory.infrastructure.supportSystems.maintenance.getStats(),
+      energy: factory.infrastructure.supportSystems.energy.getStats()
+    }
+
+    console.log('Branch Statistics:', {
+      totalBranches: Object.keys(branchStats).length,
+      totalChannels: Object.values(branchStats).reduce(
+        (sum, stat) => sum + stat.channelCount,
+        0
+      ),
+      maxDepth: Math.max(...Object.values(branchStats).map(stat => stat.depth)),
+      activeBranches: Object.values(branchStats).filter(stat => stat.isActive)
+        .length
+    })
+
+    console.log('\n🎉 Advanced Factory Features Demo completed successfully!')
+    return {
+      factory,
+      robotGroup,
+      qualityGroup,
+      cncFleet,
+      maintenanceAnalysis,
+      energyOptimization: {
+        baseline: baselineEnergy.payload,
+        optimization: loadBalancing.payload,
+        result: optimizedEnergy.payload
+      },
+      branchStats
+    }
+  } catch (error) {
+    console.error('❌ Advanced Features Demo failed:', error)
+    throw error
+  }
+}
+
+// ========================================
+// REAL-TIME MONITORING DEMO
+// ========================================
+
+export const realTimeMonitoringDemo = async () => {
+  console.log('📡 Starting Real-Time Factory Monitoring...')
+
+  try {
+    const factory = await createSmartFactoryOrchestrator()
+
+    // Set up continuous monitoring with intervals
+    const monitoringIntervals = {
+      production: setInterval(async () => {
+        try {
+          const status = await factory.getProductionStatus()
+          console.log(`[${new Date().toISOString()}] Production Status:`, {
+            efficiency: status.payload.overallEfficiency,
+            throughput: status.payload.conveyor.totalThroughput,
+            robotsOperational: status.payload.robots.filter(
+              (r: any) => r.status === 'operational'
+            ).length
+          })
+        } catch (error) {
+          console.error('Production monitoring error:', error)
+        }
+      }, 5000), // Every 5 seconds
+
+      energy: setInterval(async () => {
+        try {
+          const energy =
+            await factory.infrastructure.supportSystems.energy.call(
+              'energy-monitor',
+              {}
+            )
+          console.log(`[${new Date().toISOString()}] Energy Status:`, {
+            totalConsumption: energy.payload.summary.totalConsumption,
+            efficiency: energy.payload.summary.averageEfficiency,
+            costPerHour: energy.payload.summary.costPerHour
+          })
+        } catch (error) {
+          console.error('Energy monitoring error:', error)
+        }
+      }, 10000), // Every 10 seconds
+
+      maintenance: setInterval(async () => {
+        try {
+          const maintenance = await factory.getMaintenanceOverview()
+          console.log(`[${new Date().toISOString()}] Maintenance Status:`, {
+            criticalMachines: maintenance.payload.systemHealth.criticalMachines,
+            immediateActions: maintenance.payload.systemHealth.immediateActions,
+            totalDowntime: maintenance.payload.systemHealth.totalDowntime
+          })
+        } catch (error) {
+          console.error('Maintenance monitoring error:', error)
+        }
+      }, 15000) // Every 15 seconds
+    }
+
+    console.log('📡 Real-time monitoring started. Press Ctrl+C to stop.')
+
+    // Run for 60 seconds then clean up
+    setTimeout(() => {
+      console.log('\n🛑 Stopping real-time monitoring...')
+      Object.values(monitoringIntervals).forEach(interval =>
+        clearInterval(interval)
+      )
+      console.log('✅ Real-time monitoring stopped.')
+    }, 60000)
+
+    return {
+      factory,
+      monitoringIntervals,
+      stop: () => {
+        Object.values(monitoringIntervals).forEach(interval =>
+          clearInterval(interval)
+        )
+        console.log('🛑 Manual stop - real-time monitoring stopped.')
+      }
+    }
+  } catch (error) {
+    console.error('❌ Real-time monitoring setup failed:', error)
+    throw error
+  }
+}
+
+// Export all demo functions
+export default {
+  smartFactoryDemo,
+  advancedFactoryFeatures,
+  realTimeMonitoringDemo
+}
+
+smartFactoryDemo(), advancedFactoryFeatures(), realTimeMonitoringDemo()

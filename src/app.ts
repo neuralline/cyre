@@ -455,9 +455,8 @@ export const cyre = Object.freeze({
 
   // SEAMLESS QUERY INTEGRATION
   //query,
-  path: id => {
-    const path = io.get(id) || {path: ''}
-    return path.path || ''
+  path: () => {
+    return ''
   },
   // DEVELOPER EXPERIENCE HELPERS
 
