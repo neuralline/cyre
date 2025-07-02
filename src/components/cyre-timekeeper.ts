@@ -368,7 +368,7 @@ const QuartzEngine = {
     // Save to timeline
     getTimeline().add(updatedFormation)
 
-    sensor.debug(updatedFormation.id, 'Next execution scheduled')
+    // sensor.debug(updatedFormation.id, 'Next execution scheduled')
   },
 
   addToGroups(formation: Timer): void {
@@ -530,7 +530,6 @@ export const TimeKeeper = {
     if (formation) {
       QuartzEngine.removeFromGroups(formation)
       timeline.forget(id)
-      sensor.debug(id, 'Timer forgotten')
     }
   },
 

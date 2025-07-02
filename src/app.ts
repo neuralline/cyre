@@ -1,6 +1,12 @@
 // src/app.ts - Updated with intelligent system orchestration
 
-import type {IO, ActionPayload, CyreResponse} from './types/core'
+import type {
+  IO,
+  ActionPayload,
+  CyreResponse,
+  EventHandler,
+  SubscriptionResponse
+} from './types/core'
 import {MSG} from './config/cyre-config'
 import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
@@ -15,10 +21,8 @@ import payloadState from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
-import type {OrchestrationConfig} from './types/orchestration'
 
 import {schedule} from './components/cyre-schedule'
-import {QuickScheduleConfig, ScheduleConfig} from './types/timeline'
 import {useDispatch} from './components/cyre-dispatch'
 
 /* 
@@ -70,8 +74,46 @@ import {useDispatch} from './components/cyre-dispatch'
 */
 
 // Track initialization state
-let systemOrchestrationIds: string[] = []
-let sysInitialize = false
+export interface CyreInstance {
+  // Core methods
+  init: () => Promise<{ok: boolean; payload: number | null; message: string}>
+  action: (config: IO | IO[]) => {ok: boolean; message: string; payload?: any}
+  on: (id: string, handler: EventHandler) => SubscriptionResponse
+  call: (id: string, payload?: ActionPayload) => Promise<CyreResponse>
+  get: (id: string) => IO | undefined
+  forget: (id: string) => boolean
+  clear: () => void
+  reset: () => void
+
+  // Orchestration integration
+  //orchestration: typeof import('./orchestration/orchestration-engine').orchestration
+
+  // Path system
+  path: () => string
+
+  // Developer experience helpers
+  //schedule: typeof import('./components/cyre-schedule').schedule
+
+  // State methods
+  hasChanged: (id: string, payload: ActionPayload) => boolean
+  getPrevious: (id: string) => ActionPayload | undefined
+  updatePayload: (id: string, payload: ActionPayload) => void
+
+  // Control methods with metrics
+  pause: (id?: string) => void
+  resume: (id?: string) => void
+  lock: () => {ok: boolean; message: string; payload: null}
+  shutdown: () => void
+  status: () => boolean
+
+  // Metrics API
+  getMetrics: (
+    channelId?: string
+  ) =>
+    | import('./types/system').ChannelMetricsResult
+    | import('./types/system').SystemMetricsResult
+    | {error: string; available: false}
+}
 
 /**
  * Initialize with standardized system intelligence
@@ -82,7 +124,7 @@ const init = async (): Promise<{
   message: string
 }> => {
   try {
-    if (sysInitialize || metricsState.init()) {
+    if (metricsState.isInit()) {
       log.sys('System already initialized')
       return {ok: true, payload: Date.now(), message: MSG.ONLINE}
     }
@@ -97,7 +139,6 @@ const init = async (): Promise<{
 
     sensor.debug('system', 'success', 'system-initialization')
 
-    sysInitialize = true
     metricsState.init()
 
     log.success('Cyre initialized with system intelligence')
@@ -366,12 +407,12 @@ const forget = (id: string): boolean => {
     //removeChannelFromGroups(id)
 
     if (actionRemoved || subscriberRemoved) {
-      sensor.info(id, 'Action removal successful')
+      //sensor.info(id, 'Action removal successful')
 
       return true
     }
 
-    sensor.info(id, 'Action removal failed - not found')
+    sensor.info(`No channel found to remove for id: ${id}`, 'action-removal')
     return false
   } catch (error) {
     log.error(`Failed to forget ${id}: ${error}`)
@@ -383,11 +424,6 @@ const shutdown = (): void => {
   try {
     sensor.debug('system', 'critical', 'system-shutdown')
     sensor.sys('system', 'Initiating system shutdown')
-
-    // Stop system orchestrations
-    systemOrchestrationIds.forEach(id => {
-      orchestration.stop(id)
-    })
 
     reset()
     sensor.debug('System offline!')
@@ -406,12 +442,6 @@ const reset = (): void => {
   try {
     sensor.info('system', 'System clear initiated')
 
-    // Stop system orchestrations first
-    systemOrchestrationIds.forEach(id => {
-      orchestration.stop(id)
-      orchestration.forget(id)
-    })
-
     io.clear()
     subscribers.clear()
     timeline.clear()
@@ -420,17 +450,6 @@ const reset = (): void => {
     payloadState.clear()
 
     // Clear all groups
-    // groupOperations.getAll().forEach(group => {
-    //   groupOperations.remove(group.id)
-    // })
-
-    // Clear orchestrations
-    orchestration.list().forEach(runtime => {
-      orchestration.forget(runtime.config.id)
-    })
-
-    // Clear query cache
-    // query.cache.clear()
 
     log.success('System cleared')
   } catch (error) {
@@ -441,7 +460,7 @@ const reset = (): void => {
 /**
  * Main CYRE instance with intelligent system orchestration
  */
-export const cyre = Object.freeze({
+export const cyre: CyreInstance = Object.freeze({
   // Core methods
   init,
   action,

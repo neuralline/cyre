@@ -94,12 +94,15 @@ export const CyreActions = (action: IO): RegistrationResult => {
       const errorMessage =
         error instanceof Error ? error.message : String(error)
 
-      log.error(`Channel storage failed for ${finalAction.id}: ${errorMessage}`)
-      sensor.error(finalAction.id, errorMessage, 'storage-failed')
+      sensor.error(
+        finalAction.id,
+        `Channel creation failed for ${finalAction.id}: ${errorMessage}`,
+        'channel-creation-failed'
+      )
 
       return {
         ok: false,
-        message: `Channel creation failed: ${errorMessage}`,
+        message: `Channel creation failed for ${finalAction.id}: ${errorMessage}`,
         errors: [errorMessage],
         compilationTime
       }
@@ -146,12 +149,12 @@ export const CyreActions = (action: IO): RegistrationResult => {
     const errorMessage = error instanceof Error ? error.message : String(error)
     const totalTime = performance.now() - startTime
 
-    log.error(
-      `Channel creation failed for ${action?.id || 'unknown'}: ${errorMessage}`
-    )
+    // log.error(
+    //   `Channel creation failed for ${action?.id || 'unknown'}: ${errorMessage}`
+    // )
     sensor.error(
       action?.id || 'unknown',
-      errorMessage,
+      `Channel creation failed for ${action?.id || 'unknown'}: ${errorMessage}`,
       'registration-exception'
     )
 

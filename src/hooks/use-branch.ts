@@ -1,10 +1,10 @@
 // src/hooks/use-branch.ts
 // Branch system with required instance and proper error handling
 
-import type {Branch, BranchConfig, CyreInstance} from '../types/hooks'
+import type {Branch, BranchConfig} from '../types/hooks'
 import type {IO, BranchStore} from '../types/core'
 import {sensor} from '../components/sensor'
-import {cyre} from '../app'
+import {cyre, CyreInstance} from '../app'
 
 /**
  * Branch configuration - minimal like React props
@@ -23,7 +23,7 @@ export interface UseBranchConfig extends BranchConfig {
  * - Creates branches ON instances, not channels
  */
 export function useBranch(
-  instance: CyreInstance,
+  instance: CyreInstance | Branch,
   config: UseBranchConfig = {}
 ): Branch | false {
   // VALIDATION 1: Required instance check

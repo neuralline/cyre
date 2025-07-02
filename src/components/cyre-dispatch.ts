@@ -39,7 +39,7 @@ export const useDispatch = async (
 
     if (!subscriber) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
-
+      log.critical('subscriber not found')
       sensor.error(error, action.id)
 
       return {ok: false, payload: null, message: error}

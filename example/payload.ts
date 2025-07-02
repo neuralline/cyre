@@ -1,7 +1,7 @@
-import cyre from '../src/app'
+import cyre from '../src'
 
 cyre.on('action1', payload => {
-    console.log(payload.frute)
+  console.log(payload.frute)
 })
 cyre.action({id: 'action1', repeat: 10, interval: 500})
 
@@ -15,7 +15,7 @@ lemon()
 
 cyre.action({id: 'uber', payload: 44085648634})
 cyre.on('uber', number => {
-    console.log('Calling Uber: ', number)
+  console.log('Calling Uber: ', number)
 })
 cyre.call('uber')
 //cyre.shutdown()

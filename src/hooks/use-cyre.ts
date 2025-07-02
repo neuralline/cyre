@@ -1,9 +1,9 @@
 // src/hooks/use-cyre.ts
-// Updated useCyre hook with perfect branch integration
+// Updated useCyre hook with perfect branch integration and fixed implementation
 
 import type {IO, ActionPayload, CyreResponse, EventHandler} from '../types/core'
-import type {Branch, CyreInstance} from '../types/hooks'
-import {cyre} from '../app'
+import type {Branch} from '../types/hooks'
+import {cyre, CyreInstance} from '../app'
 import {sensor} from '../components/sensor'
 
 /**
@@ -24,10 +24,6 @@ export interface UseCyreConfig {
  * Return type for useCyre hook
  */
 export interface CyreHook {
-  /** Local channel ID */
-  id: string
-  /** Global channel ID (includes path prefix if on branch) */
-  globalId: string
   /** Branch path (empty string for root) */
   path: string
   /** Call the channel */
@@ -38,12 +34,12 @@ export interface CyreHook {
     message: string
     unsubscribe?: () => boolean
   }
+
   /** Get current channel configuration */
   get: () => IO | undefined
   /** Remove the channel */
   forget: () => boolean
-  /** Check if channel exists */
-  exists: () => boolean
+
   /** Get channel statistics */
   getStats: () => {
     globalId: string
@@ -59,66 +55,64 @@ export interface CyreHook {
 /**
  * Perfect useCyre hook that works seamlessly with both main cyre and branches
  *
- * @param config - Channel configuration
- * @param instance - Optional branch or cyre instance (defaults to main cyre)
+ * @param instance - Required branch or cyre instance
+ * @param config - Optional channel configuration
  * @returns CyreHook interface for channel operations
  */
 export const useCyre = (
-  config: UseCyreConfig,
-  instance?: CyreInstance | Branch
+  instance: CyreInstance | Branch,
+  config?: IO
 ): CyreHook => {
-  // Validate config
-  if (!config.channelId) {
-    throw new Error('useCyre requires a channelId in config')
-  }
-
-  // Determine if we're working with a branch or main cyre
-  const isBranch = instance && typeof (instance as Branch).path === 'function'
-  const isMainCyre = !instance || instance === cyre
-  const targetInstance = instance || cyre
-
-  // Get path information
-  let path: string = ''
-  let globalChannelId: string = config.channelId
-
-  if (isBranch) {
-    // ✅ BRANCH MODE: Use branch path + local ID
-    const branch = instance as Branch
-    path = branch.path()
-    globalChannelId = path ? `${path}/${config.channelId}` : config.channelId
-  } else if (isMainCyre) {
-    // ✅ ROOT MODE: Use local ID as global ID
-    path = ''
-    globalChannelId = config.channelId
-  } else {
-    // ✅ CYRE INSTANCE MODE: Use instance path if available
-    const cyreInstance = instance as CyreInstance
-    if (typeof cyreInstance.path === 'function') {
-      path = cyreInstance.path()
-      globalChannelId = path ? `${path}/${config.channelId}` : config.channelId
-    }
-  }
-
-  // Create channel configuration
-  const channelConfig: IO = {
-    id: config.channelId, // Local ID for branch operations
-    payload: config.payload,
-    ...config.config,
-    // Preserve any existing tags and add useCyre metadata
-    tags: [
-      ...(config.config?.tags || []),
+  // VALIDATION: Required instance check
+  if (!instance) {
+    sensor.error(
+      'useCyre requires a valid instance parameter',
       'use-cyre',
-      `local-id:${config.channelId}`,
-      `global-id:${globalChannelId}`,
-      ...(path ? [`branch-path:${path}`] : ['root-channel'])
-    ]
+      'validation',
+      'error'
+    )
+    throw new Error('useCyre requires a valid instance parameter')
   }
 
-  // Track creation state
+  // VALIDATION: Instance must have required methods
+  if (
+    typeof instance.path !== 'function' ||
+    typeof instance.action !== 'function'
+  ) {
+    sensor.error(
+      'Invalid instance - missing required methods (path, action)',
+      'use-cyre',
+      'validation',
+      'error'
+    )
+    throw new Error('Invalid instance - missing required methods')
+  }
+
+  // Define path, localId, and channelId early for consistent use
+  const path = instance.path() || ''
+  const localId = config?.id || `hook-${crypto.randomUUID().slice(0, 8)}`
+  const channelId = path ? `${path}/${localId}` : localId
+
+  // Determine if we're working with a branch
+  const isBranch =
+    instance && typeof (instance as Branch).path === 'function' && path !== ''
+
+  // Create channel configuration using core cyre pattern
+  // CRITICAL FIX: Pass localId as the action.id, not the full channelId
+  // The instance.action() method will handle the path prefixing internally
+  const channelConfig: IO = {
+    ...config,
+    id: localId, // ✅ Use localId - instance.action() will handle path prefixing
+    localId, // Store original local ID
+    payload: config?.payload || undefined,
+    path
+  }
+
+  // Track creation and subscription state
   let isCreated = false
   let isSubscribed = false
 
-  // Create the channel using appropriate method
+  // Create the channel using appropriate method (follows handler-first pattern)
   const createChannel = (): boolean => {
     if (isCreated) return true
 
@@ -126,23 +120,23 @@ export const useCyre = (
       let result: {ok: boolean; message: string}
 
       if (isBranch) {
-        // ✅ Use branch.action() for branch instances
-        result = (targetInstance as Branch).action(channelConfig)
+        // Use branch.action() for branch instances
+        result = (instance as Branch).action(channelConfig)
       } else {
-        // ✅ Use cyre.action() for main cyre or other instances
-        result = (targetInstance as CyreInstance).action(channelConfig)
+        // Use cyre.action() for main cyre instances
+        result = (instance as CyreInstance).action(channelConfig)
       }
 
       if (result.ok) {
         isCreated = true
         sensor.debug(
-          `useCyre channel created: ${globalChannelId}`,
+          `useCyre channel created: ${channelId}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'success',
           {
-            localId: config.channelId,
-            globalId: globalChannelId,
+            localId,
+            channelId,
             path,
             isBranch
           }
@@ -152,7 +146,7 @@ export const useCyre = (
         sensor.error(
           `useCyre channel creation failed: ${result.message}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'error'
         )
         return false
@@ -161,20 +155,15 @@ export const useCyre = (
       sensor.error(
         `useCyre channel creation error: ${error}`,
         'use-cyre',
-        config.channelId,
+        localId,
         'error'
       )
       return false
     }
   }
 
-  // Auto-create channel on first access
-  createChannel()
-
   // Build and return the hook interface
   const hook: CyreHook = {
-    id: config.channelId,
-    globalId: globalChannelId,
     path,
 
     call: async (payload?: ActionPayload) => {
@@ -188,26 +177,15 @@ export const useCyre = (
       }
 
       try {
-        if (isBranch) {
-          // ✅ Use branch.call() for branch instances
-          return await (targetInstance as Branch).call(
-            config.channelId,
-            payload
-          )
-        } else {
-          // ✅ Use cyre.call() for main cyre (with global ID)
-          return await (targetInstance as CyreInstance).call(
-            globalChannelId,
-            payload
-          )
-        }
+        // Use direct cyre.call() with channelId for maximum performance
+        return await cyre.call(channelId, payload)
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : String(error)
         sensor.error(
           `useCyre call failed: ${errorMessage}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'error'
         )
         return {
@@ -228,22 +206,15 @@ export const useCyre = (
       }
 
       try {
-        let result: {ok: boolean; message: string; unsubscribe?: () => boolean}
-
-        if (isBranch) {
-          // ✅ Use branch.on() for branch instances
-          result = (targetInstance as Branch).on(config.channelId, handler)
-        } else {
-          // ✅ Use cyre.on() for main cyre (with global ID)
-          result = (targetInstance as CyreInstance).on(globalChannelId, handler)
-        }
+        // Use direct cyre.on() with channelId for maximum performance
+        const result = cyre.on(channelId, handler)
 
         if (result.ok) {
           isSubscribed = true
           sensor.debug(
-            `useCyre subscription created: ${globalChannelId}`,
+            `useCyre subscription created: ${channelId}`,
             'use-cyre',
-            config.channelId,
+            localId,
             'success'
           )
         }
@@ -255,7 +226,7 @@ export const useCyre = (
         sensor.error(
           `useCyre subscription failed: ${errorMessage}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'error'
         )
         return {
@@ -267,20 +238,13 @@ export const useCyre = (
 
     get: () => {
       try {
-        if (isBranch) {
-          // ✅ Use branch.get() for branch instances
-          return (targetInstance as Branch).get(config.channelId)
-        } else {
-          // ✅ Use cyre.get() for main cyre (with global ID)
-          return (targetInstance as CyreInstance).get
-            ? (targetInstance as CyreInstance).get!(globalChannelId)
-            : undefined
-        }
+        // Use direct cyre.get() with channelId for maximum performance
+        return cyre.get ? cyre.get(channelId) : undefined
       } catch (error) {
         sensor.error(
           `useCyre get failed: ${error}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'error'
         )
         return undefined
@@ -289,23 +253,16 @@ export const useCyre = (
 
     forget: () => {
       try {
-        let success = false
-
-        if (isBranch) {
-          // ✅ Use branch.forget() for branch instances
-          success = (targetInstance as Branch).forget(config.channelId)
-        } else {
-          // ✅ Use cyre.forget() for main cyre (with global ID)
-          success = (targetInstance as CyreInstance).forget(globalChannelId)
-        }
+        // Use direct cyre.forget() with channelId for maximum performance
+        const success = cyre.forget(channelId)
 
         if (success) {
           isCreated = false
           isSubscribed = false
           sensor.debug(
-            `useCyre channel forgotten: ${globalChannelId}`,
+            `useCyre channel forgotten: ${channelId}`,
             'use-cyre',
-            config.channelId,
+            localId,
             'success'
           )
         }
@@ -315,23 +272,19 @@ export const useCyre = (
         sensor.error(
           `useCyre forget failed: ${error}`,
           'use-cyre',
-          config.channelId,
+          localId,
           'error'
         )
         return false
       }
     },
 
-    exists: () => {
-      return isCreated && !!hook.get()
-    },
-
     getStats: () => {
       const depth = path ? path.split('/').filter(Boolean).length : 0
 
       return {
-        globalId: globalChannelId,
-        localId: config.channelId,
+        globalId: channelId,
+        localId,
         path,
         isBranch: !!isBranch,
         depth,
@@ -343,55 +296,5 @@ export const useCyre = (
 
   return hook
 }
-
-// ============================================
-// CONVENIENCE FACTORIES
-// ============================================
-
-/**
- * Create useCyre hook for main cyre instance
- */
-export const useMainCyre = (config: UseCyreConfig): CyreHook => {
-  return useCyre(config, cyre)
-}
-
-/**
- * Create useCyre hook with automatic subscription
- */
-export const useCyreWithHandler = (
-  config: UseCyreConfig,
-  handler: EventHandler,
-  instance?: CyreInstance | Branch
-): CyreHook => {
-  const hook = useCyre(config, instance)
-
-  // Auto-subscribe
-  const subscriptionResult = hook.on(handler)
-
-  if (!subscriptionResult.ok) {
-    sensor.warn(
-      `Auto-subscription failed for ${hook.globalId}: ${subscriptionResult.message}`,
-      'use-cyre',
-      config.channelId,
-      'warning'
-    )
-  }
-
-  return hook
-}
-
-/**
- * Create multiple useCyre hooks at once
- */
-export const useMultipleCyre = (
-  configs: UseCyreConfig[],
-  instance?: CyreInstance | Branch
-): CyreHook[] => {
-  return configs.map(config => useCyre(config, instance))
-}
-
-// ============================================
-// TYPE EXPORTS
-// ============================================
 
 export default useCyre

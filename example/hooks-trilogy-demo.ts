@@ -3,7 +3,6 @@
 // Shows the difference between cyre.group (management) vs useCompose (execution)
 
 import {useBranch, useCyre, useGroup} from '../src'
-import {groupOperations} from '../src/components/cyre-group'
 
 /**
  * Complete demonstration of the beautiful trilogy working together

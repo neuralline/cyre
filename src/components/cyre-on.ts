@@ -100,6 +100,10 @@ const addSingleSubscriber = (
       console.warn(
         'This may cause unexpected behavior if the previous listener is still active. Consider using cyre.forget() to remove previous listeners before adding new ones.'
       )
+      return {
+        ok: false,
+        message: `DUPLICATE LISTENER DETECTED: Channel "${subscriber.id}" already has a listener attached!`
+      }
     }
 
     // Add or update subscriber
@@ -204,14 +208,8 @@ export const subscribe = (
   // Handle array of subscribers
   if (Array.isArray(id)) {
     const result = addMultipleSubscribers(id)
-    if (result.ok) {
-      sensor.debug('addMultipleSubscribers', 'Subscription successful')
-    } else {
-      sensor.error(
-        'addMultipleSubscribers',
-        result.message,
-        'subscription-failed'
-      )
+    if (!result.ok) {
+      sensor.error(id, result.message, 'batch-subscription-failed')
     }
     return result
   }
@@ -219,10 +217,8 @@ export const subscribe = (
   // Handle single subscriber - CRITICAL: Use action ID, not type
   if (typeof id === 'string' && handler) {
     const result = addSingleSubscriber(id, handler)
-    if (result.ok) {
-      sensor.debug('addSingleSubscriber', 'Subscription successful')
-    } else {
-      sensor.error('addSingleSubscriber', result.message, 'subscription-failed')
+    if (!result.ok) {
+      sensor.error(id, result.message, 'single-subscription-failed')
     }
     return result
   }

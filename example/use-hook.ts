@@ -1,4 +1,4 @@
-// cyre-hooks-example.ts
+// demo/cyre-hook.ts
 // A simple task manager demonstrating Cyre 4.0 hooks in Node.js
 
 import {cyre, useCyre} from '../src'

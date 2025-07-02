@@ -1,4 +1,4 @@
-// src/metrics/sensor.ts
+// src/components/sensor.ts
 // Consolidated sensor with integrated logging - replaces cyre-log
 
 /*
@@ -8,8 +8,9 @@
       Consolidated logging and event tracking system:
       - Single interface for all logging needs
       - Event tracking with metadata
-      - Environment-aware output (dev/prod)
+      - Environment-aware output (dev/prod/browser)
       - Standardized parameter order
+      - Browser-optimized console output
       - Replaces cyre-log entirely
 
 */
@@ -56,8 +57,25 @@ const isDev =
   typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'
 const isBrowser = typeof window !== 'undefined'
 
-// Smart message formatting
+// Smart message formatting - handles arrays of arguments like console.log
 const formatMessage = (message: any): string => {
+  if (Array.isArray(message)) {
+    return message
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (typeof item === 'number') return String(item)
+        if (typeof item === 'boolean') return String(item)
+        if (item === null) return 'null'
+        if (item === undefined) return 'undefined'
+        try {
+          return JSON.stringify(item, null, 2)
+        } catch {
+          return String(item)
+        }
+      })
+      .join(' ')
+  }
+
   if (typeof message === 'string') return message
   if (typeof message === 'number') return String(message)
   if (typeof message === 'boolean') return String(message)
@@ -71,24 +89,9 @@ const formatMessage = (message: any): string => {
   }
 }
 
-// Console output with colors (Node.js only)
+// Console output with full color support for both Node.js and Browser
 const logToConsole = (level: LogLevel, message: string, context?: any) => {
   const timestamp = new Date().toISOString()
-
-  // Color codes for Node.js
-  const colors = isBrowser
-    ? {}
-    : {
-        DEBUG: '\x1b[36m', // Cyan
-        INFO: '\x1b[34m', // Blue (changed from white)
-        WARN: '\x1b[33m', // Yellow
-        ERROR: '\x1b[31m', // Red
-        CRITICAL: '\x1b[41m\x1b[37m', // Red background, white text
-        SUCCESS: '\x1b[32m', // Green
-        SYS: '\x1b[35m', // Magenta
-        RESET: '\x1b[0m'
-      }
-
   const levelNames = [
     'DEBUG',
     'INFO',
@@ -99,28 +102,89 @@ const logToConsole = (level: LogLevel, message: string, context?: any) => {
     'SYS'
   ]
   const levelName = levelNames[level] || 'INFO'
-
-  const color = colors[levelName as keyof typeof colors] || ''
-  const reset = colors.RESET || ''
-
   const formattedMessage = formatMessage(message)
 
-  // Format: [2025-06-26T12:30:13.011Z] ERROR: message (all colorized)
-  const logOutput = `${color}[${timestamp}] ${levelName}: ${formattedMessage}${reset}`
+  if (isBrowser) {
+    // Browser console with CSS styling (like cyre-log)
+    const styles = {
+      DEBUG: 'color: #6b7280',
+      INFO: 'color: #2563eb',
+      WARN: 'color: #d97706; font-weight: bold',
+      ERROR: 'color: #dc2626; font-weight: bold',
+      CRITICAL: 'color: #dc2626; font-weight: bold',
+      SUCCESS: 'color: #059669; font-weight: bold',
+      SYS: 'color: white; background: #7c3aed; padding: 2px 4px; border-radius: 3px; font-weight: bold'
+    }
 
-  // Output based on level
-  if (level >= LogLevel.ERROR) {
-    console.error(logOutput)
-  } else if (level === LogLevel.WARN) {
-    console.warn(logOutput)
+    const style = styles[levelName as keyof typeof styles] || 'color: gray'
+    const logMessage = `%c[${timestamp}] ${levelName}: ${formattedMessage}`
+
+    // Use appropriate console method based on level
+    if (level >= LogLevel.ERROR) {
+      console.error(logMessage, style)
+    } else if (level === LogLevel.WARN) {
+      console.warn(logMessage, style)
+    } else {
+      console.log(logMessage, style)
+    }
+
+    // Show context if provided
+    if (context && Object.keys(context).length > 0) {
+      console.log('%cContext:', 'color: #6b7280; font-style: italic', context)
+    }
   } else {
-    console.log(logOutput)
-  }
+    // Node.js console with ANSI colors
+    const colors = {
+      DEBUG: '\x1b[36m', // Cyan
+      INFO: '\x1b[34m', // Blue
+      WARN: '\x1b[33m', // Yellow
+      ERROR: '\x1b[31m', // Red
+      CRITICAL: '\x1b[41m\x1b[37m', // Red background, white text
+      SUCCESS: '\x1b[32m', // Green
+      SYS: '\x1b[35m', // Magenta
+      RESET: '\x1b[0m'
+    }
 
-  // Show context if provided and in dev mode
-  if (context && isDev && Object.keys(context).length > 0) {
-    const contextOutput = `${color}  Context:${reset}`
-    console.log(contextOutput, context)
+    const color = colors[levelName as keyof typeof colors] || ''
+    const reset = colors.RESET || ''
+
+    const logOutput = `${color}[${timestamp}] ${levelName}: ${formattedMessage}${reset}`
+
+    // Output based on level
+    if (level >= LogLevel.ERROR) {
+      console.error(logOutput)
+    } else if (level === LogLevel.WARN) {
+      console.warn(logOutput)
+    } else {
+      console.log(logOutput)
+    }
+
+    // Show context if provided
+    if (context && Object.keys(context).length > 0) {
+      const contextOutput = `${color}  Context:${reset}`
+      console.log(contextOutput, context)
+    }
+  }
+}
+
+// Browser-specific debugging utilities
+const getBrowserDebugInfo = (): Record<string, any> => {
+  if (!isBrowser) return {}
+
+  return {
+    userAgent: navigator.userAgent,
+    url: window.location.href,
+    timestamp: Date.now(),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    },
+    connection: (navigator as any).connection
+      ? {
+          effectiveType: (navigator as any).connection.effectiveType,
+          downlink: (navigator as any).connection.downlink
+        }
+      : undefined
   }
 }
 
@@ -129,11 +193,13 @@ const logToConsole = (level: LogLevel, message: string, context?: any) => {
  */
 export const sensor = {
   /**
-   * Core sensor method - logs data and optionally to terminal
+   * Core sensor method - logs data to console by default
    */
   log: (event: SensorEvent): void => {
-    // Always log to terminal if log: true or in development
-    if (event.log || isDev) {
+    // Log by default (like cyre-log), unless explicitly disabled
+    const shouldLog = event.log !== false
+
+    if (shouldLog) {
       const context = {
         ...(event.location && {location: event.location}),
         ...(event.actionId && {actionId: event.actionId}),
@@ -149,129 +215,80 @@ export const sensor = {
     }
   },
 
-  // Standardized methods - all follow: message, location?, actionId?, eventType?, metadata?
+  // Standardized methods - handle multiple arguments like console.log
 
-  success: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  success: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'success',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.SUCCESS
     })
   },
 
-  error: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  error: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'error',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.ERROR
     })
   },
 
-  warn: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  warn: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'warning',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.WARN
     })
   },
 
-  info: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  info: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'info',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.INFO
     })
   },
 
-  debug: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  debug: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'debug',
-      metadata,
-      log: isDev, // Only log debug in development
+      message: fullMessage,
+      log: true,
       logLevel: LogLevel.DEBUG
     })
   },
 
-  critical: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  critical: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'critical',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.CRITICAL
     })
   },
 
-  sys: (
-    message: any,
-    location?: string,
-    actionId?: string,
-    eventType?: MetricEvent,
-    metadata?: Record<string, unknown>
-  ): void => {
+  sys: (message: any, ...args: any[]): void => {
+    const fullMessage = [message, ...args]
+      .filter(arg => arg !== undefined)
+      .join(' ')
     sensor.log({
-      message,
-      location,
-      actionId,
-      eventType: eventType || 'system',
-      metadata,
+      message: fullMessage,
       log: true,
       logLevel: LogLevel.SYS
     })

@@ -119,6 +119,10 @@ export const metricsState = {
     const state = metricsStore.get('quantum')
     return state?._isLocked || false
   },
+  isInit: (): boolean => {
+    const state = metricsStore.get('quantum')
+    return state?._init || false
+  },
 
   /**
    * Get current metrics state (read-only)
@@ -590,6 +594,6 @@ export const updateBreathingFromMetrics = async (): Promise<void> => {
     })
   } catch (error) {
     // Don't log error every second - just use console.error
-    console.error(`Breathing update failed: ${error}`)
+    sensor.error(`Breathing update failed: ${error}`)
   }
 }

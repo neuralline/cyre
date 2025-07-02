@@ -13,14 +13,6 @@ import {
 /**
  * Any cyre-like instance that useCyre can work with
  */
-export interface CyreInstance {
-  action: (config: IO) => {ok: boolean; message: string}
-  on: (id: string, handler: EventHandler) => SubscriptionResponse
-  call: (id: string, payload?: any) => Promise<CyreResponse>
-  get?: (id: string) => IO | undefined
-  forget: (id: string) => boolean
-  path: () => string
-}
 
 /**
  * Configuration for useCyre hook - core system aligned

@@ -1,4 +1,4 @@
-// test/cyre-hooks-reliability-fixed.ts
+// demo/cyre-hooks-reliability.ts
 // Fixed testing using core Cyre and simple branch isolation tests
 
 import {cyre, useBranch} from 'cyre'

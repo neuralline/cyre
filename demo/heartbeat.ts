@@ -1,4 +1,4 @@
-// example/heartbeat.ts
+// demo/heartbeat.ts
 import {cyre, log} from '../src'
 
 // Initialize first

@@ -58,6 +58,7 @@ export const createMultiDepthBranchSystem = async () => {
 
   // Initialize Cyre
   const initResult = await cyre.init()
+  await cyre.init()
   if (!initResult.ok) {
     throw new Error(`Failed to initialize Cyre: ${initResult.message}`)
   }
