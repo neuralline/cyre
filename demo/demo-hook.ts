@@ -1,6 +1,7 @@
-// demo-usecyre.ts
+// demo/demo-hook.ts
+// cyre demo usage
 // Clean showcase demo for useCyre hook - demonstrates usage patterns
-
+//this is a local file demo use import {cyre, useBranch, useCyre} from 'cyre'
 import {performance} from 'perf_hooks'
 import {cyre} from '../src/app'
 import {useBranch} from '../src/hooks/use-branch'

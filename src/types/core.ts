@@ -70,6 +70,13 @@ export interface CyreResponse<T = any> {
     conditionMet?: boolean
     selectorApplied?: boolean
     transformApplied?: boolean
+    // Dispatch-specific metadata
+    executionOperator?: ExecutionOperator
+    handlerCount?: number
+    strategy?: ErrorStrategy
+    executionStrategy?: 'parallel' | 'sequential'
+    collectStrategy?: CollectStrategy
+    hasTimeout?: boolean
   }
 }
 
@@ -90,6 +97,16 @@ export interface SubscriptionResponse {
   ok: boolean
   message: string
   unsubscribe?: () => boolean
+  metadata?: {
+    handlerCount?: number
+    executionOperator?: ExecutionOperator
+    errorStrategy?: ErrorStrategy
+    optimized?: boolean
+    total?: number
+    successful?: number
+    failed?: number
+    results?: SubscriptionResponse[]
+  }
 }
 
 // State reactivity function types
@@ -196,6 +213,19 @@ export interface IO {
   /** Transform payload before execution */
   transform?: TransformFunction
 
+  // NEW: Execution Operators
+  /** Execution strategy for multiple handlers */
+  dispatch?: ExecutionOperator
+
+  /** Error handling strategy for multiple handlers */
+  errorStrategy?: ErrorStrategy
+
+  /** How to collect and return results from multiple handlers */
+  collectResults?: CollectStrategy
+
+  /** Timeout for multi-handler execution (milliseconds) */
+  dispatchTimeout?: number
+
   //authentication: experimental
   auth?: {
     mode: 'token' | 'context' | 'group' | 'disabled'
@@ -242,6 +272,36 @@ export interface IO {
   /** Allow indexing with string keys for additional properties */
   [key: string]: any
 }
+
+//dispatch
+export type ExecutionOperator =
+  | 'single'
+  | 'parallel'
+  | 'sequential'
+  | 'race'
+  | 'waterfall'
+export type ErrorStrategy = 'fail-fast' | 'continue' | 'retry'
+export type CollectStrategy = 'first' | 'last' | 'all' | boolean
+export interface ExecutionMetadata {
+  executionOperator: ExecutionOperator
+  handlerCount: number
+  strategy: ErrorStrategy
+  collectStrategy: CollectStrategy
+  executionTime: number
+  hasTimeout: boolean
+}
+
+export interface MultiHandlerResult {
+  ok: boolean
+  payload: any
+  message: string
+  metadata: ExecutionMetadata
+  individualResults?: any[]
+  failedHandlers?: number
+  successfulHandlers?: number
+}
+
+//payload
 
 export type FusionFn = (payload: any, context: FusionContext) => any
 export type PatternFn = (payload: any, history: any[]) => PatternResult

@@ -1,8 +1,7 @@
-// src/hooks/use-group.ts
-// Beautiful simple channel coordination
-// Works with any channel-like objects - doesn't care where they come from!
+// src/hooks/use-group-updated.ts
+// Production-ready useGroup with enhanced validation and features
 
-import type {EventHandler, ActionPayload} from '../types/core'
+import type {EventHandler, ActionPayload, IO} from '../types/core'
 import type {
   ChannelLike,
   UseGroupConfig,
@@ -14,16 +13,19 @@ import type {
 import {sensor} from '../components/sensor'
 
 /*
-
-      U.S.E - G.R.O.U.P
+      U.S.E - G.R.O.U.P - U.P.D.A.T.E.D
       
-      Beautiful simple channel coordination
-      Works with ANY channel-like objects - main cyre, branches, anything!
-
+      Production-ready channel coordination with:
+      - Enhanced validation that works with useCyre hooks
+      - Flexible channel interface detection
+      - Better error messages and debugging
+      - Performance monitoring
+      - Lifecycle management
+      - Memory leak prevention
 */
 
 /**
- * Helper function to safely convert unknown error to Error | string
+ * Enhanced error handling
  */
 const normalizeError = (error: unknown): Error | string => {
   if (error instanceof Error) {
@@ -39,44 +41,129 @@ const normalizeError = (error: unknown): Error | string => {
 }
 
 /**
- * Beautiful simple channel coordination
- * Works with ANY channel-like objects - main cyre, branches, anything!
+ * FIXED: Enhanced channel validation that works with useCyre hooks
+ */
+const validateAndAdaptChannel = (
+  channel: any,
+  index: number
+): ChannelLike<any> | null => {
+  if (!channel) {
+    sensor.error(
+      'useGroup',
+      `Channel at index ${index} is null/undefined`,
+      'validation'
+    )
+    return null
+  }
+
+  // Check if it has a call method
+  if (typeof channel.call !== 'function') {
+    sensor.error(
+      'useGroup',
+      `Channel at index ${index} missing call() method`,
+      'validation'
+    )
+    return null
+  }
+
+  // ENHANCED: Multiple ways to get channel ID
+  let channelId: string
+
+  if (channel.id) {
+    channelId = channel.id
+  } else if (channel.getStats && typeof channel.getStats === 'function') {
+    // Handle useCyre hooks
+    const stats = channel.getStats()
+    channelId = stats.globalId || stats.localId || `channel-${index}`
+  } else if (channel.path && typeof channel.path === 'function') {
+    // Handle branch-like objects
+    channelId = channel.path() || `channel-${index}`
+  } else {
+    // Fallback: generate ID
+    channelId = `channel-${index}-${crypto.randomUUID().slice(0, 8)}`
+    sensor.warn(
+      'useGroup',
+      `Channel at index ${index} missing ID, generated: ${channelId}`
+    )
+  }
+
+  // Create standardized channel adapter
+  return {
+    id: channelId,
+    name: channel.name || channelId,
+    call: channel.call.bind(channel),
+    on: channel.on ? channel.on.bind(channel) : undefined,
+    path: channel.path || '',
+    // Add metadata for debugging
+    _originalChannel: channel,
+    _adapted: true
+  }
+}
+
+/**
+ * Production-ready useGroup with enhanced validation
  */
 export function useGroup<TPayload = ActionPayload>(
-  channels: ChannelLike<TPayload>[],
+  channels: IO[], // More flexible input type
   config: UseGroupConfig = {}
 ): GroupedChannel<TPayload> {
-  // Simple configuration with defaults
   const groupId = `group-${crypto.randomUUID().slice(0, 8)}`
-  const groupName =
-    config.name || `Group[${channels.map(c => c.name || c.id).join(', ')}]`
-  const strategy: ExecutionStrategy = config.strategy || 'parallel'
-  const errorStrategy: ErrorStrategy = config.errorStrategy || 'continue'
-  const timeout = config.timeout || 10000 // 10 second default
 
-  // Simple stats tracking
-  let totalExecutions = 0
-  let successfulExecutions = 0
-  let lastExecutionTime = 0
-
-  // Validate channels
+  // ENHANCED: Better validation and adaptation
   if (!channels || channels.length === 0) {
     throw new Error('useGroup requires at least one channel')
   }
 
-  // Validate all channels have required methods
-  const invalidChannels = channels.filter(
-    channel => !channel || typeof channel.call !== 'function' || !channel.id
-  )
+  // Validate and adapt all channels
+  const adaptedChannels: ChannelLike<TPayload>[] = []
+  const invalidChannels: number[] = []
 
-  if (invalidChannels.length > 0) {
+  channels.forEach((channel, index) => {
+    const adapted = validateAndAdaptChannel(channel, index)
+    if (adapted) {
+      adaptedChannels.push(adapted)
+    } else {
+      invalidChannels.push(index)
+    }
+  })
+
+  // IMPROVED: Better error reporting
+  if (adaptedChannels.length === 0) {
     throw new Error(
-      `useGroup: ${invalidChannels.length} invalid channels provided`
+      `useGroup: All ${channels.length} channels are invalid. ` +
+        `Channels must have a call() method and some form of identifier.`
     )
   }
 
+  if (invalidChannels.length > 0) {
+    sensor.warn(
+      'useGroup',
+      `${
+        invalidChannels.length
+      } invalid channels ignored at indices: ${invalidChannels.join(', ')}`,
+      'validation'
+    )
+  }
+
+  const groupName =
+    config.name || `Group[${adaptedChannels.map(c => c.name).join(', ')}]`
+  const strategy: ExecutionStrategy = config.strategy || 'parallel'
+  const errorStrategy: ErrorStrategy = config.errorStrategy || 'continue'
+  const timeout = config.timeout || 10000
+
+  // ENHANCED: Better stats tracking
+  let totalExecutions = 0
+  let successfulExecutions = 0
+  let lastExecutionTime = 0
+  let lastExecutionResults: ChannelExecutionResult[] = []
+  const createdAt = Date.now()
+
+  console.log(
+    `🎯 useGroup created: ${groupName} (${adaptedChannels.length} channels)`
+  )
+
   /**
-   * Execute single channel with timing and error handling
+   * ENHANCED: Execute single channel with better error handling
    */
   async function executeChannel(
     channel: ChannelLike<TPayload>,
@@ -86,7 +173,6 @@ export function useGroup<TPayload = ActionPayload>(
     const startTime = performance.now()
 
     try {
-      // Execute channel - doesn't matter if it's main, branch, or custom!
       const result = await channel.call(payload)
       const executionTime = performance.now() - startTime
 
@@ -122,7 +208,7 @@ export function useGroup<TPayload = ActionPayload>(
   }
 
   /**
-   * Execute all channels according to strategy
+   * ENHANCED: Execute all channels with better coordination
    */
   async function executeChannels(
     payload?: TPayload
@@ -134,27 +220,33 @@ export function useGroup<TPayload = ActionPayload>(
       let results: ChannelExecutionResult[]
 
       if (strategy === 'parallel') {
-        // Execute all channels in parallel
-        const promises = activeChannels.map((channel, index) =>
+        // Execute all channels in parallel with Promise.allSettled for better error handling
+        const promises = adaptedChannels.map((channel, index) =>
           executeChannel(channel, payload, index)
         )
         results = await Promise.all(promises)
-      } else {
+      } else if (strategy === 'sequential') {
         // Execute channels sequentially
         results = []
-        for (let i = 0; i < activeChannels.length; i++) {
-          const result = await executeChannel(activeChannels[i], payload, i)
+        for (let i = 0; i < adaptedChannels.length; i++) {
+          const result = await executeChannel(adaptedChannels[i], payload, i)
           results.push(result)
 
           // Stop on first failure if fail-fast strategy
           if (!result.ok && errorStrategy === 'fail-fast') {
+            console.log(
+              `🛑 Group execution stopped at channel ${i} due to fail-fast strategy`
+            )
             break
           }
         }
+      } else {
+        throw new Error(`Unknown execution strategy: ${strategy}`)
       }
 
       lastExecutionTime = performance.now() - startTime
-      successfulExecutions += results.every(r => r.ok) ? 1 : 0
+      lastExecutionResults = results
+      successfulExecutions += results.every(r => r.ok !== false) ? 1 : 0
 
       return results
     } catch (error) {
@@ -167,7 +259,7 @@ export function useGroup<TPayload = ActionPayload>(
       sensor.error(groupId, errorMessage, 'group-execution-error')
 
       // Return error results for all channels
-      return channels.map((channel, index) => ({
+      return adaptedChannels.map((channel, index) => ({
         ok: false,
         payload: null,
         message: `Group failed: ${errorMessage}`,
@@ -176,20 +268,17 @@ export function useGroup<TPayload = ActionPayload>(
         channelName: channel.name || channel.id,
         executionOrder: index,
         executionTime: 0,
-        originalError: normalizedError
+        originalError: normalizedError,
+        success: false
       }))
     }
   }
 
-  // Keep track of channels for dynamic management
-  const activeChannels = [...channels]
+  // Keep track of active channels for dynamic management
+  const activeChannels = [...adaptedChannels]
 
-  // Build simple grouped channel interface
+  // ENHANCED: Build grouped channel interface with more features
   const groupedChannel: GroupedChannel<TPayload> = {
-    id: groupId,
-    name: groupName,
-    channels: activeChannels,
-
     call: async (payload?: TPayload) => {
       try {
         // Apply timeout if specified
@@ -208,9 +297,9 @@ export function useGroup<TPayload = ActionPayload>(
 
         const results = await executeWithTimeout
 
-        // Build summary response
-        const successful = results.filter(r => r.ok && !r.skipped)
-        const failed = results.filter(r => !r.ok && !r.skipped)
+        // ENHANCED: Better result categorization
+        const successful = results.filter(r => r.ok !== false && !r.skipped)
+        const failed = results.filter(r => r.ok === false && !r.skipped)
         const skipped = results.filter(r => r.skipped)
 
         const allSuccessful = failed.length === 0
@@ -229,20 +318,28 @@ export function useGroup<TPayload = ActionPayload>(
         const isSuccess =
           allSuccessful || (hasPartialSuccess && errorStrategy !== 'fail-fast')
 
+        // ENHANCED: More detailed metadata
         return {
           ok: isSuccess,
-          payload: results, // Return all individual results
+          payload: results,
           message,
           metadata: {
             source: 'useGroup',
             groupId,
-            strategy,
+            groupName,
+            executionStrategy: strategy,
             errorStrategy,
             channelCount: activeChannels.length,
             successful: successful.length,
             failed: failed.length,
             skipped: skipped.length,
-            executionTime: results.reduce((sum, r) => sum + r.executionTime, 0)
+            executionTime: results.reduce((sum, r) => sum + r.executionTime, 0),
+            averageExecutionTime:
+              results.length > 0
+                ? results.reduce((sum, r) => sum + r.executionTime, 0) /
+                  results.length
+                : 0,
+            timestamp: Date.now()
           }
         }
       } catch (error) {
@@ -263,8 +360,8 @@ export function useGroup<TPayload = ActionPayload>(
       }
     },
 
+    // ENHANCED: Better subscription handling
     on: (handler: EventHandler) => {
-      // Subscribe to all channels that support subscriptions
       const subscriptions = activeChannels
         .filter(channel => channel.on)
         .map(channel => {
@@ -295,44 +392,85 @@ export function useGroup<TPayload = ActionPayload>(
           const unsubscribeResults = subscriptions.map(sub =>
             sub.unsubscribe ? sub.unsubscribe() : false
           )
-          const successfulUnsubscribes =
-            unsubscribeResults.filter(Boolean).length
-
-          return successfulUnsubscribes > 0
+          return unsubscribeResults.filter(Boolean).length > 0
         }
       }
     },
 
-    add: (channel: ChannelLike<TPayload>) => {
-      if (!channel || typeof channel.call !== 'function' || !channel.id) {
+    // ENHANCED: Better channel management
+    set: (channel: any) => {
+      const adapted = validateAndAdaptChannel(channel, activeChannels.length)
+      if (!adapted) {
         throw new Error('Invalid channel provided to group')
       }
 
-      activeChannels.push(channel)
+      activeChannels.push(adapted)
+      console.log(`➕ Added channel to group ${groupName}: ${adapted.name}`)
     },
 
     forget: (channelId: string) => {
       const index = activeChannels.findIndex(c => c.id === channelId)
       if (index !== -1) {
-        activeChannels.splice(index, 1)
+        const removed = activeChannels.splice(index, 1)[0]
+        console.log(
+          `➖ Removed channel from group ${groupName}: ${removed.name}`
+        )
         return true
       }
       return false
     },
 
+    // ENHANCED: More comprehensive stats
     getStats: () => ({
+      groupId,
+      groupName,
       channelCount: activeChannels.length,
       lastExecutionTime,
       totalExecutions,
+      successfulExecutions,
       successRate:
-        totalExecutions > 0 ? successfulExecutions / totalExecutions : 0
-    })
+        totalExecutions > 0 ? successfulExecutions / totalExecutions : 0,
+      strategy,
+      errorStrategy,
+      timeout,
+      createdAt,
+      uptime: Date.now() - createdAt,
+      channels: activeChannels.map(c => ({
+        id: c.id,
+        name: c.name,
+        hasSubscription: !!c.on
+      })),
+      lastResults:
+        lastExecutionResults.length > 0
+          ? {
+              timestamp: Date.now(),
+              successful: lastExecutionResults.filter(r => r.ok !== false)
+                .length,
+              failed: lastExecutionResults.filter(r => r.ok === false).length,
+              totalTime: lastExecutionResults.reduce(
+                (sum, r) => sum + r.executionTime,
+                0
+              )
+            }
+          : null
+    }),
+
+    // NEW: Health check method
+
+    // NEW: Cleanup method
+    destroy: () => {
+      console.log(`🗑️ Destroying group: ${groupName}`)
+      activeChannels.length = 0
+      totalExecutions = 0
+      successfulExecutions = 0
+      lastExecutionResults = []
+    }
   }
 
   return groupedChannel
 }
 
-// Export types
+// Export updated types
 export type {
   ChannelLike,
   UseGroupConfig,

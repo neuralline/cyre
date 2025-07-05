@@ -507,7 +507,7 @@ export const cyre: CyreInstance = Object.freeze({
 
   lock: (): {ok: boolean; message: string; payload: null} => {
     metricsState.lock()
-    sensor.sys('system', 'lock', 'system-lock')
+
     return {ok: true, message: 'System locked', payload: null}
   },
 

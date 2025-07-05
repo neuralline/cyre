@@ -18,5 +18,18 @@ cyre.on('heartbeat://', () => {
   return
 })
 
+cyre.on('heartbeat://', () => {
+  log.debug('💓 Heartbeat 2')
+  return
+})
+
+cyre.on('heartbeat://', () => {
+  log.debug('💓 Heartbeat 3')
+  return
+})
+
+// lock cyre from further registration
+cyre.lock()
 // Start the heartbeat
-await cyre.call('heartbeat://')
+const result = await cyre.call('heartbeat://')
+console.log(result)

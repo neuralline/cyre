@@ -102,10 +102,13 @@ export interface CyreChannel<TPayload = ActionPayload> {
 export interface ChannelLike<TPayload = ActionPayload> {
   id: string
   name?: string
+  path?: string
   call: (payload?: TPayload) => Promise<CyreResponse>
   on?: (
     handler: EventHandler
   ) => SubscriptionResponse & {unsubscribe?: () => boolean}
+  // Allow additional properties for adapter pattern
+  [key: string]: any
 }
 
 /**
@@ -156,13 +159,6 @@ export interface ChannelExecutionResult extends CyreResponse {
  * Grouped channel interface returned by useGroup
  */
 export interface GroupedChannel<TPayload = ActionPayload> {
-  /** Group ID */
-  id: string
-  /** Group name */
-  name: string
-  /** Individual channels */
-  channels: ChannelLike<TPayload>[]
-
   /** Execute all channels */
   call: (payload?: TPayload) => Promise<CyreResponse>
 
@@ -172,7 +168,7 @@ export interface GroupedChannel<TPayload = ActionPayload> {
   ) => SubscriptionResponse & {unsubscribe: () => boolean}
 
   /** Add channel to group */
-  add: (channel: ChannelLike<TPayload>) => void
+  set: (channel: ChannelLike<TPayload>) => void
 
   /** Remove channel from group */
   forget: (channelId: string) => boolean
@@ -184,6 +180,8 @@ export interface GroupedChannel<TPayload = ActionPayload> {
     totalExecutions: number
     successRate: number
   }
+
+  destroy: () => void
 }
 
 /**

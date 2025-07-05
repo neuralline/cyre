@@ -232,7 +232,7 @@ export const metricsState = {
   lock: (): void => {
     try {
       metricsState.update({_isLocked: true})
-      sensor.sys('System locked', 'metrics-state', 'system', 'system')
+      sensor.sys('system is locked', 'app', 'system-lock')
     } catch (error) {
       sensor.critical(`System lock failed: ${error}`)
       throw error

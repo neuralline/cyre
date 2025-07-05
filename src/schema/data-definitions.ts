@@ -1,7 +1,13 @@
 // src/schema/data-definitions.ts
 // Action compilation with talent discovery and improved validation messages
 
-import type {IO, ChannelOperator} from '../types/core'
+import type {
+  IO,
+  ChannelOperator,
+  ExecutionOperator,
+  ErrorStrategy,
+  CollectStrategy
+} from '../types/core'
 
 /*
 
@@ -24,7 +30,41 @@ export interface DataDefResult {
   operator?: ChannelOperator
   suggestions?: string[]
 }
+export interface DataResult {
+  ok: boolean
+  data?: any
+  error?: string
+  operator?: string
+  blocking?: boolean
+  suggestions?: string[]
+}
 
+type DataFunction = (value: any, action?: Partial<IO>) => DataResult
+
+// Valid execution operators
+const VALID_EXECUTION_OPERATORS: ExecutionOperator[] = [
+  'single',
+  'parallel',
+  'sequential',
+  'race',
+  'waterfall'
+]
+
+// Valid error strategies
+const VALID_ERROR_STRATEGIES: ErrorStrategy[] = [
+  'fail-fast',
+  'continue',
+  'retry'
+]
+
+// Valid collect strategies
+const VALID_COLLECT_STRATEGIES: (CollectStrategy | boolean)[] = [
+  'first',
+  'last',
+  'all',
+  true,
+  false
+]
 // Helper to describe the actual value received
 const describeValue = (value: any): string => {
   if (value === null) return 'null'
@@ -338,6 +378,120 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     }
 
     return {ok: true, data: value, operator: 'schedule'}
+  },
+
+  dispatch: (value: any): DataDefResult => {
+    if (value === undefined || value === null) {
+      return {ok: true, data: 'parallel'} // Default
+    }
+
+    if (typeof value !== 'string') {
+      return {
+        ok: false,
+        error: 'dispatch must be a string',
+        suggestions: ['parallel', 'sequential', 'single', 'race', 'waterfall']
+      }
+    }
+
+    if (!VALID_EXECUTION_OPERATORS.includes(value as ExecutionOperator)) {
+      return {
+        ok: false,
+        error: `Invalid dispatch operator: ${value}`,
+        suggestions: VALID_EXECUTION_OPERATORS
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
+  errorStrategy: (value: any): DataDefResult => {
+    if (value === undefined || value === null) {
+      return {ok: true, data: 'continue'} // Default
+    }
+
+    if (typeof value !== 'string') {
+      return {
+        ok: false,
+        error: 'errorStrategy must be a string',
+        suggestions: VALID_ERROR_STRATEGIES
+      }
+    }
+
+    if (!VALID_ERROR_STRATEGIES.includes(value as ErrorStrategy)) {
+      return {
+        ok: false,
+        error: `Invalid error strategy: ${value}`,
+        suggestions: VALID_ERROR_STRATEGIES
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
+  collectResults: (value: any): DataDefResult => {
+    if (value === undefined || value === null) {
+      return {ok: true, data: 'last'} // Default
+    }
+
+    // Handle boolean values
+    if (typeof value === 'boolean') {
+      return {
+        ok: true,
+        data: value ? 'all' : 'last'
+      }
+    }
+
+    if (typeof value !== 'string') {
+      return {
+        ok: false,
+        error: 'collectResults must be a string or boolean',
+        suggestions: ['first', 'last', 'all', 'true', 'false']
+      }
+    }
+
+    if (!VALID_COLLECT_STRATEGIES.includes(value as CollectStrategy)) {
+      return {
+        ok: false,
+        error: `Invalid collect strategy: ${value}`,
+        suggestions: ['first', 'last', 'all']
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
+  dispatchTimeout: (value: any): DataDefResult => {
+    if (value === undefined || value === null) {
+      return {ok: true, data: 10000} // 10 second default
+    }
+
+    const numValue = Number(value)
+    if (isNaN(numValue) || numValue < 0) {
+      return {
+        ok: false,
+        error: 'dispatchTimeout must be a positive number (milliseconds)',
+        suggestions: ['5000', '10000', '30000']
+      }
+    }
+
+    if (numValue > 0 && numValue < 100) {
+      return {
+        ok: false,
+        error: 'dispatchTimeout too short - minimum 100ms recommended',
+        suggestions: ['100', '1000', '5000']
+      }
+    }
+
+    if (numValue > 300000) {
+      // 5 minutes
+      return {
+        ok: false,
+        error: 'dispatchTimeout too long - maximum 5 minutes recommended',
+        suggestions: ['30000', '60000', '300000']
+      }
+    }
+
+    return {ok: true, data: numValue}
   },
 
   repeat: (value: any): DataDefResult => {
