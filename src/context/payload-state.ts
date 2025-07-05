@@ -1,7 +1,14 @@
 // src/context/payload-state.ts
 // Payload state management with functional performance optimizations
 
-import type {ActionPayload, StateKey} from '../types/core'
+import type {
+  ActionPayload,
+  StateKey,
+  CyreResponse,
+  ChannelPayloads,
+  RequestResponsePair,
+  PayloadDirection
+} from '../types/core'
 import {createStore} from './create-store'
 import {log} from '../components/cyre-log'
 import {sensor} from '../components/sensor'
@@ -11,20 +18,24 @@ import {PAYLOAD_CONFIG} from '../config/cyre-config'
 /*
       C.Y.R.E. - P.A.Y.L.O.A.D. - S.T.A.T.E
       
-      Optimized functional payload management:
-      - Separated from IO state for clean architecture
+      Enhanced dual payload management:
+      - Request payloads (input to channels)
+      - Response payloads (output from channels)
       - Circular buffer history for performance
       - Fast equality checks for common patterns
       - Deferred logging to avoid blocking call path
       - Memory-efficient operations with pooling
       - 100% functional - no classes or OOP
+      - Request-response correlation tracking
 */
 
 export interface PayloadHistoryEntry {
-  payload: ActionPayload
+  payload: ActionPayload | CyreResponse
   timestamp: number
   source: 'initial' | 'call' | 'pipeline' | 'external'
   changeType: 'initial' | 'set' | 'merge' | 'transform'
+  direction: 'request' | 'response'
+  correlationId?: string
 }
 
 export interface PayloadMetadata {
@@ -32,6 +43,12 @@ export interface PayloadMetadata {
   updateCount: number
   source: 'initial' | 'call' | 'pipeline' | 'external'
   frozen: boolean
+  // NEW: Response tracking
+  lastResponseTime?: number
+  responseCount: number
+  averageResponseTime?: number
+  lastError?: string
+  status: 'idle' | 'pending' | 'completed' | 'failed'
 }
 
 export interface PayloadEntry {
@@ -39,6 +56,9 @@ export interface PayloadEntry {
   previous?: ActionPayload
   history: PayloadHistoryEntry[] | CircularHistory
   metadata: PayloadMetadata
+  // NEW: Response payload support
+  response?: CyreResponse
+  responseHistory?: RequestResponsePair[]
 }
 
 // Functional circular buffer implementation
@@ -226,7 +246,8 @@ export const payloadState = {
           payload: existing.current,
           timestamp: currentTimestamp,
           source,
-          changeType: 'set'
+          changeType: 'set',
+          direction: 'request'
         }
         historyBuffer.add(historyEntry)
       }
@@ -241,7 +262,9 @@ export const payloadState = {
           lastUpdated: currentTimestamp,
           updateCount,
           source,
-          frozen: false
+          frozen: false,
+          responseCount: existing?.metadata.responseCount || 0,
+          status: 'idle'
         }
       }
 
@@ -272,6 +295,109 @@ export const payloadState = {
    */
   getPrevious: (channelId: string): ActionPayload | undefined => {
     return payloadStore.get(channelId)?.previous
+  },
+
+  /**
+   * Set response payload for channel
+   */
+  setResponse: (
+    channelId: string,
+    response: CyreResponse,
+    correlationId?: string
+  ): void => {
+    ensureTimestamp()
+
+    const existing = payloadStore.get(channelId)
+    if (!existing) {
+      log.warn(`Cannot set response for non-existent channel: ${channelId}`)
+      return
+    }
+
+    try {
+      // Update metadata
+      const responseCount = (existing.metadata.responseCount || 0) + 1
+      const lastResponseTime = currentTimestamp
+      const executionTime = response.metadata?.executionTime || 0
+
+      // Calculate average response time
+      const currentAvg = existing.metadata.averageResponseTime || 0
+      const newAvg =
+        currentAvg === 0
+          ? executionTime
+          : (currentAvg * (responseCount - 1) + executionTime) / responseCount
+
+      // Update status based on response
+      const status = response.ok ? 'completed' : 'failed'
+      const lastError = response.ok ? undefined : response.message
+
+      // Add to history
+      if (isCircularHistory(existing.history)) {
+        const historyEntry: PayloadHistoryEntry = {
+          payload: response,
+          timestamp: currentTimestamp,
+          source: 'call',
+          changeType: 'set',
+          direction: 'response',
+          correlationId
+        }
+        existing.history.add(historyEntry)
+      }
+
+      // Update entry
+      const updatedEntry: PayloadEntry = {
+        ...existing,
+        response,
+        metadata: {
+          ...existing.metadata,
+          lastResponseTime,
+          responseCount,
+          averageResponseTime: newAvg,
+          lastError,
+          status
+        }
+      }
+
+      payloadStore.set(channelId, updatedEntry)
+
+      // Defer logging
+      process.nextTick(() => {
+        sensor.debug(`Response set for ${channelId}: ${status}`)
+      })
+    } catch (error) {
+      process.nextTick(() => {
+        log.error(`Failed to set response for ${channelId}: ${error}`)
+        sensor.error(channelId, String(error), 'payload-response-set')
+      })
+    }
+  },
+
+  /**
+   * Get current response for channel
+   */
+  getResponse: (channelId: string): CyreResponse | undefined => {
+    return payloadStore.get(channelId)?.response
+  },
+
+  /**
+   * Get channel payloads (both request and response)
+   */
+  getPayloads: (channelId: string): ChannelPayloads | undefined => {
+    const entry = payloadStore.get(channelId)
+    if (!entry) return undefined
+
+    return {
+      request: entry.current,
+      response: entry.response,
+      metadata: {
+        lastRequestTime: entry.metadata.lastUpdated,
+        lastResponseTime: entry.metadata.lastResponseTime,
+        requestCount: entry.metadata.updateCount,
+        responseCount: entry.metadata.responseCount,
+        averageResponseTime: entry.metadata.averageResponseTime,
+        lastError: entry.metadata.lastError,
+        status: entry.metadata.status
+      }
+    }
   },
 
   /**

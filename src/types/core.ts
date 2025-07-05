@@ -607,3 +607,42 @@ export interface PayloadSubscriptionOptions {
   immediate?: boolean
   once?: boolean
 }
+
+// NEW: Dual payload system types
+export interface ChannelPayloads {
+  /** Request payload (input to channel) */
+  request: ActionPayload
+  /** Response payload (output from channel execution) */
+  response?: CyreResponse
+  /** Metadata for tracking request/response lifecycle */
+  metadata: {
+    lastRequestTime: number
+    lastResponseTime?: number
+    requestCount: number
+    responseCount: number
+    averageResponseTime?: number
+    lastError?: string
+    status: 'idle' | 'pending' | 'completed' | 'failed'
+  }
+}
+
+export interface PayloadDirection {
+  direction: 'request' | 'response'
+  timestamp: number
+  correlationId?: string
+}
+
+export interface RequestResponsePair {
+  request: {
+    payload: ActionPayload
+    timestamp: number
+    source: PayloadUpdateSource
+  }
+  response?: {
+    payload: CyreResponse
+    timestamp: number
+    executionTime: number
+  }
+  status: 'pending' | 'completed' | 'failed' | 'timeout'
+  correlationId: string
+}
