@@ -1,34 +1,15 @@
 // src/libs/utils.ts
 
-/**
- * Memoization utility with proper cache management
- */
-export const memoize = <TArgs extends unknown[], TReturn>(
-  fn: (...args: TArgs) => TReturn,
-  keyResolver?: (...args: TArgs) => string
-): ((...args: TArgs) => TReturn) => {
-  const cache = new Map<string, TReturn>()
-  const maxCacheSize = 100
+/*
 
-  return (...args: TArgs): TReturn => {
-    const key = keyResolver ? keyResolver(...args) : JSON.stringify(args)
+      C.Y.R.E - U.T.I.L.I.T.I.E.S
+      
+      Simple utility functions:
+      - Path validation using branch store
+      - Lightweight alternatives to complex systems
+      - Performance-focused implementations
 
-    if (cache.has(key)) {
-      return cache.get(key)!
-    }
-
-    const result = fn(...args)
-
-    // Manage cache size
-    if (cache.size >= maxCacheSize) {
-      const firstKey = cache.keys().next().value
-      cache.delete(firstKey)
-    }
-
-    cache.set(key, result)
-    return result
-  }
-}
+*/
 /**
  * Composes multiple functions from left to right
  * @template T - Value type
@@ -95,30 +76,6 @@ export const isEqual = (a: any, b: any): boolean => {
 }
 
 /**
- * Wraps a function to measure its execution time
- */
-export const measurePerformance = <TArgs extends Array<unknown>, TResult>(
-  fn: (...args: TArgs) => TResult,
-  name: string
-): ((...args: TArgs) => TResult) => {
-  return (...args: TArgs) => {
-    const start = performance.now()
-    try {
-      const result = fn(...args)
-      const end = performance.now()
-      console.debug(`${name} took ${(end - start).toFixed(2)}ms`)
-      return result
-    } catch (error) {
-      const end = performance.now()
-      console.error(`${name} failed after ${(end - start).toFixed(2)}ms`, error)
-      throw error
-    }
-  }
-}
-
-// src/utils/crypto-polyfill.ts
-
-/**
  * Polyfill for crypto.randomUUID() in test environments
  * This resolves the "crypto is not defined" error in tests
  */
@@ -168,23 +125,6 @@ export type Result<T, E = Error> =
   | {kind: 'error'; error: E}
 
 /**
- * Creates a Result from a try/catch block
- */
-export const tryCatch = async <T>(
-  fn: () => Promise<T>
-): Promise<Result<T, Error>> => {
-  try {
-    const value = await fn()
-    return {kind: 'ok', value}
-  } catch (error) {
-    return {
-      kind: 'error',
-      error: error instanceof Error ? error : new Error(String(error))
-    }
-  }
-}
-
-/**
  * Lens type for immutable state updates
  */
 export type Lens<S, A> = {
@@ -201,62 +141,58 @@ export const lens = <S, A>(prop: keyof S): Lens<S, A> => ({
 })
 
 /**
- * Effect type for handling async operations
+ * Simple path validation using branch store
+ * Replaces complex path-engine validation for basic checks
  */
-export type Effect<T> = () => Promise<T>
+export const isValidPath = (path: string): boolean => {
+  if (!path || typeof path !== 'string') return false
 
-/**
- * Creates an Effect wrapper with map and chain operations
- */
-export const withEffect = <T>(effect: Effect<T>) => ({
-  map: <U>(fn: (t: T) => U) => withEffect(async () => fn(await effect())),
-  chain: <U>(fn: (t: T) => Effect<U>) =>
-    withEffect(async () => {
-      const t = await effect()
-      return fn(t)()
-    }),
-  run: effect
-})
+  // Basic format validation
+  if (path.startsWith('/') || path.endsWith('/')) return false
+  if (path.includes('//')) return false
+  if (path.includes(' ') && path.trim() !== path) return false
 
-// src/libs/utils.ts
-// Utility functions with proper deep comparison
+  // Parse segments
+  const segments = path
+    .split('/')
+    .filter(segment => segment.length > 0 && segment.trim().length > 0)
+    .map(segment => segment.trim())
 
-/*
+  if (segments.length === 0) return false
 
-      C.Y.R.E - U.T.I.L.S
-      
-      Utility functions for deep comparison and state management
-
-*/
-
-/**
- * Deep clone utility
- */
-export const deepClone = <T>(obj: T): T => {
-  if (obj === null || typeof obj !== 'object') return obj
-  if (obj instanceof Date) return new Date(obj.getTime()) as unknown as T
-  if (obj instanceof Array)
-    return obj.map(item => deepClone(item)) as unknown as T
-  if (typeof obj === 'object') {
-    const cloned = {} as {[key: string]: any}
-    Object.keys(obj).forEach(key => {
-      cloned[key] = deepClone((obj as {[key: string]: any})[key])
-    })
-    return cloned as T
-  }
-  return obj
+  // Validate each segment
+  return segments.every(segment => {
+    // Allow alphanumeric with hyphens/underscores (no wildcards for basic validation)
+    return /^[a-zA-Z0-9\-_]+$/.test(segment)
+  })
 }
 
 /**
- * Safe JSON stringify with circular reference handling
+ * Memoization utility with proper cache management
  */
-export const safeStringify = (obj: any): string => {
-  const seen = new Set()
-  return JSON.stringify(obj, (key, value) => {
-    if (typeof value === 'object' && value !== null) {
-      if (seen.has(value)) return '[Circular]'
-      seen.add(value)
+export const memoize = <TArgs extends unknown[], TReturn>(
+  fn: (...args: TArgs) => TReturn,
+  keyResolver?: (...args: TArgs) => string
+): ((...args: TArgs) => TReturn) => {
+  const cache = new Map<string, TReturn>()
+  const maxCacheSize = 100
+
+  return (...args: TArgs): TReturn => {
+    const key = keyResolver ? keyResolver(...args) : JSON.stringify(args)
+
+    if (cache.has(key)) {
+      return cache.get(key)!
     }
-    return value
-  })
+
+    const result = fn(...args)
+
+    // Manage cache size
+    if (cache.size >= maxCacheSize) {
+      const firstKey = cache.keys().next().value
+      cache.delete(firstKey)
+    }
+
+    cache.set(key, result)
+    return result
+  }
 }

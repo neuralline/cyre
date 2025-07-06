@@ -60,7 +60,7 @@ const executeSingleHandler = async (
     return {
       ok: true,
       payload: result,
-      message: MSG.WELCOME,
+      message: MSG.OPERATION_SUCCESSFUL,
       metadata: {
         executionOperator: 'single',
         handlerCount: 1,
@@ -187,7 +187,7 @@ const executeParallelHandlers = async (
       payload: finalPayload,
       message:
         failed.length === 0
-          ? `All ${successful.length} handlers executed successfully`
+          ? MSG.EXECUTION_SUCCESSFUL
           : `${successful.length}/${handlers.length} handlers succeeded`,
       metadata: {
         executionOperator: 'parallel',
@@ -313,7 +313,7 @@ const executeSequentialHandlers = async (
       payload: finalPayload,
       message:
         errors.length === 0
-          ? `All ${successfulHandlers} handlers executed successfully`
+          ? MSG.EXECUTION_SUCCESSFUL
           : `${successfulHandlers}/${handlers.length} handlers succeeded`,
       metadata: {
         executionOperator: 'sequential',
@@ -549,16 +549,27 @@ export const useDispatch = async (
     if (handlers.length === 0) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
       sensor.error(error, action.id)
-      return {ok: false, payload: null, message: error}
+      const errorResponse = {ok: false, payload: null, message: error}
+
+      // Store error response in payload state
+      payloadState.setResponse(action.id, errorResponse)
+      return errorResponse
     }
 
     // Route to appropriate execution strategy based on pre-compiled operator
     const executionOperator = action._executionOperator || 'single'
 
+    let response: CyreResponse
+
     switch (executionOperator) {
       case 'single':
         // Ultra-fast path for single handler
-        return await executeSingleHandler(action, handlers[0], currentPayload)
+        response = await executeSingleHandler(
+          action,
+          handlers[0],
+          currentPayload
+        )
+        break
 
       case 'parallel':
         const parallelResult = await executeParallelHandlers(
@@ -567,13 +578,14 @@ export const useDispatch = async (
           currentPayload
         )
         // Convert MultiHandlerResult to CyreResponse
-        return {
+        response = {
           ok: parallelResult.ok,
           payload: parallelResult.payload,
           message: parallelResult.message,
           error: !parallelResult.ok,
           metadata: parallelResult.metadata
         }
+        break
 
       case 'sequential':
         const sequentialResult = await executeSequentialHandlers(
@@ -581,13 +593,14 @@ export const useDispatch = async (
           handlers,
           currentPayload
         )
-        return {
+        response = {
           ok: sequentialResult.ok,
           payload: sequentialResult.payload,
           message: sequentialResult.message,
           error: !sequentialResult.ok,
           metadata: sequentialResult.metadata
         }
+        break
 
       case 'race':
         const raceResult = await executeRaceHandlers(
@@ -595,13 +608,14 @@ export const useDispatch = async (
           handlers,
           currentPayload
         )
-        return {
+        response = {
           ok: raceResult.ok,
           payload: raceResult.payload,
           message: raceResult.message,
           error: !raceResult.ok,
           metadata: raceResult.metadata
         }
+        break
 
       case 'waterfall':
         const waterfallResult = await executeWaterfallHandlers(
@@ -609,21 +623,31 @@ export const useDispatch = async (
           handlers,
           currentPayload
         )
-        return {
+        response = {
           ok: waterfallResult.ok,
           payload: waterfallResult.payload,
           message: waterfallResult.message,
           error: !waterfallResult.ok,
           metadata: waterfallResult.metadata
         }
+        break
 
       default:
         // Fallback to single execution
         log.warn(
           `Unknown execution operator: ${executionOperator}, falling back to single`
         )
-        return await executeSingleHandler(action, handlers[0], currentPayload)
+        response = await executeSingleHandler(
+          action,
+          handlers[0],
+          currentPayload
+        )
+        break
     }
+
+    // Store response in payload state
+    payloadState.setResponse(action.id, response)
+    return response
   } catch (dispatchError) {
     const errorMessage =
       dispatchError instanceof Error
@@ -634,7 +658,7 @@ export const useDispatch = async (
     sensor.error(action.id, errorMessage, 'dispatch-exception')
     log.error(`Dispatch failed: ${errorMessage}`)
 
-    return {
+    const errorResponse = {
       ok: false,
       payload: null,
       message: `Dispatch failed: ${errorMessage}`,
@@ -646,5 +670,9 @@ export const useDispatch = async (
         hasTimeout: false
       }
     }
+
+    // Store error response in payload state
+    payloadState.setResponse(action.id, errorResponse)
+    return errorResponse
   }
 }

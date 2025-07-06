@@ -14,6 +14,7 @@ import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
 import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
 import {sensor} from './components/sensor'
+import {bufferState} from './context/buffer-state'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 
@@ -98,6 +99,9 @@ export interface CyreInstance {
   hasChanged: (id: string, payload: ActionPayload) => boolean
   getPrevious: (id: string) => ActionPayload | undefined
   updatePayload: (id: string, payload: ActionPayload) => void
+
+  // NEW: Dual payload system access
+  payloadState
 
   // Control methods with metrics
   pause: (id?: string) => void
@@ -298,7 +302,7 @@ export const call = async (
         return {
           ok: false,
           payload: undefined,
-          message: `Throttled - ${remaining}ms remaining`
+          message: `Call throttled - retry available in ${remaining}ms`
         }
       }
     }
@@ -365,8 +369,51 @@ export const call = async (
       return {
         ok: true,
         payload,
-        message: `Debounced - executing in ${action.debounce}ms`,
+        message: `Call debounced - execution scheduled in ${action.debounce}ms`,
         metadata: {delay: action.debounce}
+      }
+    }
+
+    // Buffer protection - ultra-fast buffering
+    else if (action.buffer && action.buffer.window > 0) {
+      const bufferId = `buffer-${action.id}`
+
+      if (!timeline.get(bufferId)) {
+        // First call - start buffer window
+        TimeKeeper.keep(
+          action.buffer.window,
+          async () => {
+            try {
+              // Get final buffered payload
+              const finalPayload = bufferState.get(action.id) || payload
+
+              // Clear buffer
+              bufferState.clear(action.id)
+
+              // Execute with final payload
+              return await processCall(action, finalPayload)
+            } catch (error) {
+              return {
+                ok: false,
+                payload: null,
+                message: `Buffer execution failed: ${error}`,
+                error: String(error)
+              }
+            }
+          },
+          1,
+          bufferId
+        )
+      }
+
+      // Store payload in ultra-fast buffer (no payloadState!)
+      bufferState.set(action.id, payload, action.buffer.strategy || 'overwrite')
+
+      return {
+        ok: true,
+        payload,
+        message: `Call buffered - execution scheduled in ${action.buffer.window}ms`,
+        metadata: {bufferWindow: action.buffer.window}
       }
     }
 
@@ -523,7 +570,10 @@ export const cyre: CyreInstance = Object.freeze({
    */
   getMetrics: (channelId?: string) => {
     return metricsState.getMetrics(channelId)
-  }
+  },
+
+  // NEW: Dual payload system access
+  payloadState
 })
 
 export default cyre

@@ -5,8 +5,8 @@ import {sensor} from '../components/sensor'
 import type {IO} from '../types/core'
 import payloadState from '../context/payload-state'
 import {log} from './cyre-log'
-import {io} from '../context/state'
-import {pathEngine} from '../schema/path-engine'
+import {io, stores} from '../context/state'
+import {isValidPath} from '../libs/utils'
 import {compileAction} from '../schema/compile-pipeline'
 
 /*
@@ -47,6 +47,18 @@ export const CyreActions = (action: IO): RegistrationResult => {
       }
     }
 
+    // 1.5. VALIDATE PATH BEFORE COMPILATION
+    if (action.path && !isValidPath(action.path)) {
+      const errorMessage = `Invalid path format: ${action.path}. Path must be a valid hierarchical path (e.g., "app/users/profile")`
+      sensor.error(action.id, errorMessage, 'invalid-path')
+      return {
+        ok: false,
+        message: `Channel creation failed: Invalid path format: ${action.path}. Path must be a valid hierarchical path (e.g., "app/users/profile")`,
+        errors: [errorMessage],
+        compilationTime: performance.now() - startTime
+      }
+    }
+
     const compilation = compileAction(action)
     const compilationTime = performance.now() - startTime
 
@@ -56,8 +68,8 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
       //log.error(`Channel creation failed for ${action.id}: ${errorMessage}`)
       sensor.error(action.id, errorMessage, 'compilation-blocked')
-      sensor.error(compilation.errors)
-      sensor.warn(compilation.warnings)
+      compilation.errors && sensor.error(compilation.errors)
+      compilation.warnings && sensor.warn(compilation.warnings)
 
       // Store blocked action for reference
       if (compilation.compiledAction._isBlocked) {
@@ -81,9 +93,17 @@ export const CyreActions = (action: IO): RegistrationResult => {
       // Store compiled action
       io.set(finalAction)
 
-      // Index path if provided
-      if (finalAction.path && pathEngine.isValidPath(finalAction.path)) {
-        pathEngine.add(finalAction.id, finalAction.path)
+      // Validate and index path if provided
+      if (finalAction.path && isValidPath(finalAction.path)) {
+        // Check if this path corresponds to a branch and update branch metadata
+        const branchEntry = stores.branch.get(finalAction.path)
+        if (branchEntry) {
+          // Update branch channel count
+          stores.branch.set(finalAction.path, {
+            ...branchEntry,
+            channelCount: branchEntry.channelCount + 1
+          })
+        }
       }
 
       // Initialize payload state if provided

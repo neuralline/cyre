@@ -3,16 +3,13 @@
 
 import type {
   ActionPayload,
-  StateKey,
   CyreResponse,
   ChannelPayloads,
-  RequestResponsePair,
-  PayloadDirection
+  RequestResponsePair
 } from '../types/core'
 import {createStore} from './create-store'
 import {log} from '../components/cyre-log'
 import {sensor} from '../components/sensor'
-import {isEqual} from '../libs/utils'
 import {PAYLOAD_CONFIG} from '../config/cyre-config'
 
 /*
@@ -359,10 +356,10 @@ export const payloadState = {
 
       payloadStore.set(channelId, updatedEntry)
 
-      // Defer logging
-      process.nextTick(() => {
-        sensor.debug(`Response set for ${channelId}: ${status}`)
-      })
+      // // Defer logging
+      // process.nextTick(() => {
+      //   sensor.debug(`Response set for ${channelId}: ${status}`)
+      // })
     } catch (error) {
       process.nextTick(() => {
         log.error(`Failed to set response for ${channelId}: ${error}`)
@@ -574,92 +571,6 @@ export const payloadState = {
       timestampUpdateId = null
     }
     historyBufferPool.length = 0
-  }
-}
-
-/**
- * Advanced payload operations
- */
-export const advancedPayloadOps = {
-  /**
-   * Compare payloads between channels
-   */
-  compare: (
-    channelId1: string,
-    channelId2: string
-  ): {
-    equal: boolean
-    differences: string[]
-    similarity: number
-  } => {
-    const payload1 = payloadState.get(channelId1)
-    const payload2 = payloadState.get(channelId2)
-    if (!payload1 || !payload2) {
-      return {
-        equal: false,
-        differences: ['One or both payloads not found'],
-        similarity: 0
-      }
-    }
-
-    const equal = isEqual(payload1, payload2)
-
-    // Simple similarity calculation (can be enhanced)
-    const similarity = equal ? 1 : 0.5 // Placeholder logic
-
-    return {
-      equal,
-      differences: equal ? [] : ['Payloads differ'], // Can be enhanced with deep diff
-      similarity
-    }
-  },
-
-  /**
-   * Sync payloads between multiple channels
-   */
-  sync: (channelIds: string[], sourceChannelId?: string): boolean => {
-    try {
-      const source = sourceChannelId || channelIds[0]
-      const sourcePayload = payloadState.get(source)
-
-      if (!sourcePayload) return false
-
-      channelIds.forEach(channelId => {
-        if (channelId !== source) {
-          payloadState.set(channelId, sourcePayload, 'external')
-        }
-      })
-
-      return true
-    } catch (error) {
-      log.error(`Failed to sync payloads: ${error}`)
-      return false
-    }
-  },
-
-  /**
-   * Validate payload against schema
-   */
-  validate: (
-    channelId: string,
-    schema: any
-  ): {valid: boolean; errors?: string[]} => {
-    try {
-      const payload = payloadState.get(channelId)
-      if (!payload) {
-        return {valid: false, errors: ['Payload not found']}
-      }
-
-      // This would use the schema validation system
-      // const result = validate(schema, payload)
-      // For now, simple validation
-      const valid = payload !== null && payload !== undefined
-
-      return {valid, errors: valid ? undefined : ['Validation failed']}
-    } catch (error) {
-      log.error(`Payload validation failed for ${channelId}: ${error}`)
-      return {valid: false, errors: [String(error)]}
-    }
   }
 }
 

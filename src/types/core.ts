@@ -18,6 +18,7 @@ export type ChannelOperator =
   | 'required'
   | 'schedule'
   | 'auth'
+  | 'buffer'
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low' | 'background'
 export type ActionPayload = any
@@ -77,6 +78,7 @@ export interface CyreResponse<T = any> {
     executionStrategy?: 'parallel' | 'sequential'
     collectStrategy?: CollectStrategy
     hasTimeout?: boolean
+    bufferWindow?: number
   }
 }
 
@@ -645,4 +647,10 @@ export interface RequestResponsePair {
   }
   status: 'pending' | 'completed' | 'failed' | 'timeout'
   correlationId: string
+}
+// io buffer
+export interface BufferOptions {
+  window: number
+  strategy?: 'overwrite' | 'append' | 'ignore'
+  maxSize?: number
 }

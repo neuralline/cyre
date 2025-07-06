@@ -211,6 +211,46 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
 
     return {ok: true, data: value, operator: 'debounce'}
   },
+  buffer: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (typeof value === 'number') {
+      // Simple number = window size
+      return {
+        ok: true,
+        data: {window: value, strategy: 'overwrite'},
+        operator: 'buffer'
+      }
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      if (typeof value.window !== 'number' || value.window < 0) {
+        return {
+          ok: false,
+          error: `Buffer window must be a positive number, but received ${describeValue(
+            value.window
+          )}`,
+          suggestions: [
+            'Specify window in milliseconds',
+            'Example: 1000 for 1-second buffer'
+          ]
+        }
+      }
+
+      return {ok: true, data: value, operator: 'buffer'}
+    }
+
+    return {
+      ok: false,
+      error: `Buffer must be a number or object with window property, but received ${describeValue(
+        value
+      )}`,
+      suggestions: [
+        'Use number for simple buffer',
+        'Use object for advanced configuration'
+      ]
+    }
+  },
 
   // Processing talents
   schema: (value: any): DataDefResult => {
