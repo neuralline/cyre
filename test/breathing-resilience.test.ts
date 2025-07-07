@@ -1,4 +1,4 @@
-// src/test/breathing-resilience.test.ts
+// test/breathing-resilience.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/app'
@@ -40,9 +40,7 @@ describe('Quantum Breathing Resilience', () => {
     startTime = Date.now()
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== SIMPLIFIED BREATHING TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
@@ -53,35 +51,11 @@ describe('Quantum Breathing Resilience', () => {
     }
 
     console.log(`Collected ${breathingSnapshots.length} breathing samples`)
-    console.log('===== SIMPLIFIED BREATHING TEST COMPLETED =====')
+
     vi.restoreAllMocks()
   })
 
   // Simple monitoring function that doesn't interfere with test flow
-  const setupMonitoring = () => {
-    monitorInterval = setInterval(() => {
-      const breathingState = cyre.getBreathingState()
-      const elapsed = Date.now() - startTime
-
-      breathingSnapshots.push({
-        timestamp: elapsed,
-        breathCount: breathingState.breathCount,
-        rate: breathingState.currentRate,
-        stress: breathingState.stress,
-        isRecuperating: breathingState.isRecuperating,
-        pattern: breathingState.pattern
-      })
-
-      // Log significant state changes
-      if (breathingState.isRecuperating) {
-        console.log(
-          `[${elapsed}ms] System in RECUPERATION (stress: ${(
-            breathingState.stress * 100
-          ).toFixed(1)}%)`
-        )
-      }
-    }, SAMPLE_INTERVAL)
-  }
 
   // Simplified: Directly set stress level without complex cooling mechanism
   const setSystemStress = (level: number): void => {
@@ -118,7 +92,6 @@ describe('Quantum Breathing Resilience', () => {
   // Simplified test that won't hang
   it('should adapt to system stress through breathing mechanisms', async () => {
     // Setup monitoring
-    setupMonitoring()
 
     // Baseline - no stress (500ms)
     await new Promise(resolve => setTimeout(resolve, 500))

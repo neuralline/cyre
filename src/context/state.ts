@@ -1,91 +1,60 @@
-// src/context/state.ts - Update with timer utilities
-import {log} from '../components/cyre-logger'
+// src/context/state.ts
+// Cyre state management with payload separation
+
 import type {
-  ActionMetrics,
-  ActionPayload,
+  BranchStore,
   IO,
   ISubscriber,
+  StateActionMetrics,
   Timer
-} from '../interfaces/interface'
-import {isEqual} from '../libs/utils'
-import {metricsState, type QuantumState} from './metrics-state'
-
-import type {StateKey} from '../interfaces/interface'
+} from '../types/core'
+import {metricsState, type MetricsState} from './metrics-state'
+import {payloadState} from './payload-state'
+import type {StateKey} from '../types/core'
 import {createStore} from './create-store'
-import timeKeeper from '../components/cyre-time-keeper'
+import {sensor} from '../components/sensor'
 
-// Update to include proper middleware typing
-import type {MiddlewareFunction} from '../components/cyre-middleware'
+/*
 
-// Define a middleware type that works with the ISubscriber interface
-export interface IMiddleware extends ISubscriber {
-  fn: MiddlewareFunction
-}
+      C.Y.R.E - S.T.A.T.E
+      
+      State management with clean separation:
+      - IO store: Channel configuration and behavior only
+      - Payload state: Separate payload management
+      - Clean interfaces and backward compatibility
+      - Enhanced state operations
 
-export interface StateActionMetrics {
-  lastExecutionTime: number
-  executionCount: number
-  intervalId?: NodeJS.Timeout
-  errors: Array<{
-    timestamp: number
-    message: string
-  }>
-}
+*/
 
 // Create stores with proper typing
-const ioStore = createStore<IO>()
-const subscriberStore = createStore<ISubscriber>()
-const middlewareStore = createStore<IMiddleware>()
-const timelineStore = createStore<Timer>()
-const payloadHistory = createStore<ActionPayload>()
-const actionMetrics = createStore<StateActionMetrics>()
+const ioStore = createStore<IO>() // Channels
+const subscriberStore = createStore<ISubscriber>() // .on subscribers/listeners
+const timelineStore = createStore<Timer>() // schedules and queued tasks used by TimeKeeper
+//const actionMetrics = createStore<StateActionMetrics>()
+export const branchStore = createStore<BranchStore>()
 
-// Export IO operations
-// Utility functions for state management
-const cleanupAction = (id: StateKey): void => {
-  const metrics = actionMetrics.get(id)
-  if (metrics?.intervalId) {
-    clearInterval(metrics.intervalId)
-  }
-  actionMetrics.forget(id)
-  payloadHistory.forget(id)
-}
-export const io = {
-  set: (ioState: IO): void => {
-    if (!ioState?.id) throw new Error('IO must have an id')
-
+/**
+ * IO operations - configuration only, no payload data
+ * // channel information store
+ */
+export const io = Object.freeze({
+  /**
+   * Set action configuration (no payload)
+   */
+  set: (action: IO): void => {
     try {
-      const enhanced: IO = {
-        ...ioState,
-        timestamp: Date.now(),
-        type: ioState.type || ioState.id
+      if (!action?.id) throw new Error('IO state: Channel must have an id')
+      const id = action.id
+
+      const channel: IO = {
+        ...action,
+        _timestamp: Date.now()
       }
 
-      cleanupAction(ioState.id)
-      ioStore.set(ioState.id, enhanced)
-
-      // Ensure action metrics are initialized with a valid timestamp
-      const currentTime = Date.now()
-      const currentMetrics = actionMetrics.get(ioState.id)
-
-      // Only initialize if metrics don't exist yet or have invalid values
-      if (!currentMetrics || currentMetrics.lastExecutionTime === 0) {
-        actionMetrics.set(ioState.id, {
-          lastExecutionTime: 0, // Keep as 0 until first execution
-          executionCount: 0,
-          errors: []
-        })
-      }
-
-      if (ioState.detectChanges) {
-        payloadHistory.set(ioState.id, ioState.payload)
-      }
-
-      // Record call in quantum state
-      metricsState.recordCall(ioState.priority?.level)
+      ioStore.set(id, channel)
     } catch (error) {
-      log.error(
-        `Failed to set IO: ${
+      sensor.critical(
+        `IO state corruption detected: ${
           error instanceof Error ? error.message : String(error)
         }`
       )
@@ -93,168 +62,126 @@ export const io = {
     }
   },
 
-  updateMetrics: (id: StateKey, update: Partial<ActionMetrics>): void => {
-    // Get current metrics or create default if none exist
-    const current = actionMetrics.get(id) || {
-      lastExecutionTime: 0,
-      executionCount: 0,
-      errors: []
-    }
-
-    // Update with new metrics, ensuring values are valid
-    const updatedMetrics = {
-      ...current,
-      ...update,
-      // Ensure lastExecutionTime is a valid number greater than 0
-      lastExecutionTime:
-        update.lastExecutionTime && update.lastExecutionTime > 0
-          ? update.lastExecutionTime
-          : current.lastExecutionTime
-    }
-
-    // Store updated metrics
-    actionMetrics.set(id, updatedMetrics)
-  },
-
+  /**
+   * Get action configuration
+   */
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
-  //remove channel
+  /**
+   * Remove action configuration
+   */
   forget: (id: StateKey): boolean => {
-    cleanupAction(id)
-    return ioStore.forget(id)
-  },
-  //forget all channels and clear all related records
-  clear: (): void => {
-    ioStore.getAll().forEach(item => {
-      if (item.id) cleanupAction(item.id)
-    })
-    payloadHistory.clear()
-    actionMetrics.clear()
-    ioStore.clear()
-    metricsState.reset()
+    // Also remove payload
+    payloadState.forget(id) //remove chanel's payload state
+    return ioStore.forget(id) // finally forget channel
   },
 
-  //get all io state
+  /**
+   * Clear all action configurations
+   */
+  clear: (): void => {
+    try {
+      //actionMetrics.clear()
+      ioStore.clear()
+
+      payloadState.clear() // Clear payload state
+      metricsState.reset()
+    } catch (error) {
+      sensor.critical(`System clear failed: ${error}`)
+      throw error
+    }
+  },
+
+  /**
+   * Get all action configurations
+   */
   getAll: (): IO[] => ioStore.getAll(),
 
-  hasChanged: (id: StateKey, newPayload: ActionPayload): boolean => {
-    const previousPayload = payloadHistory.get(id)
-
-    // If no previous payload, consider it changed
-    if (previousPayload === undefined) {
-      return true
-    }
-
-    return !isEqual(newPayload, previousPayload)
-  },
-
-  getPrevious: (id: StateKey): ActionPayload | undefined => {
-    return payloadHistory.get(id)
-  },
-
+  /**
+   * Get action metrics
+   */
   getMetrics: (id: StateKey): StateActionMetrics | undefined => {
-    return actionMetrics.get(id)
-  },
+    const action = ioStore.get(id)
+    if (action) {
+      const newMetrics: StateActionMetrics = {
+        lastExecutionTime: action._lastExecTime || 0,
+        executionCount: action._executionCount || 0,
+        errors: action.errors || []
+      }
 
-  /**
-   * Set a timer with proper error handling
-   * @returns Object indicating success and optional timerId/message
-   */
-  setTimer: (
-    duration: number,
-    callback: () => void,
-    timerId: string
-  ): {ok: boolean; message?: string} => {
-    try {
-      const result = timeKeeper.keep(
-        duration,
-        callback,
-        1, // Execute once
-        timerId
-      )
-
-      return result.kind === 'ok'
-        ? {ok: true}
-        : {ok: false, message: result.error.message}
-    } catch (error) {
-      log.error(`Failed to set timer: ${error}`)
-      return {ok: false, message: String(error)}
+      return newMetrics
     }
-  },
 
-  /**
-   * Clear a timer by ID
-   */
-  clearTimer: (timerId: string): boolean => {
-    try {
-      timeKeeper.forget(timerId)
-      return true
-    } catch (error) {
-      log.error(`Failed to clear timer ${timerId}: ${error}`)
-      return false
-    }
+    return undefined
   }
-}
+})
 
-// Keep existing subscribers and timeline exports
+// Keep existing subscribers and timeline exports (unchanged)
 export const subscribers = {
   add: (subscriber: ISubscriber): void => {
-    if (!subscriber?.id || !subscriber?.fn) {
+    if (!subscriber?.id || !subscriber?.handler) {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
   },
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
-  forget: (id: StateKey): boolean => subscriberStore.forget(id),
-  clear: (): void => subscriberStore.clear(),
+  forget: (id: StateKey): boolean => {
+    const result = subscriberStore.forget(id)
+    return result
+  },
+  clear: (): void => {
+    subscriberStore.clear()
+  },
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
 
-export const middlewares = {
-  add: (middleware: IMiddleware): void => {
-    if (!middleware?.id || typeof middleware.fn !== 'function') {
-      throw new Error('Invalid middleware format')
-    }
-
-    // Store middleware in the central store
-    middlewareStore.set(middleware.id, middleware)
-  },
-  get: (id: StateKey): IMiddleware | undefined => {
-    return middlewareStore.get(id)
-  },
-  forget: (id: StateKey): boolean => {
-    return middlewareStore.forget(id)
-  },
-  clear: (): void => {
-    middlewareStore.clear()
-  },
-  getAll: (): IMiddleware[] => {
-    return middlewareStore.getAll()
-  }
-}
+// scheduled task store
 export const timeline = {
   add: (timer: Timer): void => {
     if (!timer.id) return
     timelineStore.set(timer.id, timer)
+
+    // Update active formations count in metrics state
+    const activeCount = timelineStore
+      .getAll()
+      .filter(t => t.status === 'active').length
+    metricsState.update({activeFormations: activeCount})
   },
+
   get: (id: StateKey): Timer | undefined => timelineStore.get(id),
+
   forget: (id: StateKey): boolean => {
     const timers = timelineStore.getAll().filter(timer => timer.id === id)
     timers.forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
       if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
     })
-    return timelineStore.forget(id)
+
+    const result = timelineStore.forget(id)
+
+    // Update active formations count
+    const activeCount = timelineStore
+      .getAll()
+      .filter(t => t.status === 'active').length
+    metricsState.update({activeFormations: activeCount})
+
+    return result
   },
+
   clear: (): void => {
     timelineStore.getAll().forEach(timer => {
       if (timer.timeoutId) clearTimeout(timer.timeoutId)
+      if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
     })
     timelineStore.clear()
+    metricsState.update({activeFormations: 0})
   },
+
   getAll: (): Timer[] => timelineStore.getAll(),
-  getActive: (): Timer[] =>
-    timelineStore.getAll().filter(timer => timer.status === 'active')
+
+  getActive: (): Timer[] => {
+    return timelineStore.getAll().filter(timer => timer.status === 'active')
+  }
 }
 
 // Export readonly stores
@@ -262,9 +189,9 @@ export const stores = Object.freeze({
   io: ioStore,
   subscribers: subscriberStore,
   timeline: timelineStore,
-  quantum: metricsState,
-  middleware: middlewareStore
+  //quantum: metricsState,
+  branch: branchStore
 })
 
 // Export types
-export type {QuantumState, StateKey}
+export type {MetricsState as QuantumState, StateKey}

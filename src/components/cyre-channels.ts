@@ -1,21 +1,23 @@
 // src/components/cyre-channels.ts
+// Focused channel creation - only handles ID, existence, and defaults
+
+import {io} from '../context/state'
+import {IO} from '../types/core'
+import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
-import {IO} from '../interfaces/interface'
-import {memoize} from '../libs/utils'
-import {log} from './cyre-logger'
+import payloadState from '../context/payload-state'
 
-/* 
+/*
 
-      C.Y.R.E. - C.H.A.N.N.E.L.S
+      C.Y.R.E - C.H.A.N.N.E.L.S
 
+      Focused channel creation with clear responsibilities:
+      - Validate ID requirements
+      - Check if channel already exists  
+      - Set basic defaults (payload, timestamp, type)
+      - Store in state
 
 */
-
-// Enhanced type definitions
-type ValidationResult = {
-  isValid: boolean
-  error?: string
-}
 
 type ChannelResult = {
   ok: boolean
@@ -23,201 +25,88 @@ type ChannelResult = {
   payload?: IO
 }
 
-type DataDefinitionResult = {
-  ok: boolean
-  payload: any
-  message?: string
-  required?: boolean
-}
-
-type DataDefinition = (value: any) => DataDefinitionResult
-type DataDefinitions = Record<string, DataDefinition>
-
-// Constants for messages
-
-// Type guard functions
-const isValidChannel = (value: unknown): value is IO => {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'id' in value &&
-    typeof (value as IO).id === 'string' &&
-    (value as IO).id.length > 0
-  )
-}
-
-// Validation functions with proper error handling
-const validateChannel = memoize((channel: IO): ValidationResult => {
-  if (!channel) {
-    return {isValid: false, error: MSG.CHANNEL_INVALID_STRUCTURE}
+/**
+ * Validate channel ID requirements
+ */
+const validateChannelId = (id: any): {valid: boolean; error?: string} => {
+  // Check existence first
+  if (id === undefined || id === null) {
+    return {valid: false, error: 'Channel ID cannot be empty'}
   }
 
-  if (!channel.id) {
-    return {isValid: false, error: MSG.CHANNEL_MISSING_ID}
+  // Check type
+  if (typeof id !== 'string') {
+    return {valid: false, error: MSG.CHANNEL_INVALID_TYPE}
   }
 
-  if (!channel.type && !channel.id) {
-    return {isValid: false, error: MSG.CHANNEL_MISSING_TYPE}
+  // Check if empty string
+  if (id.trim().length === 0) {
+    return {valid: false, error: 'Channel ID cannot be empty'}
   }
 
-  if (channel.type && typeof channel.type !== 'string') {
-    return {isValid: false, error: MSG.CHANNEL_INVALID_TYPE}
-  }
-
-  return {isValid: true}
-})
-
-// Process data definitions with improved error handling
-const processDataDefinitions = (
-  channel: IO,
-  definitions: DataDefinitions
-): ChannelResult => {
-  try {
-    const processedData = {...channel}
-    const errors: string[] = []
-
-    // Process each channel property against its definition
-    for (const [key, value] of Object.entries(channel)) {
-      const definition = definitions[key]
-
-      if (!definition) {
-        processedData[key] = value
-        continue
-      }
-
-      const result = definition(value)
-
-      if (!result.ok) {
-        if (result.required) {
-          return {
-            ok: false,
-            message: `Required field '${key}' validation failed: ${result.message}`,
-            payload: processedData
-          }
-        }
-        errors.push(`${key}: ${result.message}`)
-      }
-
-      processedData[key] = result.payload
-    }
-
-    // Check for required definitions that weren't provided
-    for (const [key, def] of Object.entries(definitions)) {
-      const result = def(undefined)
-      if (result.required && !(key in channel)) {
-        return {
-          ok: false,
-          message: `Missing required field: ${key}`,
-          payload: processedData
-        }
-      }
-    }
-
-    if (errors.length > 0) {
-      return {
-        ok: false,
-        message: errors.join('; '),
-        payload: processedData
-      }
-    }
-
-    return {
-      ok: true,
-      payload: processedData
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Data definition processing failed: ${errorMessage}`)
-    return {
-      ok: false,
-      message: MSG.CHANNEL_INVALID_DEFINITION
-    }
-  }
-}
-
-// Prepare channel with proper typing
-const prepareChannel = (channel: IO): IO => {
-  const now = Date.now()
-  return {
-    ...channel,
-    type: channel.type || channel.id,
-    timestamp: now,
-    interval: channel.interval || 0,
-    timeOfCreation: channel.timeOfCreation || now
-  }
-}
-
-// Validate channel against definitions
-const validateDefinitions = (
-  channel: IO,
-  definitions: DataDefinitions
-): boolean => {
-  if (!definitions) return true
-
-  const requiredDefinitions = Object.entries(definitions)
-    .filter(([_, def]) => def(undefined).required)
-    .map(([key]) => key)
-
-  return requiredDefinitions.every(key => key in channel)
+  return {valid: true}
 }
 
 /**
- * Enhanced CyreChannel factory function with improved type safety and error handling
- * @param channel - The channel configuration object
- * @param definitions - Data definitions for validation
- * @returns Channel result object with status and payload
+ * Check if channel already exists
  */
-const CyreChannel = (
-  channel: IO,
-  definitions: DataDefinitions
-): ChannelResult => {
+const checkChannelExists = (id: string): boolean => {
+  return io.get(id) !== undefined
+}
+
+/**
+ * Set channel defaults
+ */
+const setChannelDefaults = (channel: IO): IO => {
+  const now = Date.now()
+
+  return {
+    ...channel,
+    // Type is a group/category - don't default to ID
+    type: channel.type, // Keep undefined if not provided
+    payload: channel.payload !== undefined ? channel.payload : undefined,
+    _timestamp: now,
+    _timeOfCreation: channel._timeOfCreation || now,
+    _executionDuration: 0,
+    _lastExecTime: 0,
+    _executionCount: 0,
+    _debounceTimer: undefined
+  }
+}
+
+/**
+ * Focused channel creation - handles only core channel concerns
+ */
+export const CyreChannel = (action: IO): ChannelResult => {
   try {
-    // Type guard check
-    if (!isValidChannel(channel)) {
-      log.error(MSG.CHANNEL_INVALID_STRUCTURE)
+    // 1. Validate ID requirements
+    const idValidation = validateChannelId(action.id)
+    if (!idValidation.valid) {
+      log.error(idValidation.error!)
       return {
         ok: false,
-        message: MSG.CHANNEL_INVALID_STRUCTURE
+        message: idValidation.error!
       }
     }
 
-    // Validate basic channel structure
-    const validation = validateChannel(channel)
-    if (!validation.isValid) {
-      log.error(validation.error!)
-      return {
-        ok: false,
-        message: validation.error
-      }
-    }
+    // 2. Check if channel exists (log but don't fail)
+    const exists = checkChannelExists(action.id)
+    // if (exists) {
+    //   log.debug(`Channel ${action.id} already exists - updating`)
+    // }
 
-    // Validate against definitions
-    if (!validateDefinitions(channel, definitions)) {
-      log.error(MSG.CHANNEL_INVALID_DEFINITION)
-      return {
-        ok: false,
-        message: MSG.CHANNEL_INVALID_DEFINITION
-      }
-    }
+    // 3. Set defaults and prepare channel
+    const preparedChannel = setChannelDefaults(action)
 
-    // Process data definitions
-    const definitionResult = processDataDefinitions(channel, definitions)
-    if (!definitionResult.ok) {
-      return definitionResult
-    }
+    // 4. Store channel
+    io.set(preparedChannel)
+    payloadState.set(preparedChannel.id, preparedChannel.payload, 'initial')
 
-    // Prepare final channel
-    const preparedChannel = prepareChannel({
-      ...definitionResult.payload,
-      id: channel.id
-    })
-
-    // Log success
-    log.debug(`${MSG.CHANNEL_CREATED}: ${channel.id}`)
+    const message = exists ? 'Channel updated' : MSG.CHANNEL_CREATED
 
     return {
       ok: true,
-      message: MSG.CHANNEL_CREATED,
+      message,
       payload: preparedChannel
     }
   } catch (error) {

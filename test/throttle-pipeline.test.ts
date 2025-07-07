@@ -12,13 +12,10 @@ describe('Throttle Protection Pipeline', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== THROTTLE PROTECTION TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== THROTTLE PROTECTION TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

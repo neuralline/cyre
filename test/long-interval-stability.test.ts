@@ -1,7 +1,7 @@
 // test/long-interval-stability.test.ts
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src'
 import {TIMING} from '../src/config/cyre-config'
 
 /**
@@ -18,14 +18,12 @@ describe('Cyre Long Interval Stability', () => {
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
-    cyre.initialize()
+    cyre.init()
     testActionIds.length = 0
-    console.log('===== LONG INTERVAL STABILITY TEST STARTED =====')
   })
 
   afterEach(() => {
     testActionIds.forEach(id => cyre.forget(id))
-    console.log('===== LONG INTERVAL STABILITY TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

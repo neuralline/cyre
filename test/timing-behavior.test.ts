@@ -50,13 +50,10 @@ describe('CYRE Timing Behavior', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('\n===== TIMING BEHAVIOR TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== TIMING BEHAVIOR TEST COMPLETED =====\n')
     vi.restoreAllMocks()
   })
 
@@ -320,7 +317,9 @@ describe('CYRE Timing Behavior', () => {
 
       // Call should return ok: true (action registered but not executed)
       expect(result.ok).toBe(true)
-      expect(result.message).toContain('not executed')
+      expect(result.message).toContain(
+        'Timed execution: interval=200ms repeat=0'
+      )
     },
     TEST_TIMEOUT
   )

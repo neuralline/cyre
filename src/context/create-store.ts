@@ -1,6 +1,7 @@
 // src/context/create-store.ts
+// Ultra-fast, minimal store implementation
 
-import {StateKey} from '../interfaces/interface'
+import {StateKey} from '../types/core'
 
 export interface StateStore<T> {
   get: (key: StateKey) => T | undefined
@@ -11,29 +12,16 @@ export interface StateStore<T> {
   size: () => number
 }
 
-// Move createStore to a separate utility file to avoid circular dependencies
+// Ultra-fast store - direct Map property access
 export const createStore = <T>(): StateStore<T> => {
   const store = new Map<StateKey, T>()
-  const maxHistorySize = 1000
-
-  const cleanup = () => {
-    if (store.size > maxHistorySize) {
-      const entriesToDelete = Array.from(store.keys()).slice(
-        0,
-        store.size - maxHistorySize
-      )
-      entriesToDelete.forEach(key => store.delete(key))
-    }
-  }
 
   return {
-    get: key => store.get(key),
-    set: (key, value) => {
-      store.set(key, value)
-      cleanup()
-    },
-    forget: key => store.delete(key),
-    clear: () => store.clear(),
+    // Direct property access for maximum speed
+    get: store.get.bind(store),
+    set: store.set.bind(store),
+    forget: store.delete.bind(store),
+    clear: store.clear.bind(store),
     getAll: () => Array.from(store.values()),
     size: () => store.size
   }

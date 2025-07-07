@@ -16,13 +16,10 @@ describe('Corrected CYRE Subscription Test', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

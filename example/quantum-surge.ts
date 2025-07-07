@@ -1,5 +1,7 @@
-import {cyre, log} from '../src/app'
-import type {CyreResponse} from '../src/interfaces/interface'
+// example/quantum-surge.ts
+
+import {cyre, log} from '../src/'
+import type {CyreResponse} from '../src/types/core'
 
 /*
  * C.Y.R.E. - Q.U.A.N.T.U.M. S.U.R.G.E.
@@ -28,7 +30,7 @@ const metrics: SurgeMetrics = {
 cyre.on([
   {
     id: 'quantum-initiator',
-    fn: payload => {
+    handler: payload => {
       // Create multiple surge patterns
       const patterns = [
         {count: 50, delay: 0}, // Immediate burst
@@ -61,7 +63,7 @@ cyre.on([
   },
   {
     id: 'quantum-amplifier',
-    fn: async payload => {
+    handler: async payload => {
       metrics.surgeCount++
       metrics.chainDepth = Math.max(metrics.chainDepth, payload.depth)
 
@@ -92,8 +94,8 @@ cyre.on([
       }
 
       // Monitor system health
-      const breathingState = cyre.getBreathingState()
-      if (breathingState.isRecuperating) {
+      const breathingState = cyre.getMetrics()
+      if (breathingState.available) {
         metrics.recovered++
       }
 
@@ -106,7 +108,7 @@ cyre.on([
   },
   {
     id: 'quantum-reactor',
-    fn: payload => {
+    handler: payload => {
       const totalDelay = Date.now() - payload.timestamp
       const processDelay = Date.now() - payload.processTime
 
@@ -148,7 +150,7 @@ cyre.action([
 const startTime = Date.now()
 const monitor = setInterval(() => {
   const runTime = (Date.now() - startTime) / 1000
-  const breathingState = cyre.getBreathingState()
+  const breathingState = cyre.getMetrics()
 
   log.debug({
     timestamp: Date.now(),

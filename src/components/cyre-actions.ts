@@ -1,224 +1,188 @@
 // src/components/cyre-actions.ts
-import {io, subscribers} from '../context/state'
-import {IO} from '../interfaces/interface'
-import {log} from './cyre-logger'
-import {pipe} from '../libs/utils'
-import {MSG} from '../config/cyre-config'
-import {metricsReport} from '../context/metrics-report'
+// Streamlined action registration with compile-pipeline integration
+
+import {sensor} from '../components/sensor'
+import type {IO} from '../types/core'
+import payloadState from '../context/payload-state'
+import {log} from './cyre-log'
+import {io, stores} from '../context/state'
+import {isValidPath} from '../libs/utils'
+import {compileAction} from '../schema/compile-pipeline'
 
 /*
 
-      C.Y.R.E. - A.C.T.I.O.N.S
-      
-      
+      C.Y.R.E - A.C.T.I.O.N.S
+
+      Streamlined registration with compile-pipeline:
+      1. Validate ID and compile action
+      2. Handle blocking conditions immediately
+      3. Store action and index paths
+      4. Report results with metrics
+
 */
 
-// Enhanced type definitions
-type ActionStatus = 'pending' | 'active' | 'completed' | 'error' | 'skipped'
-
-interface ActionResult extends IO {
+interface RegistrationResult {
   ok: boolean
-  done: boolean
-  status?: ActionStatus
-  error?: string
-  skipped?: boolean
-  skipReason?: string
+  message: string
+  payload?: IO
+  errors?: string[]
+  warnings?: string[]
+  compilationTime?: number
+  hasFastPath?: boolean
 }
 
-// Action pipeline functions with improved error handling
-const prepareAction = (action: IO): ActionResult => {
-  try {
-    if (!action) {
-      throw new Error(MSG.ACTION_PREPARE_FAILED)
-    }
-
-    return {
-      ...action,
-      ok: true,
-      done: false,
-      status: 'pending',
-      timestamp: Date.now()
-    }
-  } catch (error) {
-    return {
-      id: '',
-      type: '',
-      ok: false,
-      done: false,
-      status: 'error',
-      error: MSG.ACTION_PREPARE_FAILED
-    }
-  }
-}
-
-const validateAction = (action: ActionResult): ActionResult => {
-  if (!action.type || !action.id) {
-    return {
-      ...action,
-      ok: false,
-      done: false,
-      status: 'error',
-      error: 'Missing required fields: type or id'
-    }
-  }
-
-  return {
-    ...action,
-    ok: true,
-    status: 'active'
-  }
-}
-
-// Note: We keep this but it's typically handled earlier in the pipeline now
-const checkPayloadChanges = (action: ActionResult): ActionResult => {
-  if (!action.detectChanges) {
-    return action
-  }
-
-  const hasChanged = io.hasChanged(action.id, action.payload)
-  if (!hasChanged) {
-    return {
-      ...action,
-      ok: true,
-      done: true,
-      status: 'skipped',
-      skipped: true,
-      skipReason: MSG.ACTION_SKIPPED
-    }
-  }
-
-  return action
-}
-
-const executeAction = (action: ActionResult): ActionResult => {
-  if (action.skipped || action.status === 'error') {
-    return action
-  }
+export const CyreActions = (action: IO): RegistrationResult => {
+  const startTime = performance.now()
 
   try {
-    const subscriber = subscribers.get(action.id)
-    if (!subscriber) {
-      throw new Error(`No subscriber found for: ${action.id}`)
-    }
-
-    // Track execution start time
-    const startTime = performance.now()
-
-    const result = subscriber.fn(action.payload)
-    const endTime = performance.now()
-    const executionTime = endTime - startTime
-
-    // Update metrics with execution time
-    io.updateMetrics(action.id, {
-      lastExecutionTime: Date.now(),
-      executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
-    })
-    if (
-      typeof metricsReport !== 'undefined' &&
-      typeof metricsReport.trackListenerExecution === 'function'
-    ) {
-      metricsReport.trackListenerExecution(action.id, executionTime)
-    }
-
-    // Handle linked actions
-    if (result && typeof result === 'object' && 'id' in result) {
+    // 1. VALIDATE ID AND COMPILE ACTION
+    if (!action.id) {
+      log.error('Channel creation failed: Channel ID is required')
+      sensor.error('unknown', 'Channel ID is required', 'cyre-action')
       return {
-        ...action,
-        ok: true,
-        done: true,
-        status: 'completed',
-        intraLink: {
-          id: result.id,
-          payload: result.payload
-        }
+        ok: false,
+        message: 'Channel creation failed: Channel ID is required',
+        errors: ['Channel ID is required'],
+        compilationTime: performance.now() - startTime
       }
     }
 
-    return {
-      ...action,
-      ok: true,
-      done: true,
-      status: 'completed'
+    // 1.5. VALIDATE PATH BEFORE COMPILATION
+    if (action.path && !isValidPath(action.path)) {
+      const errorMessage = `Invalid path format: ${action.path}. Path must be a valid hierarchical path (e.g., "app/users/profile")`
+      sensor.error(action.id, errorMessage, 'invalid-path')
+      return {
+        ok: false,
+        message: `Channel creation failed: Invalid path format: ${action.path}. Path must be a valid hierarchical path (e.g., "app/users/profile")`,
+        errors: [errorMessage],
+        compilationTime: performance.now() - startTime
+      }
     }
-  } catch (error) {
-    log.error(
-      `CYRE ACTION ERROR: ${MSG.ACTION_EXECUTE_FAILED} -id ${action.id} ${
+
+    const compilation = compileAction(action)
+    const compilationTime = performance.now() - startTime
+
+    // 2. HANDLE BLOCKING CONDITIONS IMMEDIATELY
+    if (compilation.block || compilation.errors.length > 0) {
+      const errorMessage = compilation.errors.join(', ')
+
+      //log.error(`Channel creation failed for ${action.id}: ${errorMessage}`)
+      sensor.error(action.id, errorMessage, 'compilation-blocked')
+      compilation.errors && sensor.error(compilation.errors)
+      compilation.warnings && sensor.warn(compilation.warnings)
+
+      // Store blocked action for reference
+      if (compilation.compiledAction._isBlocked) {
+        io.set(compilation.compiledAction)
+      }
+
+      return {
+        ok: false,
+        message: `Channel creation failed: ${errorMessage}`,
+        payload: compilation.compiledAction,
+        errors: compilation.errors,
+        warnings: compilation.warnings,
+        compilationTime
+      }
+    }
+
+    const finalAction = compilation.compiledAction
+
+    // 3. STORE ACTION AND INDEX PATHS
+    try {
+      // Store compiled action
+      io.set(finalAction)
+
+      // Validate and index path if provided
+      if (finalAction.path && isValidPath(finalAction.path)) {
+        // Check if this path corresponds to a branch and update branch metadata
+        const branchEntry = stores.branch.get(finalAction.path)
+        if (branchEntry) {
+          // Update branch channel count
+          stores.branch.set(finalAction.path, {
+            ...branchEntry,
+            channelCount: branchEntry.channelCount + 1
+          })
+        }
+      }
+
+      // Initialize payload state if provided
+      if ('payload' in action && action.payload !== undefined) {
+        payloadState.set(finalAction.id, action.payload, 'initial')
+      }
+    } catch (error) {
+      const errorMessage =
         error instanceof Error ? error.message : String(error)
-      }`
-    )
-    return {
-      ...action,
-      ok: false,
-      done: false,
-      status: 'error',
-      error: error instanceof Error ? error.message : String(error)
-    }
-  }
-}
 
-const logAction = (action: ActionResult): ActionResult => {
-  if (action.log) {
-    if (action.status === 'error') {
-      log.error(action)
-    } else if (action.status === 'skipped') {
-      log.info(action)
+      sensor.error(
+        finalAction.id,
+        `Channel creation failed for ${finalAction.id}: ${errorMessage}`,
+        'channel-creation-failed'
+      )
+
+      return {
+        ok: false,
+        message: `Channel creation failed for ${finalAction.id}: ${errorMessage}`,
+        errors: [errorMessage],
+        compilationTime
+      }
+    }
+
+    // 4. REPORT SUCCESS WITH METRICS
+    const exists = !!io.get(action.id)
+    const actionMessage = exists ? 'Action updated' : 'Action registered'
+
+    // Build status message
+    let statusMsg: string
+    if (finalAction._hasFastPath) {
+      statusMsg = 'Fast path (optimized)'
     } else {
-      log.info(action)
+      const features: string[] = []
+      if (finalAction._hasProtections) features.push('protections')
+      if (finalAction._hasProcessing) {
+        const talentCount = finalAction._processingTalents?.length || 0
+        features.push(`${talentCount} processing talents`)
+      }
+      if (finalAction._hasScheduling) features.push('scheduling')
+      statusMsg = features.join(', ')
     }
-  }
-  return action
-}
 
-const updateStore = (action: ActionResult): ActionResult => {
-  if (action.ok && !action.skipped) {
-    io.set({
-      ...action,
-      timestamp: Date.now()
-    })
-  }
-  return action
-}
+    // Add path info if available
+    if (finalAction.path) {
+      statusMsg += ` (path: ${finalAction.path})`
+    }
 
-/**
- * CyreAction function - handles single action execution
- * Repeat/interval handling is managed by the call method
- */
-export const CyreAction = (initialIO: IO, fn: Function): ActionResult => {
-  // Handle null/undefined input before pipe
-  if (!initialIO) {
-    log.error(MSG.ACTION_PREPARE_FAILED)
+    // Add compilation time for slow compilations
+    if (compilationTime > 5) {
+      statusMsg += ` [${compilationTime.toFixed(1)}ms compilation]`
+    }
+
     return {
-      id: 'CYRE-ERROR',
-      type: '',
-      ok: false,
-      done: false,
-      status: 'error',
-      error: MSG.ACTION_PREPARE_FAILED
+      ok: true,
+      message: `${actionMessage}: ${statusMsg}`,
+      payload: finalAction,
+      warnings: compilation.warnings,
+      compilationTime,
+      hasFastPath: finalAction._hasFastPath
     }
-  }
-
-  try {
-    const result = pipe(
-      prepareAction(initialIO),
-      validateAction,
-      executeAction,
-      (action: ActionResult) =>
-        action.status === 'error' ? action : logAction(action),
-      (action: ActionResult) =>
-        action.status === 'error' ? action : updateStore(action)
-    )
-    return result
   } catch (error) {
-    log.error(`Action processing failed: ${error}`)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const totalTime = performance.now() - startTime
+
+    // log.error(
+    //   `Channel creation failed for ${action?.id || 'unknown'}: ${errorMessage}`
+    // )
+    sensor.error(
+      action?.id || 'unknown',
+      `Channel creation failed for ${action?.id || 'unknown'}: ${errorMessage}`,
+      'registration-exception'
+    )
+
     return {
-      ...initialIO,
-      id: 'CYRE-ERROR',
       ok: false,
-      done: false,
-      status: 'error',
-      error: error instanceof Error ? error.message : String(error)
+      message: `Channel creation failed: ${errorMessage}`,
+      errors: [errorMessage],
+      compilationTime: totalTime
     }
   }
 }
-
-export default CyreAction

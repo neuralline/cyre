@@ -16,13 +16,10 @@ describe('Duplicate Registration Handling', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== DUPLICATE HANDLING TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== DUPLICATE HANDLING TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

@@ -1,8 +1,9 @@
-// src/cyre-cloud-monitor.ts
+// example/cyre-cloud-monitor.ts
 
 //example cyre usage
 
-import {cyre} from 'cyre'
+import {cyre, log} from '../src'
+import {AlertConfig} from '../src/types/orchestration'
 
 // Initialize monitoring system
 const initializeMonitoring = () => {
@@ -10,7 +11,7 @@ const initializeMonitoring = () => {
   cyre.on([
     {
       id: 'monitor',
-      fn: async () => {
+      handler: async () => {
         const services = await checkServicesHealth()
         // Chain to metric processing
         return {
@@ -24,7 +25,7 @@ const initializeMonitoring = () => {
     },
     {
       id: 'metrics',
-      fn: (data: {metrics: ServiceMetrics[]; timestamp: number}) => {
+      handler: (data: {metrics: ServiceMetrics[]; timestamp: number}) => {
         const {degraded, healthScore} = processMetrics(data)
 
         // Update system state
@@ -47,7 +48,7 @@ const initializeMonitoring = () => {
     },
     {
       id: 'alerts',
-      fn: async alert => {
+      handler: async alert => {
         const breaker = await checkCircuitBreaker(alert.services)
 
         if (breaker.shouldAlert) {
@@ -87,9 +88,8 @@ const initializeMonitoring = () => {
       id: 'health-check',
       type: 'monitor',
       interval: 30000, // Check every 30 seconds
-      repeat: 'infinite',
-      debounce: 1000, // Protect against rapid checks
-      throttle: 5000 // Minimum 5s between checks
+      repeat: 20,
+      debounce: 1000 // Protect against rapid checks
     },
     {
       id: 'metric-aggregator',
@@ -199,3 +199,4 @@ const sendAlerts = async (alert: any): Promise<void> => {
 
 // Export for use
 export {initializeMonitoring}
+initializeMonitoring()

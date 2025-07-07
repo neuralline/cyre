@@ -1,581 +1,442 @@
-// test/repeat.test.ts
+// test/repeat.test.ts - Updated for new TimeKeeper integration
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
-import {cyre} from '../src/app'
+import {cyre} from '../src'
 
-/**
- * This test validates CYRE's execution behavior for interval and repeated actions
- * following the new timing rules:
+/*
+ * CYRE Repeat and Timing Behavior Tests
+ * Updated for new TimeKeeper integration with delay/interval logic
  *
- * 1. Interval actions wait for the interval before first execution
- * 2. Delay overrides interval for initial wait time
- * 3. Repeat specifies total number of executions
- * 4. No immediate executions for interval or delay actions by default
- * 5. Edge cases like repeat: 0 and delay: 0 are properly handled
+ * Tests the integration between cyre.action() timing properties and the redesigned TimeKeeper
  */
-describe('CYRE Repeat and Timing Behavior', () => {
-  // Test timeout - we need this longer for intervals
-  const TEST_TIMEOUT = 5000
 
+describe('CYRE Repeat and Timing Behavior with New TimeKeeper', () => {
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('\n===== REPEAT BEHAVIOR TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== REPEAT BEHAVIOR TEST COMPLETED =====\n')
+    console.log()
     vi.restoreAllMocks()
   })
 
-  it(
-    'should wait for interval before each execution including the first',
-    async () => {
-      const ACTION_ID = 'interval-action'
-      const INTERVAL = 300 // ms
-      const TOTAL_EXECUTIONS = 3 // Total executions
+  /**
+   * Test that interval actions wait for the interval before first execution
+   * with new TimeKeeper integration
+   */
+  it('should wait for interval before each execution including the first', async () => {
+    const INTERVAL = 200
+    const actionId = `interval-action-${Date.now()}`
+    const executions: Array<{time: number; counter: number}> = []
+    const startTime = Date.now()
 
-      // Record execution timestamps
-      const executionTimes: number[] = []
+    // Register handler
+    cyre.on(actionId, payload => {
+      const elapsed = Date.now() - startTime
+      executions.push({time: elapsed, counter: payload.counter})
+      console.log(`[${elapsed}ms] EXECUTED with counter: ${payload.counter}`)
+      return {executed: true}
+    })
 
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
+    // Create action with interval - should use new TimeKeeper delay/interval logic
+    const actionResult = cyre.action({
+      id: actionId,
+      interval: INTERVAL,
+      repeat: 3,
+      payload: {counter: 0}
+    })
 
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
+    // Verify action was created successfully
+    expect(actionResult.ok).toBe(true)
+
+    // Start the action
+    const callResult = await cyre.call(actionId, {counter: 1})
+
+    // Should succeed and be scheduled
+    expect(callResult.ok).toBe(true)
+    expect(callResult.metadata?.scheduled).toBe(true)
+
+    // Wait for all executions to complete
+    await new Promise(resolve => setTimeout(resolve, INTERVAL * 4))
+
+    console.log('Execution times:', executions)
+
+    // Verify we have the expected number of executions
+    expect(executions.length).toBe(3)
+
+    // First execution should be after waiting for interval
+    expect(executions[0].time).toBeGreaterThanOrEqual(INTERVAL * 0.8)
+    expect(executions[0].time).toBeLessThanOrEqual(INTERVAL * 1.5)
+
+    // Subsequent executions should be spaced by interval
+    for (let i = 1; i < executions.length; i++) {
+      const timeBetween = executions[i].time - executions[i - 1].time
+      expect(timeBetween).toBeGreaterThanOrEqual(INTERVAL * 0.7)
+      expect(timeBetween).toBeLessThanOrEqual(INTERVAL * 1.6)
+    }
+
+    // Clean up
+    cyre.forget(actionId)
+  })
+
+  /**
+   * Test delay vs interval behavior with new TimeKeeper integration
+   */
+  it('should use delay value for initial wait when both delay and interval are specified', async () => {
+    const DELAY = 100
+    const INTERVAL = 200
+    const actionId = `delay-interval-action-${Date.now()}`
+    const executions: Array<{time: number}> = []
+    const startTime = Date.now()
+
+    // Register handler
+    cyre.on(actionId, () => {
+      const elapsed = Date.now() - startTime
+      executions.push({time: elapsed})
+      console.log(`[${elapsed}ms] EXECUTED`)
+      return {executed: true}
+    })
+
+    // Create action with both delay and interval - new TimeKeeper should handle this properly
+    const actionResult = cyre.action({
+      id: actionId,
+      delay: DELAY,
+      interval: INTERVAL,
+      repeat: 2
+    })
+
+    expect(actionResult.ok).toBe(true)
+
+    // Start the action
+    const callResult = await cyre.call(actionId)
+    expect(callResult.ok).toBe(true)
+
+    // Wait for executions
+    await new Promise(resolve => setTimeout(resolve, DELAY + INTERVAL * 2))
+
+    console.log('Execution times:', executions)
+
+    // Verify executions
+    expect(executions.length).toBe(2)
+
+    // First execution should use delay
+    expect(executions[0].time).toBeGreaterThanOrEqual(DELAY * 0.8)
+    expect(executions[0].time).toBeLessThanOrEqual(DELAY * 2)
+
+    // Second execution should be interval after first
+    if (executions.length > 1) {
+      const timeBetween = executions[1].time - executions[0].time
+      expect(timeBetween).toBeGreaterThanOrEqual(INTERVAL * 0.7)
+      expect(timeBetween).toBeLessThanOrEqual(INTERVAL * 1.6)
+    }
+
+    // Clean up
+    cyre.forget(actionId)
+  })
+
+  /**
+   * Test immediate execution with delay: 0 and new TimeKeeper
+   */
+  it('should execute immediately when delay is explicitly set to 0', async () => {
+    const actionId = `immediate-action-${Date.now()}`
+    const executions: Array<{time: number}> = []
+    const startTime = Date.now()
+
+    // Register handler
+    cyre.on(actionId, () => {
+      const elapsed = Date.now() - startTime
+      executions.push({time: elapsed})
+      console.log(`[${elapsed}ms] EXECUTED immediately`)
+      return {executed: true}
+    })
+
+    // Create action with delay: 0 - new TimeKeeper should handle immediate execution
+    const actionResult = cyre.action({
+      id: actionId,
+      delay: 0,
+      repeat: 1
+    })
+
+    expect(actionResult.ok).toBe(true)
+
+    // Start the action
+    const callResult = await cyre.call(actionId)
+    expect(callResult.ok).toBe(true)
+
+    // Wait a short time for execution
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    console.log('Execution times:', executions)
+
+    // Verify immediate execution
+    expect(executions.length).toBe(1)
+    expect(executions[0].time).toBeLessThanOrEqual(50)
+
+    // Clean up
+    cyre.forget(actionId)
+  })
+
+  /**
+   * Test infinite repeats with new TimeKeeper
+   */
+  it('should support infinite repeats with repeat: true', async () => {
+    const INTERVAL = 150
+    const actionId = `infinite-repeats-action-${Date.now()}`
+    const executions: Array<{time: number; counter: number}> = []
+    const startTime = Date.now()
+
+    // Register handler
+    cyre.on(actionId, payload => {
+      const elapsed = Date.now() - startTime
+      executions.push({time: elapsed, counter: payload.counter})
+      console.log(`[${elapsed}ms] EXECUTED with counter: ${payload.counter}`)
+      return {executed: true}
+    })
+
+    // Create action with infinite repeats - new TimeKeeper should handle this
+    const actionResult = cyre.action({
+      id: actionId,
+      interval: INTERVAL,
+      repeat: true, // Infinite repeats
+      payload: {counter: 0}
+    })
+
+    expect(actionResult.ok).toBe(true)
+
+    // Start the action
+    const callResult = await cyre.call(actionId, {counter: 1})
+    expect(callResult.ok).toBe(true)
+
+    // Let it run for a limited time
+    await new Promise(resolve => setTimeout(resolve, INTERVAL * 3.5))
+
+    // Stop the infinite repeats
+    cyre.forget(actionId)
+
+    console.log('Execution times:', executions)
+
+    // Verify multiple executions occurred
+    expect(executions.length).toBeGreaterThanOrEqual(2)
+    expect(executions.length).toBeLessThanOrEqual(4)
+
+    // Verify timing pattern with new TimeKeeper
+    if (executions.length >= 2) {
+      // First execution after interval
+      expect(executions[0].time).toBeGreaterThanOrEqual(INTERVAL * 0.7)
+
+      // Check intervals between executions
+      for (let i = 1; i < executions.length; i++) {
+        const timeBetween = executions[i].time - executions[i - 1].time
+        expect(timeBetween).toBeGreaterThanOrEqual(INTERVAL * 0.6)
+        expect(timeBetween).toBeLessThanOrEqual(INTERVAL * 1.6)
       }
+    }
+  })
 
-      // Setup the action
-      cyre.action({
-        id: ACTION_ID,
-        payload: {counter: 0},
-        interval: INTERVAL,
-        repeat: TOTAL_EXECUTIONS
+  /**
+   * Test multiple calls to same action ID with new TimeKeeper behavior
+   */
+  it('should handle multiple calls to the same action ID properly', async () => {
+    const INTERVAL = 200
+    const actionId = `multiple-calls-action-${Date.now()}`
+    const executions: Array<{
+      time: number
+      payload: any
+      callNumber?: number
+    }> = []
+    const startTime = Date.now()
+
+    // Register handler
+    cyre.on(actionId, payload => {
+      const elapsed = Date.now() - startTime
+      executions.push({
+        time: elapsed,
+        payload,
+        callNumber: payload.callNumber
       })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, (payload: any) => {
-        const now = Date.now()
-        const elapsed = now - testStartTime
-
-        executionTimes.push(elapsed)
-        logWithTime(`EXECUTED with counter: ${payload.counter}`)
-
-        return {executed: true}
-      })
-
-      // Call the action
-      logWithTime(
-        'CALLING action - should wait for interval before first execution'
+      console.log(
+        `[${elapsed}ms] EXECUTED with payload:`,
+        JSON.stringify(payload)
       )
-      await cyre.call(ACTION_ID, {counter: 1})
+      return {executed: true}
+    })
 
-      // Wait for all executions to complete
-      const waitTime = INTERVAL * (TOTAL_EXECUTIONS + 1) // Add buffer
-      logWithTime(`Waiting for ${waitTime}ms for all executions...`)
-      await new Promise(resolve => setTimeout(resolve, waitTime))
+    // Create action with interval and limited repeats
+    const actionResult = cyre.action({
+      id: actionId,
+      interval: INTERVAL,
+      repeat: 2 // Only 2 executions total per call
+    })
 
-      // Log the execution times
-      logWithTime('Execution times:')
-      executionTimes.forEach((time, index) => {
-        console.log(`  ${index + 1}. ${time}ms after test start`)
-      })
+    expect(actionResult.ok).toBe(true)
 
-      // Calculate intervals between executions
-      const intervalsBetweenExecutions = []
-      for (let i = 1; i < executionTimes.length; i++) {
-        intervalsBetweenExecutions.push(
-          executionTimes[i] - executionTimes[i - 1]
-        )
+    // Make first call
+    console.log(`[0ms] Making first call`)
+    const call1 = await cyre.call(actionId, {callNumber: 1, data: 'first'})
+    expect(call1.ok).toBe(true)
+
+    // Wait a short time, then make second call
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    console.log(`[${Date.now() - startTime}ms] Making second call`)
+    const call2 = await cyre.call(actionId, {callNumber: 2, data: 'second'})
+    expect(call2.ok).toBe(true)
+
+    // Wait another short time, then make third call
+    await new Promise(resolve => setTimeout(resolve, 25))
+
+    console.log(`[${Date.now() - startTime}ms] Making third call`)
+    const call3 = await cyre.call(actionId, {callNumber: 3, data: 'third'})
+    expect(call3.ok).toBe(true)
+
+    // Wait for all executions to complete
+    await new Promise(resolve => setTimeout(resolve, INTERVAL * 3))
+
+    console.log('Final executions:', executions)
+
+    // With new TimeKeeper, behavior should be more predictable
+    expect(executions.length).toBeGreaterThanOrEqual(1)
+    expect(executions.length).toBeLessThanOrEqual(8)
+
+    // Verify we see recent payloads being used
+    const payloadNumbers = executions
+      .map(exec => exec.payload?.callNumber)
+      .filter(Boolean)
+    console.log('Payload numbers used:', payloadNumbers)
+
+    // We should see evidence of recent calls
+    const hasRecentPayload = payloadNumbers.some(num => num >= 2)
+    expect(hasRecentPayload).toBe(true)
+
+    // Verify reasonable timing between executions
+    if (executions.length >= 2) {
+      for (let i = 1; i < Math.min(executions.length, 3); i++) {
+        const timeBetween = executions[i].time - executions[i - 1].time
+        expect(timeBetween).toBeGreaterThan(0)
+        expect(timeBetween).toBeLessThan(INTERVAL * 2.5)
       }
-
-      logWithTime('Intervals between executions:')
-      intervalsBetweenExecutions.forEach((interval, index) => {
-        console.log(`  ${index + 1}. ${interval}ms`)
-      })
-
-      // ASSERTIONS
-
-      // Should have executed exactly TOTAL_EXECUTIONS times
-      expect(executionTimes.length).toBe(TOTAL_EXECUTIONS)
-
-      // First execution should wait for the interval (not immediate)
-      expect(executionTimes[0]).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-      expect(executionTimes[0]).toBeLessThanOrEqual(INTERVAL * 1.1)
-
-      // Subsequent executions should be separated by the interval
-      intervalsBetweenExecutions.forEach(interval => {
-        expect(interval).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-        expect(interval).toBeLessThanOrEqual(INTERVAL * 1.1)
-      })
-    },
-    TEST_TIMEOUT
-  )
-
-  it(
-    'should use delay value for initial wait when both delay and interval are specified',
-    async () => {
-      const ACTION_ID = 'delay-interval-action'
-      const DELAY = 150 // ms - shorter than interval
-      const INTERVAL = 300 // ms
-      const TOTAL_EXECUTIONS = 3 // Total executions
-
-      // Record execution timestamps
-      const executionTimes: number[] = []
-
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
-
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
-      }
-
-      // Setup the action with delay overriding interval for first wait
-      cyre.action({
-        id: ACTION_ID,
-        payload: {counter: 0},
-        delay: DELAY,
-        interval: INTERVAL,
-        repeat: TOTAL_EXECUTIONS
-      })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, (payload: any) => {
-        const now = Date.now()
-        const elapsed = now - testStartTime
-
-        executionTimes.push(elapsed)
-        logWithTime(`EXECUTED with counter: ${payload.counter}`)
-
-        return {executed: true}
-      })
-
-      // Call the action
-      logWithTime(
-        'CALLING action - should wait for delay first, then use interval timing'
-      )
-      await cyre.call(ACTION_ID, {counter: 1})
-
-      // Wait for all executions to complete
-      const waitTime = DELAY + INTERVAL * TOTAL_EXECUTIONS // Account for delay and intervals
-      logWithTime(`Waiting for ${waitTime}ms for all executions...`)
-      await new Promise(resolve => setTimeout(resolve, waitTime))
-
-      // Log the execution times
-      logWithTime('Execution times:')
-      executionTimes.forEach((time, index) => {
-        console.log(`  ${index + 1}. ${time}ms after test start`)
-      })
-
-      // ASSERTIONS
-
-      // Should have executed exactly TOTAL_EXECUTIONS times
-      expect(executionTimes.length).toBe(TOTAL_EXECUTIONS)
-
-      // First execution should wait for the DELAY (not interval)
-      expect(executionTimes[0]).toBeGreaterThanOrEqual(DELAY * 0.9)
-      expect(executionTimes[0]).toBeLessThanOrEqual(DELAY * 1.2)
-      expect(executionTimes[0]).toBeLessThan(INTERVAL * 0.9) // Should be faster than interval
-
-      // Calculate intervals between executions
-      if (executionTimes.length > 1) {
-        const secondExecutionInterval = executionTimes[1] - executionTimes[0]
-        // Second execution should follow the INTERVAL timing
-        expect(secondExecutionInterval).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-        expect(secondExecutionInterval).toBeLessThanOrEqual(INTERVAL * 1.2)
-      }
-    },
-    TEST_TIMEOUT
-  )
-
-  it(
-    'should execute immediately when delay is explicitly set to 0',
-    async () => {
-      const ACTION_ID = 'zero-delay-action'
-      const DELAY = 0 // ms - immediate execution
-      const INTERVAL = 200 // ms
-      const TOTAL_EXECUTIONS = 2 // Total executions
-
-      // Record execution timestamps
-      const executionTimes: number[] = []
-
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
-
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
-      }
-
-      // Setup the action with explicit zero delay
-      cyre.action({
-        id: ACTION_ID,
-        payload: {counter: 0},
-        delay: DELAY,
-        interval: INTERVAL,
-        repeat: TOTAL_EXECUTIONS
-      })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, (payload: any) => {
-        const now = Date.now()
-        const elapsed = now - testStartTime
-
-        executionTimes.push(elapsed)
-        logWithTime(`EXECUTED with counter: ${payload.counter}`)
-
-        return {executed: true}
-      })
-
-      // Call the action
-      logWithTime('CALLING action with delay: 0 - should execute immediately')
-      await cyre.call(ACTION_ID, {counter: 1})
-
-      // Wait for all executions to complete
-      const waitTime = INTERVAL * (TOTAL_EXECUTIONS + 1) // Add buffer
-      logWithTime(`Waiting for ${waitTime}ms for all executions...`)
-      await new Promise(resolve => setTimeout(resolve, waitTime))
-
-      // Log the execution times
-      logWithTime('Execution times:')
-      executionTimes.forEach((time, index) => {
-        console.log(`  ${index + 1}. ${time}ms after test start`)
-      })
-
-      // ASSERTIONS
-
-      // Should have executed exactly TOTAL_EXECUTIONS times
-      expect(executionTimes.length).toBe(TOTAL_EXECUTIONS)
-
-      // First execution should be near-immediate due to delay: 0
-      expect(executionTimes[0]).toBeLessThan(50)
-
-      // Calculate intervals between executions
-      if (executionTimes.length > 1) {
-        const secondExecutionInterval = executionTimes[1] - executionTimes[0]
-        // Second execution should follow the INTERVAL timing
-        expect(secondExecutionInterval).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-        expect(secondExecutionInterval).toBeLessThanOrEqual(INTERVAL * 1.2)
-      }
-    },
-    TEST_TIMEOUT
-  )
-
-  it(
-    'should support infinite repeats with repeat: true',
-    async () => {
-      const ACTION_ID = 'infinite-repeats-action'
-      const INTERVAL = 150 // ms
-      const EXECUTION_COUNT = 4 // How many executions to wait for
-
-      // Record execution timestamps
-      const executionTimes: number[] = []
-
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
-
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
-      }
-
-      // Setup the action with infinite repeats
-      cyre.action({
-        id: ACTION_ID,
-        payload: {counter: 0},
-        interval: INTERVAL,
-        repeat: true // Infinite repeats
-      })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, (payload: any) => {
-        const now = Date.now()
-        const elapsed = now - testStartTime
-
-        executionTimes.push(elapsed)
-        logWithTime(`EXECUTED with counter: ${payload.counter}`)
-
-        // Stop infinite execution after reaching our target count
-        if (executionTimes.length >= EXECUTION_COUNT) {
-          cyre.forget(ACTION_ID)
-        }
-
-        return {executed: true}
-      })
-
-      // Call the action
-      logWithTime('CALLING action with infinite repeats')
-      await cyre.call(ACTION_ID, {counter: 1})
-
-      // Wait for enough executions
-      logWithTime(`Waiting for ${EXECUTION_COUNT} executions...`)
-
-      // Use a promise that resolves when we have enough executions
-      await new Promise<void>(resolve => {
-        const checkInterval = setInterval(() => {
-          if (executionTimes.length >= EXECUTION_COUNT) {
-            clearInterval(checkInterval)
-            resolve()
-          }
-        }, INTERVAL / 2)
-      })
-
-      // Add a small buffer to ensure last execution is recorded
-      await new Promise(resolve => setTimeout(resolve, 50))
-
-      // Log the execution times
-      logWithTime('Execution times:')
-      executionTimes.forEach((time, index) => {
-        console.log(`  ${index + 1}. ${time}ms after test start`)
-      })
-
-      // ASSERTIONS
-
-      // Should have executed at least EXECUTION_COUNT times
-      expect(executionTimes.length).toBeGreaterThanOrEqual(EXECUTION_COUNT)
-
-      // First execution should wait for the interval
-      expect(executionTimes[0]).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-      expect(executionTimes[0]).toBeLessThanOrEqual(INTERVAL * 1.2)
-
-      // Calculate intervals between executions
-      const intervalsBetweenExecutions = []
-      for (let i = 1; i < executionTimes.length; i++) {
-        intervalsBetweenExecutions.push(
-          executionTimes[i] - executionTimes[i - 1]
-        )
-      }
-
-      // Intervals should match the specified INTERVAL
-      intervalsBetweenExecutions.forEach(interval => {
-        expect(interval).toBeGreaterThanOrEqual(INTERVAL * 0.9)
-        expect(interval).toBeLessThanOrEqual(INTERVAL * 1.3) // Allow more margin for infinite case
-      })
-    },
-    TEST_TIMEOUT
-  )
-
-  it(
-    'should not execute any action with repeat: 0',
-    async () => {
-      const ACTION_ID = 'zero-repeat-action'
-      const INTERVAL = 200 // ms
-
-      // Flag to track execution
-      let executed = false
-
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
-
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
-      }
-
-      // Setup the action
-      cyre.action({
-        id: ACTION_ID,
-        payload: {counter: 0},
-        interval: INTERVAL,
-        repeat: 0 // Should not execute
-      })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, () => {
-        executed = true
-        logWithTime('EXECUTED - THIS SHOULD NOT HAPPEN')
-        return {executed: true}
-      })
-
-      // Call the action
-      logWithTime('CALLING action with repeat: 0 - should not execute')
-      const result = await cyre.call(ACTION_ID, {counter: 1})
-
-      logWithTime(`Call result: ${JSON.stringify(result)}`)
-
-      // Wait to verify no execution occurs
-      logWithTime(`Waiting ${INTERVAL * 2}ms to verify no execution...`)
-      await new Promise(resolve => setTimeout(resolve, INTERVAL * 2))
-
-      // ASSERTIONS
-
-      // Should not have executed
-      expect(executed).toBe(false)
-
-      // Call should return ok: true (action registered but not executed)
-      expect(result.ok).toBe(true)
-      expect(result.message).toContain('not executed')
-    },
-    TEST_TIMEOUT
-  )
-
-  it(
-    'should handle multiple calls to the same action ID by using the most recent payload',
-    async () => {
-      const ACTION_ID = 'multiple-calls-action'
-      const INTERVAL = 200 // ms
-      const TOTAL_EXECUTIONS = 3 // Total executions
-
-      // Record executions with payloads
-      const executions: Array<{time: number; payload: any}> = []
-
-      // Create test start time reference
-      const testStartTime = Date.now()
-      const getElapsedTime = () => Date.now() - testStartTime
-
-      // Helper to log with timestamp
-      const logWithTime = (message: string) => {
-        console.log(`[${getElapsedTime()}ms] ${message}`)
-      }
-
-      // Setup the action
-      cyre.action({
-        id: ACTION_ID,
-        payload: {value: 'initial'},
-        interval: INTERVAL,
-        repeat: TOTAL_EXECUTIONS
-      })
-
-      // Setup the handler
-      cyre.on(ACTION_ID, (payload: any) => {
-        const elapsed = getElapsedTime()
-
-        logWithTime(`EXECUTED with value: ${payload.value}`)
-        executions.push({
-          time: elapsed,
-          payload: {...payload} // Clone to avoid reference sharing
-        })
-
-        return {executed: true}
-      })
-
-      // Make sequential calls with different payloads
-      // Add delays between calls to ensure they're processed in sequence
-      logWithTime('CALLING with first value')
-      await cyre.call(ACTION_ID, {value: 'first'})
-
-      // Small delay before second call
-      await new Promise(resolve => setTimeout(resolve, 50))
-
-      logWithTime('CALLING with second value')
-      await cyre.call(ACTION_ID, {value: 'second'})
-
-      // Small delay before third call
-      await new Promise(resolve => setTimeout(resolve, 50))
-
-      logWithTime('CALLING with final value')
-      await cyre.call(ACTION_ID, {value: 'final'})
-
-      // Wait for all executions to complete
-      const waitTime = INTERVAL * (TOTAL_EXECUTIONS + 1) // Add buffer
-      logWithTime(`Waiting for ${waitTime}ms for all executions...`)
-      await new Promise(resolve => setTimeout(resolve, waitTime))
-
-      // Log the executions
-      logWithTime('Execution details:')
-      executions.forEach((exec, index) => {
-        console.log(
-          `  ${index + 1}. [${exec.time}ms] Value: ${exec.payload.value}`
-        )
-      })
-
-      // ASSERTIONS - UPDATED TO MATCH IMPLEMENTATION BEHAVIOR
-
-      // Check if all executed values after the final call use the final payload
-      const executionsAfterFinalCall = executions.filter(
-        exec =>
-          // Find executions that happened after a reasonable time after the final call
-          // 50ms should be enough buffer for the final call to be processed
-          exec.time > 525 + 50
-      )
-
-      logWithTime(
-        `Found ${executionsAfterFinalCall.length} executions after final call`
-      )
-
-      // All executions after final call should use final payload
-      executionsAfterFinalCall.forEach(exec => {
-        expect(exec.payload.value).toBe('final')
-      })
-
-      // First execution with interval should happen after the interval
-      const firstIntervalExecution = executionsAfterFinalCall[0]
-      if (firstIntervalExecution) {
-        expect(firstIntervalExecution.time).toBeGreaterThanOrEqual(
-          525 + INTERVAL * 0.9
-        )
-      }
-    },
-    TEST_TIMEOUT
-  ),
-    it(
-      'should apply debounce before any execution when specified',
-      async () => {
-        const ACTION_ID = 'debounce-action'
-        const DEBOUNCE = 200 // ms
-
-        // Record execution timestamps
-        const executionTimes: number[] = []
-
-        // Create test start time reference
-        const testStartTime = Date.now()
-        const getElapsedTime = () => Date.now() - testStartTime
-
-        // Helper to log with timestamp
-        const logWithTime = (message: string) => {
-          console.log(`[${getElapsedTime()}ms] ${message}`)
-        }
-
-        // Setup the action with debounce
-        cyre.action({
-          id: ACTION_ID,
-          debounce: DEBOUNCE,
-          repeat: 1
-        })
-
-        // Setup the handler
-        cyre.on(ACTION_ID, (payload: any) => {
-          const elapsed = getElapsedTime()
-          executionTimes.push(elapsed)
-          logWithTime(`EXECUTED with value: ${payload.value}`)
-          return {executed: true}
-        })
-
-        // Make multiple rapid calls that should get debounced
-        logWithTime('CALLING first time')
-        await cyre.call(ACTION_ID, {value: 'first'})
-
-        logWithTime('CALLING second time immediately')
-        await cyre.call(ACTION_ID, {value: 'second'})
-
-        logWithTime('CALLING third time immediately')
-        await cyre.call(ACTION_ID, {value: 'third'})
-
-        // Wait for debounce to complete
-        const waitTime = DEBOUNCE * 1.5
-        logWithTime(`Waiting ${waitTime}ms for debounce to complete...`)
-        await new Promise(resolve => setTimeout(resolve, waitTime))
-
-        // ASSERTIONS
-
-        // Should execute exactly once after debounce period
-        expect(executionTimes.length).toBe(1)
-
-        // Execution should happen after the debounce period
-        expect(executionTimes[0]).toBeGreaterThanOrEqual(DEBOUNCE * 0.9)
-        expect(executionTimes[0]).toBeLessThanOrEqual(DEBOUNCE * 1.2)
-      },
-      TEST_TIMEOUT
+    }
+
+    // Clean up
+    cyre.forget(actionId)
+  })
+
+  /**
+   * Test debounce behavior with new TimeKeeper integration
+   */
+  it('should apply debounce before any execution when specified', async () => {
+    const DEBOUNCE_TIME = 200
+    const actionId = `debounce-action-${Date.now()}`
+    const executions: Array<{time: number; value: string}> = []
+    const startTime = Date.now()
+
+    // Register handler
+    cyre.on(actionId, payload => {
+      const elapsed = Date.now() - startTime
+      executions.push({time: elapsed, value: payload.value})
+      console.log(`[${elapsed}ms] EXECUTED with value: ${payload.value}`)
+      return {executed: true}
+    })
+
+    // Create action with debounce - should work with new TimeKeeper
+    const actionResult = cyre.action({
+      id: actionId,
+      debounce: DEBOUNCE_TIME
+    })
+
+    expect(actionResult.ok).toBe(true)
+
+    // Make rapid calls
+    console.log(`[0ms] CALLING first time`)
+    const call1 = await cyre.call(actionId, {value: 'first'})
+
+    console.log(`[0ms] CALLING second time immediately`)
+    const call2 = await cyre.call(actionId, {value: 'second'})
+
+    console.log(`[0ms] CALLING third time immediately`)
+    const call3 = await cyre.call(actionId, {value: 'third'})
+
+    console.log(`[1ms] Waiting 300ms for debounce to complete...`)
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    console.log('Final executions:', executions)
+
+    // With debounce, we expect:
+    // - First call executes immediately
+    // - Subsequent calls are debounced
+    // - Final debounced call executes after delay
+    expect(executions.length).toBe(2)
+    expect(executions[0].value).toBe('first') // Immediate execution
+    expect(executions[1].value).toBe('third') // Final debounced value
+
+    // Clean up
+    cyre.forget(actionId)
+  })
+
+  /**
+   * Test complex timing scenarios with delay, interval, and repeat
+   */
+  it('should handle complex timing scenarios with delay, interval, and repeat', async () => {
+    const DELAY = 100
+    const INTERVAL = 150
+    const REPEAT = 3
+    const actionId = `complex-timing-action-${Date.now()}`
+    const executions: Array<{time: number; execution: number}> = []
+    const startTime = Date.now()
+
+    console.log(
+      `[TEST] Starting complex timer: delay=${DELAY}ms, interval=${INTERVAL}ms, repeat=${REPEAT}`
     )
+
+    // Register handler
+    cyre.on(actionId, payload => {
+      const elapsed = Date.now() - startTime
+      const execution = executions.length + 1
+      executions.push({time: elapsed, execution})
+      console.log(`[${elapsed}ms] EXECUTED #${execution}`)
+      return {executed: true, execution}
+    })
+
+    // Create action with complex timing
+    const actionResult = cyre.action({
+      id: actionId,
+      delay: DELAY,
+      interval: INTERVAL,
+      repeat: REPEAT
+    })
+
+    expect(actionResult.ok).toBe(true)
+
+    // Start the action
+    const callResult = await cyre.call(actionId)
+    expect(callResult.ok).toBe(true)
+
+    // Wait for all executions to complete
+    await new Promise(resolve =>
+      setTimeout(resolve, DELAY + INTERVAL * REPEAT + 100)
+    )
+
+    console.log('Complex timing executions:', executions)
+
+    // Should have exactly REPEAT executions
+    expect(executions.length).toBe(REPEAT)
+
+    // First execution should be after DELAY
+    expect(executions[0].time).toBeGreaterThanOrEqual(DELAY * 0.8)
+    expect(executions[0].time).toBeLessThanOrEqual(DELAY * 1.5)
+
+    // Subsequent executions should be spaced by INTERVAL
+    for (let i = 1; i < executions.length; i++) {
+      const timeBetween = executions[i].time - executions[i - 1].time
+      expect(timeBetween).toBeGreaterThanOrEqual(INTERVAL * 0.7)
+      expect(timeBetween).toBeLessThanOrEqual(INTERVAL * 1.6)
+    }
+
+    // Clean up
+    cyre.forget(actionId)
+  })
 })

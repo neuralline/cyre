@@ -1,836 +1,591 @@
-// src/app.ts
-import CyreAction from './components/cyre-actions'
-import CyreChannel from './components/cyre-channels'
-import {log} from './components/cyre-logger'
-import {subscribe} from './components/cyre-on'
-import timeKeeper from './components/cyre-time-keeper'
-import {BREATHING, MSG} from './config/cyre-config'
-import {io, subscribers, timeline} from './context/state'
-import {metricsState} from './context/metrics-state'
-import {historyState} from './context/history-state'
-import {registerMiddleware} from './components/cyre-middleware'
-import dataDefinitions from './elements/data-definitions'
+// src/app.ts - Updated with intelligent system orchestration
+
 import type {
-  ActionId,
-  ActionPayload,
-  BreathingMetrics,
-  CyreResponse,
   IO,
-  Subscriber,
-  SubscriptionResponse,
-  TimekeeperMetrics
-} from './interfaces/interface'
-import {
-  buildProtectionPipeline,
-  executeProtectionPipeline
-} from './components/cyre-protection'
-import {metricsReport} from './context/metrics-report'
+  ActionPayload,
+  CyreResponse,
+  EventHandler,
+  SubscriptionResponse
+} from './types/core'
+import {MSG} from './config/cyre-config'
+import {log} from './components/cyre-log'
+import {subscribe} from './components/cyre-on'
+import TimeKeeper from './components/cyre-timekeeper'
+import {io, subscribers, timeline} from './context/state'
+import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
+import {sensor} from './components/sensor'
+import {bufferState} from './context/buffer-state'
+import {CyreActions} from './components/cyre-actions'
+import {processCall} from './components/cyre-call'
+
+import payloadState from './context/payload-state'
+
+// Import advanced systems
+import {orchestration} from './orchestration/orchestration-engine'
+
+import {schedule} from './components/cyre-schedule'
+import {useDispatch} from './components/cyre-dispatch'
 
 /* 
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.0.2 2025
+    Version 4.5.0 2025 with Intelligent System Orchestration
 
-    example use:
-      cyre.action({id: 'uber', payload: 44085648634})
-      cyre.on('uber', number => {
-          console.log('Calling Uber: ', number)
-      })
-      cyre.call('uber') 
+    Intelligent system processes:
+    - Adaptive breathing with stress-responsive adjustments
+    - Smart memory cleanup with performance impact analysis  
+    - Proactive performance monitoring with actionable insights
+    - Automated state persistence with conflict resolution
+    - Comprehensive health checks with self-healing
+    - Dynamic load balancing and adaptive optimization
+
+        example use:
+        cyre.action({id: 'taxi', payload: 44085648634})
+        cyre.on('taxi', number => {
+            console.log('Calling taxi @', number)
+        })
+        cyre.call('taxi') 
+
+       
+
+        Path System Features:
+        - Hierarchical channel organization: 'app/users/profile/settings'
+        - Pattern-based operations: 'building/* /temperature'
+        - Foreign key indexing for O(1) performance
+        - Clean plugin architecture with private internals
+        - Backward compatibility with existing flat IDs
+
+        example use:
+        cyre.action({id: 'user-profile', payload: userData})
+        cyre.on('user-profile', handler)
+        cyre.call('user-profile', newData)
+
+        // path-based  
+        cyre.action({id: 'user-profile', path: 'app/users/profile', payload: userData})
+
+    Flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
+
 
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
-    Cyre's second law: An event system must never fail to execute critical actions nor allow system degradation by refusing to implement proper protection mechanisms.
+    
+     
+
 */
 
-interface CyreInstance {
-  initialize: () => CyreResponse
-  call: (id?: ActionId, payload?: ActionPayload) => Promise<CyreResponse>
-  action: (attribute: IO | IO[]) => void
-  on: (
-    type: string | Subscriber[],
-    fn?: (
-      payload?: unknown
-    ) => void | Promise<void> | {id: string; payload?: unknown}
-  ) => SubscriptionResponse
-  shutdown: () => void
-  lock: () => void
-  status: () => boolean
-  forget: (id: string) => boolean
+// Track initialization state
+export interface CyreInstance {
+  // Core methods
+  init: () => Promise<{ok: boolean; payload: number | null; message: string}>
+  action: (config: IO | IO[]) => {ok: boolean; message: string; payload?: any}
+  on: (id: string, handler: EventHandler) => SubscriptionResponse
+  call: (id: string, payload?: ActionPayload) => Promise<CyreResponse>
   get: (id: string) => IO | undefined
-  pause: (id?: string) => void
-  resume: (id?: string) => void
+  forget: (id: string) => boolean
+  clear: () => void
+  reset: () => void
+
+  // Orchestration integration
+  //orchestration: typeof import('./orchestration/orchestration-engine').orchestration
+
+  // Path system
+  path: () => string
+
+  // Developer experience helpers
+  //schedule: typeof import('./components/cyre-schedule').schedule
+
+  // State methods
   hasChanged: (id: string, payload: ActionPayload) => boolean
   getPrevious: (id: string) => ActionPayload | undefined
-  getBreathingState: () => Readonly<BreathingMetrics>
-  getPerformanceState: () => {
-    totalProcessingTime: number
-    totalCallTime: number
-    totalStress: number
-    stress: number
-  }
-  getMetrics: (channelId: string) => TimekeeperMetrics
-  getHistory: (actionId?: string) => any
-  clearHistory: (actionId?: string) => void
-  middleware: (id: string, fn: Function) => void
-  getMetricsReport: (actionId?: string) => any
-  logMetricsReport: (filter?: (metrics: any) => boolean) => void
+  updatePayload: (id: string, payload: ActionPayload) => void
+
+  // NEW: Dual payload system access
+  payloadState
+
+  // Control methods with metrics
+  pause: (id?: string) => void
+  resume: (id?: string) => void
+  lock: () => {ok: boolean; message: string; payload: null}
+  unlock: () => {ok: boolean; message: string; payload: null}
+  shutdown: () => void
+  status: () => boolean
+
+  // Metrics API
+  getMetrics: (
+    channelId?: string
+  ) =>
+    | import('./types/system').ChannelMetricsResult
+    | import('./types/system').SystemMetricsResult
+    | {error: string; available: false}
 }
 
-const Cyre = function (line: string = crypto.randomUUID()): CyreInstance {
-  let isShutdown = false // Cyre shutdown state
+/**
+ * Initialize with standardized system intelligence
+ */
+const init = async (): Promise<{
+  ok: boolean
+  payload: number | null
+  message: string
+}> => {
+  try {
+    if (metricsState.isInit()) {
+      log.sys('System already initialized')
+      return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+    }
 
-  const initializeBreathing = () => {
-    timeKeeper.keep(
-      BREATHING.RATES.BASE,
-      async () => {
-        const currentState = metricsState.get()
-        const state = metricsState.updateBreath({
-          cpu: currentState.system.cpu,
-          memory: currentState.system.memory,
-          eventLoop: currentState.system.eventLoop,
-          isOverloaded: currentState.system.isOverloaded
-        })
-      },
-      true
-    )
+    log.sys(MSG.QUANTUM_HEADER)
+
+    // Initialize advanced systems
+    //initializeQuerySystem()
+
+    initializeBreathing()
+    TimeKeeper.resume()
+
+    sensor.debug('system', 'success', 'system-initialization')
+
+    metricsState.init()
+
+    log.success('Cyre initialized with system intelligence')
+    sensor.success('initialize', 'Cyre initialized with system intelligence')
+    log.debug('System online!')
+
+    return {ok: true, payload: Date.now(), message: MSG.ONLINE}
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    log.critical(`Cyre failed to initialize : ${errorMessage}`)
+    sensor.critical('system', errorMessage, 'system-initialization')
+    shutdown()
+    return {ok: false, payload: null, message: errorMessage}
+  }
+}
+
+/**
+ * Initialize breathing system with metrics integration
+ */
+const initializeBreathing = (): void => {
+  TimeKeeper.keep(
+    1000,
+    async () => {
+      //callback on each reputation
+      try {
+        await updateBreathingFromMetrics()
+        return undefined // ✅ Explicit return for async function
+      } catch (error) {
+        // Silent fail to prevent log spam
+        sensor.error('system', 'Breathing update error:', 'initialize')
+        return undefined // ✅ Return in catch block too
+      }
+    },
+    true,
+    'system-breathing',
+    1000
+  )
+
+  sensor.info('system', 'Breathing system initialized with metrics integration')
+}
+/**
+ * Action registration with automatic orchestration trigger detection
+ */
+const action = (
+  attribute: IO | IO[]
+): {ok: boolean; message: string; payload?: any} => {
+  // HOT PATH OPTIMIZATION: Single flag check instead of multiple conditions
+  const {allowed, messages} = metricsState.canRegister()
+  if (!allowed) {
+    sensor.error(messages, 'system-error', 'Channel-registration')
+
+    return {ok: false, message: messages.join(', ')}
   }
 
-  const lock = (): CyreResponse => {
-    if (isShutdown) {
+  try {
+    if (Array.isArray(attribute)) {
+      const results = attribute.map(singleAction => {
+        const result = CyreActions(singleAction)
+
+        return result
+      })
+
+      const successful = results.filter(r => r.ok).length
+      return {
+        ok: successful > 0,
+        message: `Registered ${successful}/${results.length} actions`,
+        payload: results
+      }
+    } else {
+      const result = CyreActions(attribute)
+
+      return result
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    sensor.error(
+      'system',
+      '`Channel registration failed: ${errorMessage}`',
+      'app/channel'
+    )
+    return {ok: false, message: `Channel registration failed: ${errorMessage}`}
+  }
+}
+
+/**
+ * Call execution with pre-pipeline protections
+ */
+export const call = async (
+  id: string,
+  payload?: ActionPayload
+): Promise<CyreResponse> => {
+  try {
+    if (!id) {
+      sensor.error(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
       return {
         ok: false,
-        message: MSG.CALL_OFFLINE,
-        payload: null
+        payload: null,
+        message: `${MSG.UNABLE_TO_COMPLY}: ${id} `
+      }
+    }
+    const action = io.get(id)
+    if (!action) {
+      log.error(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
+
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.CALL_INVALID_ID}: ${id} `
       }
     }
 
-    metricsState.lock()
-    log.info('Cyre system locked - no new channels or subscribers can be added')
-
-    return {
-      ok: true,
-      message: 'System locked successfully',
-      payload: null
+    if (action._isBlocked) {
+      log.critical(`${MSG.CALL_NOT_RESPONDING}: ${id}`)
+      return {
+        ok: false,
+        payload: null,
+        message: `${MSG.CALL_NOT_RESPONDING}: ${id} `
+      }
     }
-  }
+    // log.debug(action)
 
-  /**
-   * Simplified useDispatch that focuses solely on dispatching to subscribers
-   */
-  const useDispatch = async (io: IO): Promise<CyreResponse> => {
-    if (!io?.id) {
-      throw new Error('Invalid IO object')
+    // HOT PATH OPTIMIZATION: Single flag check for system conditions
+    const {allowed, messages} = metricsState.canCall()
+    if (!allowed) {
+      // Special case: Allow critical actions even during recuperation
+      if (action.priority?.level === 'critical') {
+        // Continue with critical action
+      } else {
+        sensor.error(
+          'app/call/system',
+          messages.join(', '),
+          action.id,
+          'blocked'
+        )
+        return {
+          ok: false,
+          payload: undefined,
+          message: messages.join(', ')
+        }
+      }
+    }
+    const req = payload ?? payloadState.get(id)
+    //io.set(action)
+
+    // In call() - detect fast path early
+    if (action._hasFastPath) {
+      // Direct dispatch - skip processCall entirely
+      return await useDispatch(action, payload)
+    }
+    // STEP 4: Throttle check
+    // ✅ STEP 4: FIXED Throttle check
+    else if (action.throttle && action.throttle > 0) {
+      const currentTime = Date.now()
+      const lastExecTime = action._lastExecTime || 0
+
+      // FIX 1: Calculate elapsed time from LAST EXECUTION, not action creation
+      const elapsedSinceLastExec = currentTime - lastExecTime
+      const remaining = Math.max(0, action.throttle - elapsedSinceLastExec)
+
+      // FIX 2: Check if we should throttle (industry standard: first call always passes)
+      if (lastExecTime > 0 && elapsedSinceLastExec < action.throttle) {
+        return {
+          ok: false,
+          payload: undefined,
+          message: `Call throttled - retry available in ${remaining}ms`
+        }
+      }
     }
 
-    // Find subscriber
-    const subscriber = subscribers.get(io.id)
-    if (!subscriber) {
-      const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${io.id}`
-      // Record failed dispatch in history
-      historyState.record(io.id, io.payload, {ok: false, message: error})
-      return {ok: false, payload: null, message: error}
-    }
+    // STEP 5: Debounce check (most complex protection)
+    // In call() function - simplified debounce check
+    else if (action.debounce && action.debounce > 0) {
+      const debounceId = `debounce-${action.id}`
 
-    // Execute action
-    const startTime = performance.now()
-    const dispatch = CyreAction({...io}, subscriber.fn)
-    const duration = performance.now() - startTime
+      // Check if already in debounce state
+      if (timeline.get(debounceId)) {
+        // Cancel existing debounce timer
+        TimeKeeper.forget(debounceId)
 
-    // Record history
-    historyState.record(
-      io.id,
-      io.payload,
-      {ok: dispatch.ok, message: dispatch.message, error: dispatch.error},
-      duration
-    )
-
-    // Log if enabled
-    if (io.log) {
-      log.info({
-        ...dispatch,
-        executionTime: duration,
-        timestamp: Date.now()
-      })
-    }
-
-    // Handle intraLink (chain to next action)
-    if (dispatch?.intraLink) {
-      const {id, payload} = dispatch.intraLink
-      call(id, payload).catch(error => {
-        log.error(`Linked action error: ${error}`)
-      })
-    }
-
-    // Return standardized response reflecting actual dispatch result
-    return {
-      ok: dispatch.ok,
-      payload: dispatch,
-      message: dispatch.message || MSG.WELCOME
-    }
-  }
-
-  /**
-   * Executes an action immediately with standardized approach
-   */
-  const executeImmediately = async (
-    action: IO,
-    payload: ActionPayload
-  ): Promise<CyreResponse> => {
-    try {
-      // Track execution start time
-      const startTime = performance.now()
-
-      // Dispatch the action
-      const dispatchResult = await useDispatch({
-        ...action,
-        timeOfCreation: performance.now(),
-        payload
-      })
-
-      // Calculate execution time and update metrics
-      const executionTime = performance.now() - startTime
-
-      // Only update metrics if dispatch was successful
-      if (dispatchResult.ok) {
-        // Add this line to track execution time
-        metricsReport.trackExecution(action.id, executionTime)
-
-        io.updateMetrics(action.id, {
-          lastExecutionTime: Date.now(),
-          executionCount: (io.getMetrics(action.id)?.executionCount || 0) + 1
-        })
+        // Check maxWait constraint
+        if (
+          action.maxWait &&
+          Date.now() - action._debounceStart >= action.maxWait
+        ) {
+          // MaxWait exceeded - execute immediately
+          io.set({...action, _debounceStart: undefined})
+          return await processCall(action, payload)
+        }
+      } else {
+        // First debounce call - set start time
+        io.set({...action, _debounceStart: Date.now()})
       }
 
-      // Record metrics
-      metricsState.recordCall(action.priority?.level)
+      // Store latest payload and schedule debounced execution
+      payloadState.set(action.id, payload, 'call')
 
-      return dispatchResult
-    } catch (error) {
-      metricsReport.trackError(action.id)
-      return standardErrorResponse('Execution failed', error)
-    }
-  }
+      // Fix for the debounce callback in app.ts
+      // The catch block needs a return statement
 
-  // Update scheduleTimedExecution function to ensure metrics are updated
-  // for first execution of timed actions
-
-  const scheduleTimedExecution = (
-    action: IO,
-    payload: ActionPayload
-  ): Promise<CyreResponse> => {
-    // Determine timing behavior
-    const hasDelay = action.delay !== undefined && action.delay >= 0
-    const hasInterval = action.interval && action.interval > 0
-    const repeatValue = action.repeat
-
-    // Apply stress factor to interval
-    const {stress} = metricsState.get()
-    const stressFactor = 1 + stress.combined
-    const adjustedInterval = hasInterval ? action.interval * stressFactor : 0
-
-    // Determine initial wait time
-    const initialWait = hasDelay
-      ? Math.max(0, action.delay)
-      : hasInterval
-      ? adjustedInterval
-      : 0
-
-    // Clean up existing timers - only do this when creating a new timer
-    const existingTimers = timeline.getAll().filter(t => t.id === action.id)
-    existingTimers.forEach(timer => {
-      if (timer.timeoutId) clearTimeout(timer.timeoutId)
-      if (timer.recuperationInterval) clearTimeout(timer.recuperationInterval)
-    })
-    timeline.forget(action.id)
-
-    return new Promise(resolve => {
-      // Set up first execution
-      const timerId = `${action.id}-${Date.now()}`
-
-      const timerResult = timeKeeper.keep(
-        initialWait,
+      TimeKeeper.keep(
+        action.debounce,
         async () => {
-          // Track execution start time
-          const startTime = performance.now()
-
-          // First execution
-          const firstResult = await useDispatch({
-            ...action,
-            timeOfCreation: performance.now(),
-            payload
-          })
-
-          // Calculate execution time
-          const executionTime = performance.now() - startTime
-
-          // Update metrics if execution was successful
-          if (firstResult.ok) {
-            io.updateMetrics(action.id, {
-              lastExecutionTime: Date.now(),
-              executionCount:
-                (io.getMetrics(action.id)?.executionCount || 0) + 1
+          try {
+            const latestPayload = payloadState.get(action.id) || payload
+            const currentAction = io.get(action.id) // Get the FULL action object
+            if (!currentAction) return
+            // Clear debounce state PROPERLY
+            io.set({
+              ...currentAction, // Use the complete action object
+              _debounceStart: undefined
             })
-          }
 
-          // Handle repeats if needed
-          if (
-            (hasInterval && repeatValue === true) ||
-            (typeof repeatValue === 'number' && repeatValue > 1)
-          ) {
-            // Schedule remaining executions with interval timing
-            setupRepeatingTimer(action, payload, repeatValue)
+            // Execute with the complete action
+            return await processCall(currentAction, latestPayload)
+          } catch (error) {
+            // Handle error properly
+            return {
+              ok: false,
+              payload: null,
+              message: `Debounced execution failed: ${error}`,
+              error: String(error)
+            } // ✅ Add explicit return in catch block
           }
-
-          resolve({
-            ok: firstResult.ok,
-            payload: firstResult.payload,
-            message: `Action executed with ${
-              hasDelay ? `delay: ${action.delay}ms` : ''
-            }${
-              hasInterval ? `, interval: ${action.interval}ms` : ''
-            }, repeat: ${repeatValue === true ? 'infinite' : repeatValue}`
-          })
         },
-        1, // Execute first timer exactly once
-        timerId
+        1,
+        debounceId
       )
 
-      // Handle timer setup failure
-      if (timerResult.kind === 'error') {
-        resolve({
-          ok: false,
-          payload: null,
-          message: `Failed to set up timer: ${timerResult.error.message}`
-        })
+      return {
+        ok: true,
+        payload,
+        message: `Call debounced - execution scheduled in ${action.debounce}ms`,
+        metadata: {delay: action.debounce}
       }
-    })
-  }
+    }
 
-  /**
-   * Sets up a repeating timer for interval actions
-   */
-  const setupRepeatingTimer = (
-    action: IO,
-    payload: ActionPayload,
-    repeat: number | boolean | undefined
-  ): void => {
-    // Apply stress factor to interval
-    const {stress} = metricsState.get()
-    const stressFactor = 1 + stress.combined
-    const adjustedInterval = action.interval! * stressFactor
+    // Buffer protection - ultra-fast buffering
+    else if (action.buffer && action.buffer.window > 0) {
+      const bufferId = `buffer-${action.id}`
 
-    // Calculate remaining repeats
-    const remainingRepeats =
-      repeat === true
-        ? true
-        : typeof repeat === 'number'
-        ? repeat - 1 // First execution already happened
-        : 0
+      if (!timeline.get(bufferId)) {
+        // First call - start buffer window
+        TimeKeeper.keep(
+          action.buffer.window,
+          async () => {
+            try {
+              // Get final buffered payload
+              const finalPayload = bufferState.get(action.id) || payload
 
-    if (!remainingRepeats) return // Nothing to do
+              // Clear buffer
+              bufferState.clear(action.id)
 
-    // Set up repeating timer
-    timeKeeper.keep(
-      adjustedInterval,
-      async () => {
-        if (metricsState.isHealthy()) {
-          // Track repeat before execution
-          metricsReport.trackRepeat(action.id)
+              // Execute with final payload
+              return await processCall(action, finalPayload)
+            } catch (error) {
+              return {
+                ok: false,
+                payload: null,
+                message: `Buffer execution failed: ${error}`,
+                error: String(error)
+              }
+            }
+          },
+          1,
+          bufferId
+        )
+      }
 
-          await useDispatch({
-            ...action,
-            timeOfCreation: performance.now(),
-            payload
-          })
-        }
-      },
-      remainingRepeats,
-      action.id
-    )
-  }
+      // Store payload in ultra-fast buffer (no payloadState!)
+      bufferState.set(action.id, payload, action.buffer.strategy || 'overwrite')
 
-  /**
-   * Standardized error response generator
-   */
-  const standardErrorResponse = (
-    context: string,
-    error: unknown
-  ): CyreResponse => {
+      return {
+        ok: true,
+        payload,
+        message: `Call buffered - execution scheduled in ${action.buffer.window}ms`,
+        metadata: {bufferWindow: action.buffer.window}
+      }
+    }
+
+    // ALL PRE-PIPELINE PROTECTIONS PASSED - Continue to pipeline
+
+    // Execute the processing pipeline
+    const result = await processCall(action, req)
+
+    return result
+  } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`${context}: ${errorMessage}`)
+
+    sensor.error(id, errorMessage, 'call-execution')
 
     return {
       ok: false,
       payload: null,
-      message: `${context}: ${errorMessage}`
+      message: `Call failed: ${errorMessage}`,
+      error: errorMessage
     }
-  }
-
-  /**
-   * Entry point for action execution
-   */
-  const call = async (
-    id?: ActionId,
-    payload?: ActionPayload
-  ): Promise<CyreResponse> => {
-    // System shutdown check
-    if (isShutdown) {
-      return {ok: false, message: MSG.CALL_OFFLINE, payload: null}
-    }
-
-    // ID validation
-    if (!id?.trim()) {
-      return {ok: false, message: MSG.CALL_INVALID_ID, payload: null}
-    }
-    metricsReport.trackCall(id.trim())
-    // Action retrieval from store
-    const action = io.get(id.trim())
-    if (!action) {
-      return {
-        ok: false,
-        payload: null,
-        message: `${MSG.CALL_NOT_RESPONDING}: ${id}`
-      }
-    }
-
-    try {
-      // Use the final payload (passed in or from action)
-      const finalPayload = payload ?? action.payload
-
-      // ALWAYS check if the action has a pipeline and rebuild if missing
-      if (!action._protectionPipeline) {
-        // Rebuild the pipeline - this ensures middleware added after action creation works
-        const updatedAction = {
-          ...action,
-          _protectionPipeline: buildProtectionPipeline(action)
-        }
-        // Store the updated action with pipeline
-        io.set(updatedAction)
-
-        // Update our reference to use the updated action
-        Object.assign(action, updatedAction)
-
-        log.debug(`Rebuilt protection pipeline for action ${action.id}`)
-      }
-
-      // Route based on timing settings
-      if (action.interval || action.delay) {
-        // Create a function that handles timing
-        const executeTimed = () => scheduleTimedExecution(action, finalPayload)
-
-        // Execute the pipeline with timed execution as the final step
-        return executeProtectionPipeline(
-          action,
-          finalPayload,
-          action._protectionPipeline,
-          executeTimed
-        )
-      } else {
-        // Create a function that executes immediately
-        const executeNow = () => executeImmediately(action, finalPayload)
-
-        // Execute the pipeline with immediate execution as the final step
-        return executeProtectionPipeline(
-          action,
-          finalPayload,
-          action._protectionPipeline,
-          executeNow
-        )
-      }
-    } catch (error) {
-      return standardErrorResponse('Call failed', error)
-    }
-  }
-
-  const action = (attribute: IO | IO[]): void => {
-    if (isShutdown) {
-      log.error(MSG.OFFLINE)
-      return
-    }
-    if (metricsState.isSystemLocked()) {
-      log.error(MSG.SYSTEM_LOCKED_CHANNELS)
-      return
-    }
-
-    try {
-      if (Array.isArray(attribute)) {
-        attribute.forEach(ioItem => {
-          // Get existing action to preserve middleware
-          const existingAction = io.get(ioItem.id)
-          const existingMiddleware = existingAction?.middleware || []
-
-          // Ensure middleware is preserved/merged in new action
-          const mergedItem = {
-            ...ioItem,
-            type: ioItem.type || ioItem.id,
-            middleware: ioItem.middleware
-              ? [
-                  ...existingMiddleware,
-                  ...ioItem.middleware.filter(
-                    (id: string) => !existingMiddleware.includes(id)
-                  )
-                ]
-              : existingMiddleware
-          }
-
-          const processedChannel = CyreChannel(mergedItem, dataDefinitions)
-          if (processedChannel.ok && processedChannel.payload) {
-            // ALWAYS rebuild the protection pipeline when creating or updating an action
-            const actionWithPipeline = {
-              ...processedChannel.payload,
-              _protectionPipeline: buildProtectionPipeline(
-                processedChannel.payload
-              )
-            }
-
-            // Ensure the action is properly stored
-            io.set(actionWithPipeline)
-
-            // Debug log to confirm storage and pipeline rebuilding
-            log.debug(
-              `Action registered with fresh pipeline: ${actionWithPipeline.id}`
-            )
-          } else {
-            log.error(`Failed to process action: ${processedChannel.message}`)
-          }
-        })
-      } else {
-        // Get existing action to preserve middleware
-        const existingAction = io.get(attribute.id)
-        const existingMiddleware = existingAction?.middleware || []
-
-        // Ensure middleware is preserved/merged in new action
-        const mergedAttribute = {
-          ...attribute,
-          type: attribute.type || attribute.id,
-          middleware: attribute.middleware
-            ? [
-                ...existingMiddleware,
-                ...attribute.middleware.filter(
-                  (id: string) => !existingMiddleware.includes(id)
-                )
-              ]
-            : existingMiddleware
-        }
-
-        const processedChannel = CyreChannel(mergedAttribute, dataDefinitions)
-        if (processedChannel.ok && processedChannel.payload) {
-          // ALWAYS rebuild the protection pipeline when creating or updating an action
-          const actionWithPipeline = {
-            ...processedChannel.payload,
-            _protectionPipeline: buildProtectionPipeline(
-              processedChannel.payload
-            )
-          }
-
-          // Ensure the action is properly stored
-          io.set(actionWithPipeline)
-
-          // Debug log to confirm storage and pipeline rebuilding
-          log.debug(
-            `Action registered with fresh pipeline: ${actionWithPipeline.id}`
-          )
-        } else {
-          log.error(`Failed to process action: ${processedChannel.message}`)
-        }
-      }
-    } catch (error) {
-      log.error(`Action registration failed: ${error}`)
-    }
-  }
-
-  //init Cyre
-  const initialize = (): CyreResponse => {
-    isShutdown = false
-    initializeBreathing()
-    timeKeeper.resume()
-
-    log.sys(
-      '%c' + MSG.QUANTUM_HEADER,
-      'background: rgb(151, 2, 151); color: white; display: block;'
-    )
-
-    return {
-      ok: true,
-      payload: 200,
-      message: MSG.WELCOME
-    }
-  }
-
-  const status = () => {
-    isShutdown
-      ? log.info({ok: true, message: MSG.OFFLINE})
-      : log.info({ok: true, message: MSG.ONLINE})
-    return isShutdown
-  }
-
-  const forget = (id: string): boolean => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return false
-    }
-
-    timeKeeper.pause(id)
-    return io.forget(id)
-  }
-
-  const get = (id: string): IO | undefined => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return undefined
-    }
-    return io.get(id)
-  }
-
-  const pause = (id?: string): void => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return
-    }
-
-    timeKeeper.pause(id)
-    const allTimers = timeline.getAll()
-
-    if (id) {
-      const timer = timeline.get(id)
-      if (timer) {
-        timeline.add({...timer, status: 'paused'})
-      }
-    } else {
-      allTimers.forEach(timer => {
-        if (timer) {
-          timeline.add({...timer, status: 'paused'})
-        }
-      })
-    }
-  }
-
-  const resume = (id?: string): void => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return
-    }
-
-    timeKeeper.resume(id)
-    const allTimers = timeline.getAll()
-
-    if (id) {
-      const timer = timeline.get(id)
-      if (timer) {
-        timeline.add({...timer, status: 'active'})
-      }
-    } else {
-      allTimers.forEach(timer => {
-        if (timer) {
-          timeline.add({...timer, status: 'active'})
-        }
-      })
-    }
-  }
-
-  const hasChanged = (id: string, payload: ActionPayload): boolean => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return false
-    }
-    return io.hasChanged(id, payload)
-  }
-
-  const getPrevious = (id: string): ActionPayload | undefined => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return undefined
-    }
-    return io.getPrevious(id)
-  }
-
-  const getBreathingState = () => {
-    return metricsState.get().breathing
-  }
-
-  const getPerformanceState = () => {
-    const state = metricsState.get()
-    return {
-      totalProcessingTime: 0,
-      totalCallTime: 0,
-      totalStress: state.stress.combined,
-      stress: state.stress.combined
-    }
-  }
-
-  const getMetrics = (channelId: string): TimekeeperMetrics => {
-    if (isShutdown) {
-      return {
-        hibernating: true,
-        activeFormations: 0,
-        inRecuperation: false,
-        breathing: metricsState.get().breathing,
-        formations: []
-      }
-    }
-    return {
-      hibernating: false,
-      activeFormations: timeline.getActive().length,
-      inRecuperation: false,
-      breathing: metricsState.get().breathing,
-      formations: timeline
-        .getAll()
-        .filter(f => f.id === channelId)
-        .map(f => ({
-          ...f,
-          breathingSync: 1.0
-        }))
-    }
-  }
-
-  const getHistory = (actionId?: string) => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return []
-    }
-
-    if (actionId) {
-      return historyState.getChannel(actionId)
-    }
-    return historyState.getAll()
-  }
-
-  const clearHistory = (actionId?: string) => {
-    if (isShutdown) {
-      log.error(MSG.CALL_OFFLINE)
-      return
-    }
-
-    if (actionId) {
-      historyState.clearChannel(actionId)
-    } else {
-      historyState.clearAll()
-    }
-  }
-
-  /**
-   * Register middleware
-   * @param id Unique middleware identifier
-   * @param fn Middleware function
-   * @returns Response indicating success or failure
-   */
-  const middleware = (id: string, fn: Function): CyreResponse => {
-    if (isShutdown) {
-      return {
-        ok: false,
-        message: MSG.CALL_OFFLINE,
-        payload: null
-      }
-    }
-
-    if (metricsState.isSystemLocked()) {
-      return {
-        ok: false,
-        message: MSG.SYSTEM_LOCKED_CHANNELS,
-        payload: null
-      }
-    }
-
-    try {
-      // Register the middleware
-      const success = registerMiddleware(id, fn)
-
-      return {
-        ok: success,
-        message: success
-          ? `Middleware registered: ${id}`
-          : `Failed to register middleware '${id}'`,
-        payload: null
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      log.error(`Failed to register middleware: ${errorMessage}`)
-
-      return {
-        ok: false,
-        message: `Failed to register middleware: ${errorMessage}`,
-        payload: null
-      }
-    }
-  }
-
-  const shutdown = (): void => {
-    if (isShutdown) return
-
-    try {
-      // Clean up timers first
-      timeline.getAll().forEach(timer => {
-        if (timer.timeoutId) {
-          clearTimeout(timer.timeoutId)
-        }
-      })
-
-      timeKeeper.hibernate()
-      subscribers.clear()
-      io.clear()
-      metricsState.reset()
-      metricsReport.reset()
-      isShutdown = true
-
-      if (typeof process !== 'undefined' && process.exit) {
-        process.exit(0)
-      }
-    } catch (error) {
-      log.error(`Failed to shutdown gracefully: ${error}`)
-      if (typeof process !== 'undefined' && process.exit) {
-        process.exit(1)
-      }
-    }
-    log.sys('Cyre shutting down')
-  }
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('beforeunload', shutdown)
-  } else {
-    process.on('SIGINT', shutdown)
-    process.on('SIGTERM', shutdown)
-    process.on('uncaughtException', error => {
-      console.error('Uncaught Exception:', error)
-      shutdown()
-    })
-  }
-
-  return {
-    initialize,
-    call,
-    action,
-    on: subscribe,
-    shutdown,
-    lock,
-    status,
-    forget,
-    get,
-    pause,
-    resume,
-    hasChanged,
-    getPrevious,
-    getBreathingState,
-    getPerformanceState,
-    getMetrics,
-    getHistory,
-    clearHistory,
-    middleware,
-    getMetricsReport: () => ({
-      actions: metricsReport.getAllActionMetrics(),
-      global: metricsReport.getGlobalMetrics(),
-      insights: metricsReport.getInsights()
-    }),
-    logMetricsReport: (filter?: (metrics: any) => boolean) =>
-      metricsReport.logReport(filter)
   }
 }
 
-// Create default instance
-const cyre = Cyre('quantum-inceptions')
-cyre.initialize()
+/**
+ * Forget action with group and orchestration cleanup
+ */
+const forget = (id: string): boolean => {
+  if (!id || typeof id !== 'string') {
+    return false
+  }
 
-export {Cyre, cyre, log}
+  try {
+    const actionRemoved = io.forget(id)
+    const subscriberRemoved = subscribers.forget(id)
+    timeline.forget(id)
+
+    // Remove from groups
+    //removeChannelFromGroups(id)
+
+    if (actionRemoved || subscriberRemoved) {
+      //sensor.info(id, 'Action removal successful')
+
+      return true
+    }
+
+    sensor.info(`No channel found to remove for id: ${id}`, 'action-removal')
+    return false
+  } catch (error) {
+    log.error(`Failed to forget ${id}: ${error}`)
+    sensor.error(id, String(error), 'action-removal')
+    return false
+  }
+}
+const shutdown = (): void => {
+  try {
+    sensor.debug('system', 'critical', 'system-shutdown')
+    sensor.sys('system', 'Initiating system shutdown')
+
+    reset()
+    sensor.debug('System offline!')
+    if (typeof process !== 'undefined' && process.exit) {
+      process.exit(0)
+    }
+  } catch (error) {
+    sensor.critical('shutdown', 'System-shutdown failed')
+  }
+}
+
+/**
+ * Clear system with all integrations
+ */
+const reset = (): void => {
+  try {
+    sensor.info('system', 'System clear initiated')
+
+    io.clear()
+    subscribers.clear()
+    timeline.clear()
+    //metrics.reset()
+    metricsState.reset()
+    payloadState.clear()
+
+    // Clear all groups
+
+    log.success('System cleared')
+  } catch (error) {
+    log.error(`Clear operation failed: ${error}`)
+    sensor.error('system', String(error), 'system-clear')
+  }
+}
+/**
+ * Main CYRE instance with intelligent system orchestration
+ */
+export const cyre: CyreInstance = Object.freeze({
+  // Core methods
+  init,
+  action,
+  on: subscribe,
+  call,
+  forget,
+  clear: reset,
+  reset,
+  // ALIGNED ORCHESTRATION INTEGRATION
+  orchestration,
+
+  // SEAMLESS QUERY INTEGRATION
+  //query,
+  path: () => {
+    return ''
+  },
+  // DEVELOPER EXPERIENCE HELPERS
+
+  schedule,
+  // ENHANCED METRICS SYSTEM
+  // Add metrics interface
+
+  get: (id: string): IO | undefined => io.get(id),
+  // Add this to the main cyre object, right before the closing brace
+
+  // State methods
+  hasChanged: (id: string, payload: ActionPayload): boolean =>
+    payloadState.hasChanged(id, payload),
+  getPrevious: (id: string): ActionPayload | undefined =>
+    payloadState.getPrevious(id),
+  updatePayload: (id: string, payload: ActionPayload): void =>
+    payloadState.set(id, payload),
+
+  // Control methods with metrics
+  pause: (id?: string): void => {
+    TimeKeeper.pause(id)
+    sensor.debug(id || 'system', 'info', 'system-pause')
+  },
+
+  resume: (id?: string): void => {
+    TimeKeeper.resume(id)
+    sensor.debug(id || 'system', 'info', 'system-resume')
+  },
+
+  lock: (): {ok: boolean; message: string; payload: null} => {
+    metricsState.lock()
+
+    return {ok: true, message: 'System locked', payload: null}
+  },
+
+  unlock: (): {ok: boolean; message: string; payload: null} => {
+    metricsState.unlock()
+
+    return {ok: true, message: 'System unlocked', payload: null}
+  },
+
+  shutdown,
+
+  status: (): boolean => metricsState.get().hibernating,
+
+  // NEW: Metrics API integration
+  /**
+   * Get metrics for system or specific channel
+   * @param channelId Optional channel ID for channel-specific metrics
+   * @returns Comprehensive metrics data
+   */
+  getMetrics: (channelId?: string) => {
+    return metricsState.getMetrics(channelId)
+  },
+
+  // NEW: Dual payload system access
+  payloadState
+})
+
 export default cyre

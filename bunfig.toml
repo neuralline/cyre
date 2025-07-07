@@ -1,0 +1,20 @@
+# bunfig.toml
+# Bun configuration for Cyre library
+
+[install]
+# Package manager configuration
+cache = true
+save-exact = false
+production = false
+
+[test]
+# Test configuration
+#coverage = true
+timeout = 30000
+preload = ["./test/setup.ts"]
+
+[build]
+# Build configuration
+sourcemap = "external"
+minify = false
+target = "es2022"

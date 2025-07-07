@@ -13,13 +13,10 @@ describe('Quantum Breathing - Long Operations', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== LONG OPERATIONS TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== LONG OPERATIONS TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

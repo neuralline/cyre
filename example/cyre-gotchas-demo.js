@@ -13,7 +13,7 @@
 const {cyre} = mockCyre()
 
 // Initialize and clear logs
-cyre.initialize()
+cyre.init()
 console.log('\n======= CYRE GOTCHAS DEMONSTRATION =======\n')
 console.log('Starting time: ' + new Date().toISOString())
 console.log('')

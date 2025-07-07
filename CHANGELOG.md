@@ -307,10 +307,36 @@ function UserComponent() {
   - Fixed detectChanges behavior with debounce
 
 - 4.0.0: Cyre hooks
+
   - Introducing `useCyre`
   - Delay
   - Middleware
   - cyre-compose (batch channel processing)
   - Update Cyre logics
+
+- 4.1.0: Schema
+
+  - build in data/payload validation
+  - -
+
+- 4.2.0: Stream
+
+  - cyre/stream functional process chaining for live events
+  - experimental
+  - -
+
+- 4.3.0: SateMachine
+
+  - experimental
+  - -
+
+- 4.4.0: ReactiveState
+
+  - experimental
+  - use payload as state
+  - -
+
+- 4.4.0: cyre.group
+  - early stages
 
 For more detailed examples and API reference, see the [documentation](/docs).

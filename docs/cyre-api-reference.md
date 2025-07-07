@@ -6,7 +6,7 @@ CYRE is a sophisticated event management system that provides reactive networkin
 
 ## Core Methods
 
-### `cyre.initialize()`
+### `cyre.init()`
 
 Initializes the CYRE system with default settings and activates the quantum breathing system.
 
@@ -26,7 +26,7 @@ Initializes the CYRE system with default settings and activates the quantum brea
 
 ```javascript
 // Initialize CYRE at application startup
-const result = cyre.initialize()
+const result = cyre.init()
 if (result.ok) {
   console.log('CYRE initialized successfully')
 }

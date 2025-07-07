@@ -33,3 +33,5 @@ public---/surge-test.ts
 # testing
 /coverage
 /node_modules
+
+/v10/*

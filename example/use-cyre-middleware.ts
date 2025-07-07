@@ -1,7 +1,7 @@
 // example/use-cyre-middleware.ts
 
 import {useCyre} from '../src/hooks/use-cyre'
-import {CyreMiddleware, CyreResponse} from '../src/interfaces/hooks-interface'
+import {CyreMiddleware} from '../src/types/hooks-interface'
 
 // Create a user validation channel
 const userChannel = useCyre({

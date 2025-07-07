@@ -20,13 +20,10 @@ describe('Combined Protection Features', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== COMBINED FEATURES TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== COMBINED FEATURES TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 

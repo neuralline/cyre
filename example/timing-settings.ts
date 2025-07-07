@@ -83,7 +83,7 @@ const runTest = async () => {
 
     // Monitor for this phase
     const monitor = setInterval(() => {
-      const state = cyre.getBreathingState()
+      const state = cyre.getMetrics()
       const elapsed = (Date.now() - testStart) / 1000
       const throughput = stats.calls / elapsed
 

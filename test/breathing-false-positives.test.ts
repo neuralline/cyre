@@ -80,13 +80,10 @@ describe('Breathing System False Positives', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('===== BREATHING FALSE POSITIVE TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== BREATHING FALSE POSITIVE TEST COMPLETED =====')
     vi.restoreAllMocks()
   })
 
@@ -329,16 +326,16 @@ describe('Breathing System False Positives', () => {
     )
 
     // Log all data for analysis
-    console.log(
-      '[TEST] Execution data:',
-      executions.map((e, i) => ({
-        index: i,
-        stress: (e.stress * 100).toFixed(1) + '%',
-        delay: e.delay,
-        rate: e.breathing.rate,
-        recuperating: e.breathing.isRecuperating
-      }))
-    )
+    // console.log(
+    //   '[TEST] Execution data:',
+    //   executions.map((e, i) => ({
+    //     index: i,
+    //     stress: (e.stress * 100).toFixed(1) + '%',
+    //     delay: e.delay,
+    //     rate: e.breathing.rate,
+    //     recuperating: e.breathing.isRecuperating
+    //   }))
+    // )
 
     // ASSERTIONS
 

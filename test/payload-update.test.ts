@@ -18,13 +18,10 @@ describe('CYRE Payload Update Behavior', () => {
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
-    cyre.initialize()
-
-    console.log('\n===== PAYLOAD UPDATE TEST STARTED =====')
+    cyre.init()
   })
 
   afterEach(() => {
-    console.log('===== PAYLOAD UPDATE TEST COMPLETED =====\n')
     vi.restoreAllMocks()
   })
 

@@ -1,468 +1,300 @@
 // src/hooks/use-cyre.ts
+// Updated useCyre hook with perfect branch integration and fixed implementation
 
-import {cyre} from '../app'
-import type {
-  IO,
-  EventHandler,
-  ActionPayload,
-  CyreResponse
-} from '../interfaces/interface'
-
-import {
-  CyreHook,
-  CyreHookOptions,
-  CyreMiddleware,
-  ChannelConfig,
-  HistoryEntry,
-  Result,
-  SubscriptionWithCleanup
-} from '../interfaces/hooks-interface'
-import {
-  registerMiddleware,
-  MiddlewareFunction
-} from '../components/cyre-middleware'
+import type {IO, ActionPayload, CyreResponse, EventHandler} from '../types/core'
+import type {Branch} from '../types/hooks'
+import {cyre, CyreInstance} from '../app'
+import {sensor} from '../components/sensor'
 
 /**
- * Creates a Cyre channel with enhanced capabilities
- *
- * @param options - Channel configuration options including identification and protection
- * @returns A channel object with CYRE operations bound to a specific ID
+ * Configuration for useCyre hook
  */
-export function useCyre<TPayload = ActionPayload>(
-  options: CyreHookOptions<TPayload> = {}
-): CyreHook<TPayload> {
-  // Use name/tag from options, or generate a default identifier
-  const channelName = options.name || options.tag || 'channel'
-  const channelId = `${channelName}-${crypto.randomUUID()}`
+export interface UseCyreConfig {
+  /** Local channel ID (will be prefixed with branch path if used with branch) */
+  channelId: string
+  /** Initial payload for the channel */
+  payload?: ActionPayload
+  /** Channel name for debugging/display */
+  name?: string
+  /** Channel configuration (throttle, debounce, etc.) */
+  config?: Partial<IO>
+}
 
-  // Configure debugging
-  const debugEnabled = options.debug === true
-  const debugLog = debugEnabled
-    ? (message: string, data?: any) =>
-        console.log(
-          `[${channelName}:${channelId.slice(-8)}] ${message}`,
-          data !== undefined ? data : ''
-        )
-    : () => {}
-
-  // Initialize state tracking
-  let isInitialized = false
-
-  // Initialize subscription tracking
-  interface ChannelSubscription {
-    id: string
-    handler: EventHandler
+/**
+ * Return type for useCyre hook
+ */
+export interface CyreHook {
+  /** Branch path (empty string for root) */
+  path: string
+  /** Call the channel */
+  call: (payload?: ActionPayload) => Promise<CyreResponse>
+  /** Set up handler for the channel */
+  on: (handler: EventHandler) => {
+    ok: boolean
+    message: string
+    unsubscribe?: () => boolean
   }
 
-  const subscriptions: ChannelSubscription[] = []
-  let subscriptionCounter = 0
+  /** Get current channel configuration */
+  get: () => IO | undefined
+  /** Remove the channel */
+  forget: () => boolean
 
-  /**
-   * Initialize the channel action with configuration
-   */
-  const initialize = (config: ChannelConfig = {}): Result<boolean, Error> => {
+  /** Get channel statistics */
+  getStats: () => {
+    globalId: string
+    localId: string
+    path: string
+    isBranch: boolean
+    depth: number
+    created: boolean
+    subscribed: boolean
+  }
+}
+
+/**
+ * Perfect useCyre hook that works seamlessly with both main cyre and branches
+ *
+ * @param instance - Required branch or cyre instance
+ * @param config - Optional channel configuration
+ * @returns CyreHook interface for channel operations
+ */
+export const useCyre = (
+  instance: CyreInstance | Branch,
+  config?: IO
+): CyreHook => {
+  // VALIDATION: Required instance check
+  if (!instance) {
+    sensor.error(
+      'useCyre requires a valid instance parameter',
+      'use-cyre',
+      'validation',
+      'error'
+    )
+    throw new Error('useCyre requires a valid instance parameter')
+  }
+
+  // VALIDATION: Instance must have required methods
+  if (
+    typeof instance.path !== 'function' ||
+    typeof instance.action !== 'function'
+  ) {
+    sensor.error(
+      'Invalid instance - missing required methods (path, action)',
+      'use-cyre',
+      'validation',
+      'error'
+    )
+    throw new Error('Invalid instance - missing required methods')
+  }
+
+  // Define path, localId, and channelId early for consistent use
+  const path = instance.path() || ''
+  const localId = config?.id || `hook-${crypto.randomUUID().slice(0, 8)}`
+  const channelId = path ? `${path}/${localId}` : localId
+
+  // Determine if we're working with a branch
+  const isBranch =
+    instance && typeof (instance as Branch).path === 'function' && path !== ''
+
+  // Create channel configuration using core cyre pattern
+  // CRITICAL FIX: Pass localId as the action.id, not the full channelId
+  // The instance.action() method will handle the path prefixing internally
+  const channelConfig: IO = {
+    ...config,
+    id: localId, // ✅ Use localId - instance.action() will handle path prefixing
+    localId, // Store original local ID
+    payload: config?.payload || undefined,
+    path
+  }
+
+  // Track creation and subscription state
+  let isCreated = false
+  let isSubscribed = false
+
+  // Create the channel using appropriate method (follows handler-first pattern)
+  const createChannel = (): boolean => {
+    if (isCreated) return true
+
     try {
-      if (isInitialized) {
-        debugLog('Channel already initialized, updating configuration')
+      let result: {ok: boolean; message: string}
+
+      if (isBranch) {
+        // Use branch.action() for branch instances
+        result = (instance as Branch).action(channelConfig)
       } else {
-        debugLog('Initializing channel')
+        // Use cyre.action() for main cyre instances
+        result = (instance as CyreInstance).action(channelConfig)
       }
 
-      // Collect middleware IDs from action config if present
-      const existingMiddleware = config.middleware || []
-
-      cyre.action({
-        ...config,
-        id: channelId,
-        // Apply protection options
-        throttle: options.protection?.throttle,
-        debounce: options.protection?.debounce,
-        detectChanges: options.protection?.detectChanges,
-        priority: options.priority,
-        payload: config.payload ?? options.initialPayload ?? {},
-        // Ensure middleware array is preserved
-        middleware: existingMiddleware
-      })
-
-      isInitialized = true
-      debugLog('Initialization complete')
-      return {success: true, value: true}
+      if (result.ok) {
+        isCreated = true
+        sensor.debug(
+          `useCyre channel created: ${channelId}`,
+          'use-cyre',
+          localId,
+          'success',
+          {
+            localId,
+            channelId,
+            path,
+            isBranch
+          }
+        )
+        return true
+      } else {
+        sensor.error(
+          `useCyre channel creation failed: ${result.message}`,
+          'use-cyre',
+          localId,
+          'error'
+        )
+        return false
+      }
     } catch (error) {
-      debugLog('Initialization failed', error)
-      return {
-        success: false,
-        error:
-          error instanceof Error
-            ? error
-            : new Error('Channel initialization failed')
-      }
+      sensor.error(
+        `useCyre channel creation error: ${error}`,
+        'use-cyre',
+        localId,
+        'error'
+      )
+      return false
     }
   }
 
-  // Auto-initialize if enabled
-  if (options.autoInit !== false) {
-    initialize()
-  }
+  // Build and return the hook interface
+  const hook: CyreHook = {
+    path,
 
-  // Create the channel object
-  const channel: CyreHook<TPayload> = {
-    /** The unique ID for this channel */
-    id: channelId,
-
-    /** The friendly name for this channel */
-    name: channelName,
-
-    /**
-     * Initialize or update the channel configuration
-     */
-    action: (config: ChannelConfig): Result<boolean, Error> => {
-      try {
-        if (isInitialized) {
-          debugLog('Channel already initialized, updating configuration')
-        } else {
-          debugLog('Initializing channel')
-        }
-
-        // Get existing action to preserve middleware
-        const existingAction = cyre.get(channelId)
-        const existingMiddleware = existingAction?.middleware || []
-
-        // Ensure middleware is preserved during updates
-        cyre.action({
-          ...config,
-          id: channelId,
-          // Apply protection options
-          throttle: options.protection?.throttle,
-          debounce: options.protection?.debounce,
-          detectChanges: options.protection?.detectChanges,
-          priority: options.priority,
-          payload: config.payload ?? options.initialPayload ?? {},
-          // Preserve existing middleware - this is the key fix
-          middleware: config.middleware
-            ? [...existingMiddleware, ...config.middleware]
-            : existingMiddleware
-        })
-
-        isInitialized = true
-        debugLog(`Initialization complete`)
-        // Log middleware state for debugging
-        const currentAction = cyre.get(channelId)
-        debugLog(
-          `Middleware array: ${JSON.stringify(currentAction?.middleware || [])}`
-        )
-
-        return {success: true, value: true}
-      } catch (error) {
-        debugLog('Initialization failed', error)
-        return {
-          success: false,
-          error:
-            error instanceof Error
-              ? error
-              : new Error('Channel initialization failed')
-        }
-      }
-    },
-
-    /**
-     * Subscribe to events on this channel with unsubscribe capability
-     */
-    on: (handler: EventHandler): SubscriptionWithCleanup => {
-      const subscriptionId = `${channelId}-sub-${++subscriptionCounter}`
-      debugLog(`Creating subscription: ${subscriptionId}`)
-
-      // Register with Cyre
-      const response = cyre.on(channelId, handler)
-
-      // Track locally for cleanup capability
-      if (response.ok) {
-        subscriptions.push({
-          id: subscriptionId,
-          handler
-        })
-
-        debugLog(`Subscription active, total: ${subscriptions.length}`)
-      } else {
-        debugLog(`Subscription failed: ${response.message}`)
-      }
-
-      // Return enhanced response with unsubscribe capability
-      return {
-        ...response,
-        unsubscribe: () => {
-          debugLog(`Unsubscribing: ${subscriptionId}`)
-          const index = subscriptions.findIndex(
-            sub => sub.id === subscriptionId
-          )
-          if (index >= 0) {
-            subscriptions.splice(index, 1)
-            debugLog(`Unsubscribed, remaining: ${subscriptions.length}`)
-          }
-          return cyre.forget(channelId)
-        }
-      }
-    },
-
-    /**
-     * Trigger the channel action with optional payload
-     */
-    call: async (payload?: TPayload): Promise<CyreResponse> => {
-      if (!isInitialized) {
-        debugLog('Auto-initializing before call')
-        const result = initialize()
-        if (!result.success) {
-          return {
-            ok: false,
-            payload: null,
-            message: `Channel initialization failed: ${result.error.message}`
-          }
-        }
-      }
-
-      // Get the current action to check middleware array
-      const action = cyre.get(channelId)
-      debugLog(
-        `Call - Current action has middleware: ${JSON.stringify(
-          action?.middleware || []
-        )}`
-      )
-
-      const finalPayload = payload || ({} as TPayload)
-      debugLog('Calling with payload', finalPayload)
-
-      try {
-        // Call the action
-        const response = await cyre.call(channelId, finalPayload)
-
-        // Log the result
-        if (response.ok) {
-          debugLog('Call succeeded')
-        } else {
-          debugLog(`Call failed: ${response.message}`)
-        }
-
-        return response
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        debugLog('Call error', errorMessage)
-
+    call: async (payload?: ActionPayload) => {
+      if (!isCreated && !createChannel()) {
         return {
           ok: false,
           payload: null,
-          message: `Call error: ${errorMessage}`
+          message: 'Channel not created',
+          error: 'Failed to create channel'
         }
       }
-    },
 
-    /**
-     * Safely call the channel with automatic error handling
-     */
-    safeCall: async (
-      payload?: TPayload
-    ): Promise<Result<CyreResponse, Error>> => {
       try {
-        debugLog('Making safe call with payload', payload)
-        const response = await channel.call(payload)
-        debugLog('Safe call succeeded', response)
-        return {success: true, value: response}
+        // Use direct cyre.call() with channelId for maximum performance
+        return await cyre.call(channelId, payload)
       } catch (error) {
-        debugLog('Safe call failed', error)
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        sensor.error(
+          `useCyre call failed: ${errorMessage}`,
+          'use-cyre',
+          localId,
+          'error'
+        )
         return {
-          success: false,
-          error: error instanceof Error ? error : new Error(String(error))
-        }
-      }
-    },
-
-    /**
-     * Get current channel state
-     */
-    get: (): IO | undefined => {
-      return cyre.get(channelId)
-    },
-
-    /**
-     * Remove the channel and its resources
-     */
-    forget: (): boolean => {
-      debugLog('Forgetting channel')
-      const result = cyre.forget(channelId)
-      if (result) isInitialized = false
-      return result
-    },
-
-    /**
-     * Pause channel execution
-     */
-    pause: (): void => {
-      debugLog('Pausing')
-      cyre.pause(channelId)
-    },
-
-    /**
-     * Resume channel execution
-     */
-    resume: (): void => {
-      debugLog('Resuming')
-      cyre.resume(channelId)
-    },
-
-    /**
-     * Check if payload has changed from previous
-     */
-    hasChanged: (payload: TPayload): boolean => {
-      return cyre.hasChanged(channelId, payload)
-    },
-
-    /**
-     * Get previous payload
-     */
-    getPrevious: (): TPayload | undefined => {
-      return cyre.getPrevious(channelId) as TPayload | undefined
-    },
-
-    /**
-     * Get channel performance metrics
-     */
-    metrics: () => {
-      return cyre.getMetrics(channelId)
-    },
-
-    /**
-     * Get breathing metrics for this channel
-     */
-    getBreathingState: () => {
-      return cyre.getBreathingState()
-    },
-
-    /**
-     * Check if channel is initialized
-     */
-    isInitialized: (): boolean => {
-      return isInitialized
-    },
-
-    /**
-     * Register middleware for pre/post processing
-     * Now uses core middleware system
-     */
-    /**
-     * Register middleware for pre/post processing
-     */
-    middleware: (middleware: CyreMiddleware<TPayload>): void => {
-      debugLog('Adding middleware')
-
-      // Generate a unique ID for this middleware
-      const middlewareId = `${channelId}-middleware-${crypto
-        .randomUUID()
-        .slice(0, 8)}`
-
-      // Register the middleware function
-      const response = cyre.middleware(
-        middlewareId,
-        async (action, actionPayload) => {
-          try {
-            // Only apply to this channel's actions
-            if (action.id !== channelId) {
-              return {action, payload: actionPayload}
-            }
-
-            debugLog(`Executing middleware ${middlewareId}`)
-
-            // Prepare next function
-            const next = async (
-              processedPayload: TPayload
-            ): Promise<CyreResponse> => {
-              debugLog('Middleware calling next with processed payload')
-              return await cyre.call(channelId, processedPayload)
-            }
-
-            // Call the channel middleware
-            const result = await middleware(actionPayload as TPayload, next)
-
-            // If middleware returns a result, continue the chain
-            if (result.ok) {
-              debugLog('Middleware transformation successful')
-              return {action, payload: result.payload || actionPayload}
-            }
-
-            // Otherwise, reject the action
-            debugLog('Middleware rejected the action')
-            return null
-          } catch (error) {
-            debugLog('Middleware error', error)
-            return null
-          }
-        }
-      )
-
-      if (response.ok) {
-        // Get the current action configuration
-        const action = cyre.get(channelId)
-
-        if (action) {
-          // Important: Create a proper middleware array
-          const currentMiddleware = Array.isArray(action.middleware)
-            ? action.middleware
-            : []
-          const updatedMiddleware = [...currentMiddleware, middlewareId]
-
-          // Update the action with the new middleware array
-          cyre.action({
-            ...action,
-            // Explicitly set the middleware array
-            middleware: updatedMiddleware
-          })
-
-          // Verify the update was successful
-          const updatedAction = cyre.get(channelId)
-          debugLog(
-            `Middleware registered and added to action, middleware array: [${
-              updatedAction?.middleware?.join(', ') || ''
-            }]`
-          )
-        } else {
-          debugLog('Cannot add middleware: Action not found')
-        }
-      } else {
-        debugLog(`Failed to register middleware: ${response.message}`)
-      }
-    },
-
-    /**
-     * Get execution history using core history system via cyre API
-     */
-    getHistory: (): ReadonlyArray<HistoryEntry<TPayload>> => {
-      const rawHistory = cyre.getHistory(channelId)
-      // Convert to expected format
-      return rawHistory.map(entry => ({
-        timestamp: entry.timestamp,
-        payload: entry.payload as TPayload,
-        response: {
-          ok: entry.result.ok,
+          ok: false,
           payload: null,
-          message: entry.result.message || '',
-          error: entry.result.error ? new Error(entry.result.error) : undefined
+          message: `Call failed: ${errorMessage}`,
+          error: errorMessage
         }
-      }))
+      }
     },
 
-    /**
-     * Clear execution history using core history system via public API
-     */
-    clearHistory: (): void => {
-      debugLog('Clearing history')
-      cyre.clearHistory(channelId)
+    on: (handler: EventHandler) => {
+      if (!isCreated && !createChannel()) {
+        return {
+          ok: false,
+          message: 'Cannot subscribe - channel not created'
+        }
+      }
+
+      try {
+        // Use direct cyre.on() with channelId for maximum performance
+        const result = cyre.on(channelId, handler)
+
+        if (result.ok) {
+          isSubscribed = true
+          sensor.debug(
+            `useCyre subscription created: ${channelId}`,
+            'use-cyre',
+            localId,
+            'success'
+          )
+        }
+
+        return result
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        sensor.error(
+          `useCyre subscription failed: ${errorMessage}`,
+          'use-cyre',
+          localId,
+          'error'
+        )
+        return {
+          ok: false,
+          message: `Subscription failed: ${errorMessage}`
+        }
+      }
     },
 
-    /**
-     * Get the count of active subscriptions
-     */
-    getSubscriptionCount: (): number => {
-      return subscriptions.length
+    get: () => {
+      try {
+        // Use direct cyre.get() with channelId for maximum performance
+        return cyre.get ? cyre.get(channelId) : undefined
+      } catch (error) {
+        sensor.error(
+          `useCyre get failed: ${error}`,
+          'use-cyre',
+          localId,
+          'error'
+        )
+        return undefined
+      }
+    },
+
+    forget: () => {
+      try {
+        // Use direct cyre.forget() with channelId for maximum performance
+        const success = cyre.forget(channelId)
+
+        if (success) {
+          isCreated = false
+          isSubscribed = false
+          sensor.debug(
+            `useCyre channel forgotten: ${channelId}`,
+            'use-cyre',
+            localId,
+            'success'
+          )
+        }
+
+        return success
+      } catch (error) {
+        sensor.error(
+          `useCyre forget failed: ${error}`,
+          'use-cyre',
+          localId,
+          'error'
+        )
+        return false
+      }
+    },
+
+    getStats: () => {
+      const depth = path ? path.split('/').filter(Boolean).length : 0
+
+      return {
+        globalId: channelId,
+        localId,
+        path,
+        isBranch: !!isBranch,
+        depth,
+        created: isCreated,
+        subscribed: isSubscribed
+      }
     }
   }
 
-  return channel
+  return hook
 }
+
+export default useCyre
