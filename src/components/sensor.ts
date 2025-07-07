@@ -53,8 +53,7 @@ export type MetricEvent =
   | 'system'
 
 // Environment detection
-const isDev =
-  typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'
+
 const isBrowser = typeof window !== 'undefined'
 
 // Smart message formatting - handles arrays of arguments like console.log
@@ -113,7 +112,7 @@ const logToConsole = (level: LogLevel, message: string, context?: any) => {
       ERROR: 'color: #dc2626; font-weight: bold',
       CRITICAL: 'color: #dc2626; font-weight: bold',
       SUCCESS: 'color: #059669; font-weight: bold',
-      SYS: 'color: white; background: #7c3aed; padding: 2px 4px; border-radius: 3px; font-weight: bold'
+      SYS: 'color: white; background: #7c3aed; padding:  4px; border-radius: 4px; font-weight: bold'
     }
 
     const style = styles[levelName as keyof typeof styles] || 'color: gray'
@@ -164,27 +163,6 @@ const logToConsole = (level: LogLevel, message: string, context?: any) => {
       const contextOutput = `${color}  Context:${reset}`
       console.log(contextOutput, context)
     }
-  }
-}
-
-// Browser-specific debugging utilities
-const getBrowserDebugInfo = (): Record<string, any> => {
-  if (!isBrowser) return {}
-
-  return {
-    userAgent: navigator.userAgent,
-    url: window.location.href,
-    timestamp: Date.now(),
-    viewport: {
-      width: window.innerWidth,
-      height: window.innerHeight
-    },
-    connection: (navigator as any).connection
-      ? {
-          effectiveType: (navigator as any).connection.effectiveType,
-          downlink: (navigator as any).connection.downlink
-        }
-      : undefined
   }
 }
 

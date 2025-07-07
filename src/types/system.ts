@@ -50,6 +50,24 @@ export type BreathingMetrics = {
   pattern: keyof typeof import('../config/cyre-config').BREATHING.PATTERNS
 }
 
+// Pre-computed system flags for hot path optimization
+export interface SystemFlags {
+  // Call method flags
+  canCall: boolean
+  canCallMessages: string[]
+
+  // Action/On method flags
+  canAction: boolean
+  canActionMessages: string[]
+
+  // System-wide flags
+  isOperational: boolean
+  isOperationalMessages: string[]
+
+  // Last computed timestamp
+  lastComputed: number
+}
+
 // Main system state interface with clear authority separation
 export interface QuantumState {
   system: SystemMetrics
@@ -75,6 +93,9 @@ export interface QuantumState {
   _isLocked: boolean // Changed from _Locked to _isLocked for consistency
   _shutdown: boolean
   _init: boolean
+
+  // Pre-computed flags for hot path optimization
+  flags: SystemFlags
 }
 
 export interface ActionMetrics {

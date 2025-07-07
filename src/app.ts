@@ -107,6 +107,7 @@ export interface CyreInstance {
   pause: (id?: string) => void
   resume: (id?: string) => void
   lock: () => {ok: boolean; message: string; payload: null}
+  unlock: () => {ok: boolean; message: string; payload: null}
   shutdown: () => void
   status: () => boolean
 
@@ -189,10 +190,12 @@ const initializeBreathing = (): void => {
 const action = (
   attribute: IO | IO[]
 ): {ok: boolean; message: string; payload?: any} => {
-  if (metricsState.isLocked()) {
-    sensor.error('system', 'error', 'Channel-registration')
-    log.error(MSG.SYSTEM_LOCKED_CHANNELS)
-    return {ok: false, message: MSG.SYSTEM_LOCKED_CHANNELS}
+  // HOT PATH OPTIMIZATION: Single flag check instead of multiple conditions
+  const {allowed, messages} = metricsState.canRegister()
+  if (!allowed) {
+    sensor.error(messages, 'system-error', 'Channel-registration')
+
+    return {ok: false, message: messages.join(', ')}
   }
 
   try {
@@ -262,21 +265,24 @@ export const call = async (
     }
     // log.debug(action)
 
-    // PRE-PIPELINE PROTECTIONS (Block, Throttle, Debounce, Recuperation)
-
-    //STEP 3: Recuperation check
-    const breathing = metricsState.get().breathing
-    if (breathing.isRecuperating && action.priority?.level !== 'critical') {
-      sensor.error(
-        'app/call/recuperation',
-        'System is recuperating - only critical actions allowed',
-        action.id,
-        'blocked'
-      )
-      return {
-        ok: false,
-        payload: undefined,
-        message: 'System is recuperating - only critical actions allowed'
+    // HOT PATH OPTIMIZATION: Single flag check for system conditions
+    const {allowed, messages} = metricsState.canCall()
+    if (!allowed) {
+      // Special case: Allow critical actions even during recuperation
+      if (action.priority?.level === 'critical') {
+        // Continue with critical action
+      } else {
+        sensor.error(
+          'app/call/system',
+          messages.join(', '),
+          action.id,
+          'blocked'
+        )
+        return {
+          ok: false,
+          payload: undefined,
+          message: messages.join(', ')
+        }
       }
     }
     const req = payload ?? payloadState.get(id)
@@ -556,6 +562,12 @@ export const cyre: CyreInstance = Object.freeze({
     metricsState.lock()
 
     return {ok: true, message: 'System locked', payload: null}
+  },
+
+  unlock: (): {ok: boolean; message: string; payload: null} => {
+    metricsState.unlock()
+
+    return {ok: true, message: 'System unlocked', payload: null}
   },
 
   shutdown,

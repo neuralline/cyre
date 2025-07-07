@@ -124,7 +124,10 @@ beforeEach(() => {
   vi.clearAllMocks()
 
   // Reset any global state that might leak between tests
-  if (globalThis.performance?.now) {
+  if (
+    globalThis.performance?.now &&
+    vi.isMockFunction(globalThis.performance.now)
+  ) {
     vi.mocked(globalThis.performance.now).mockReturnValue(Date.now())
   }
 })

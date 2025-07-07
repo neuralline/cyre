@@ -212,7 +212,10 @@ export interface Branch {
 
   // Core methods (scoped to branch only)
   action: (config: IO) => {ok: boolean; message: string}
-  on: (id: string, handler: any) => SubscriptionResponse
+  on: (
+    id: string,
+    handler: any
+  ) => SubscriptionResponse | {ok: boolean; message: string}
   call: (target: string, payload?: any) => Promise<CyreResponse>
   get: (id: string) => IO | undefined
   forget: (id: string) => boolean

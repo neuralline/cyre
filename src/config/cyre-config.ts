@@ -291,5 +291,14 @@ export const defaultMetrics: QuantumState = {
   activeFormations: 0,
   _isLocked: false,
   _init: false,
-  _shutdown: false
+  _shutdown: false,
+  flags: {
+    canCall: false,
+    canCallMessages: ['System not initialized'],
+    canAction: false,
+    canActionMessages: ['System not initialized'],
+    isOperational: false,
+    isOperationalMessages: ['System not initialized'],
+    lastComputed: Date.now()
+  }
 }

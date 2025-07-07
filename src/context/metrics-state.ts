@@ -8,7 +8,8 @@ import type {
   QuantumState as MetricsState,
   PerformanceMetrics,
   SystemMetrics,
-  SystemStress
+  SystemStress,
+  SystemFlags
 } from '../types/system'
 import type {Priority, StateKey} from '../types/core'
 import {memoize} from '../libs/utils'
@@ -24,6 +25,7 @@ import {createStore} from './create-store'
       - Breathing system has authority over system flags
       - Clean separation: hibernating (TimeKeeper) vs recuperating (system)
       - Provides .getMetrics() API for cyre.getMetrics()
+      - Pre-computed flags for hot path optimization
 
 */
 
@@ -93,6 +95,63 @@ const calculateBreathingRate = (stress: number): number => {
   )
 }
 
+/**
+ * Compute system flags based on current state
+ * This is the core optimization - pre-compute all conditions
+ */
+const computeSystemFlags = (state: MetricsState): SystemFlags => {
+  const messages: string[] = []
+  const canCallMessages: string[] = []
+  const canActionMessages: string[] = []
+  const isOperationalMessages: string[] = []
+
+  // PRECEDENCE ORDER: shutdown > locked > not initialized > recuperating > hibernating
+
+  // Check if system is shutdown (highest precedence)
+  if (state._shutdown) {
+    canCallMessages.push('System is shutdown')
+    canActionMessages.push('System is shutdown')
+    isOperationalMessages.push('System is shutdown')
+  }
+  // Check if system is locked (only if not shutdown)
+  else if (state._isLocked) {
+    canActionMessages.push('System is locked')
+    isOperationalMessages.push('System is locked')
+  }
+  // Check initialization (only if not shutdown and not locked)
+  else if (!state._init) {
+    canCallMessages.push('System not initialized')
+    canActionMessages.push('System not initialized')
+    isOperationalMessages.push('System not initialized')
+  }
+
+  // Check recuperation state (for call method) - independent of other states
+  if (state.breathing.isRecuperating) {
+    canCallMessages.push('System is in recuperation mode')
+    isOperationalMessages.push('System is in recuperation mode')
+  }
+
+  // Check hibernation state - independent of other states
+  if (state.hibernating) {
+    isOperationalMessages.push('System is hibernating')
+  }
+
+  // Determine flags
+  const canCall = canCallMessages.length === 0
+  const canAction = canActionMessages.length === 0
+  const isOperational = isOperationalMessages.length === 0
+
+  return {
+    canCall,
+    canCallMessages,
+    canAction,
+    canActionMessages,
+    isOperational,
+    isOperationalMessages,
+    lastComputed: Date.now()
+  }
+}
+
 // Result type for state operations
 export type Result<T, E = Error> =
   | {kind: 'ok'; value: T}
@@ -133,7 +192,7 @@ export const metricsState = {
   },
 
   /**
-   * Update metrics state - central state updater
+   * Update metrics state - central state updater with flag recomputation
    */
   update: (update: Partial<MetricsState>): MetricsState => {
     initializeQuantumStore()
@@ -150,8 +209,38 @@ export const metricsState = {
       next.stress = getStressLevel(next.system, next.performance)
     }
 
+    // Recompute flags whenever state changes
+    next.flags = computeSystemFlags(next)
+
     metricsStore.set('quantum', next)
     return next
+  },
+
+  /**
+   * Pre-computed flag accessors for hot path optimization
+   */
+  canCall: (): {allowed: boolean; messages: string[]} => {
+    const state = metricsStore.get('quantum') || defaultMetrics
+    return {
+      allowed: state.flags.canCall,
+      messages: state.flags.canCallMessages
+    }
+  },
+
+  canRegister: (): {allowed: boolean; messages: string[]} => {
+    const state = metricsStore.get('quantum') || defaultMetrics
+    return {
+      allowed: state.flags.canAction,
+      messages: state.flags.canActionMessages
+    }
+  },
+
+  isOperational: (): {operational: boolean; messages: string[]} => {
+    const state = metricsStore.get('quantum') || defaultMetrics
+    return {
+      operational: state.flags.isOperational,
+      messages: state.flags.isOperationalMessages
+    }
   },
 
   /**
@@ -323,7 +412,8 @@ export const metricsState = {
    */
   reset: (): void => {
     try {
-      metricsStore.set('quantum', {
+      // Use update to ensure flags are recomputed
+      metricsState.update({
         ...defaultMetrics,
         lastUpdate: Date.now()
       })
@@ -449,6 +539,12 @@ export const metricsState = {
           subscribers: subscribers.getAll().length,
           timeline: timeline.getAll().length,
           activeFormations: state.activeFormations
+        },
+        flags: {
+          canCall: state.flags.canCall,
+          canAction: state.flags.canAction,
+          isOperational: state.flags.isOperational,
+          lastComputed: state.flags.lastComputed
         },
         available: true
       }

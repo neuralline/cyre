@@ -1,6 +1,7 @@
 // src/components/cyre-on.ts
 // Enhanced subscription system with pre-analysis and execution operator assignment
 
+import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
 import {subscribers, io} from '../context/state'
 import type {
@@ -202,12 +203,12 @@ const addSingleSubscriber = (
     // metricsState.addSubscriber(subscriber.id)
 
     // Log execution operator assignment for debugging
-    sensor.info(
-      `Subscriber registered: ${subscriber.id} | ` +
-        `Handlers: ${newHandlerCount} | ` +
-        `Operator: ${executionConfig._executionOperator} | ` +
-        `Strategy: ${executionConfig._errorStrategy}`
-    )
+    // sensor.info(
+    //   `Subscriber registered: ${subscriber.id} | ` +
+    //     `Handlers: ${newHandlerCount} | ` +
+    //     `Operator: ${executionConfig._executionOperator} | ` +
+    //     `Strategy: ${executionConfig._errorStrategy}`
+    // )
 
     return {
       ok: true,
@@ -356,6 +357,17 @@ export const subscribe = (
   idOrSubscriptions: string | Array<{id: string; handler: EventHandler}>,
   handler?: EventHandler
 ): SubscriptionResponse => {
+  // HOT PATH OPTIMIZATION: Check system state before processing
+
+  const {allowed, messages} = metricsState.canRegister()
+  if (!allowed) {
+    sensor.error(messages.join(', '))
+    return {
+      ok: false,
+      message: messages.join(', ')
+    }
+  }
+
   // Handle array of subscriptions
   if (Array.isArray(idOrSubscriptions)) {
     return addMultipleSubscribers(idOrSubscriptions)
@@ -368,7 +380,8 @@ export const subscribe = (
 
   return {
     ok: false,
-    message: 'Invalid subscription parameters'
+    message: 'Invalid subscription parameters',
+    metadata: {}
   }
 }
 
