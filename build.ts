@@ -20,14 +20,14 @@ import {statSync} from 'fs'
 const distDir = './dist'
 
 const buildESM = async () => {
-  console.log('🔨 Building ESM...')
+  console.log('🔨 Building ESM (browser)...')
 
   const result = await build({
     entrypoints: ['./src/index.ts'], // ✅ Single entry point only
     outdir: distDir,
     format: 'esm',
-    target: 'es2022',
-    minify: false,
+    target: 'browser', // Target browser for ESM
+    minify: true,
     splitting: false, // ✅ No splitting to prevent duplicate exports
     sourcemap: 'external',
     naming: '[name].js',
@@ -35,32 +35,33 @@ const buildESM = async () => {
   })
 
   if (!result.success) {
-    console.error('❌ ESM build failed')
+    console.error('❌ ESM (browser) build failed')
     process.exit(1)
   }
 
-  console.log('✅ ESM build complete')
+  console.log('✅ ESM (browser) build complete')
 }
 
 const buildCJS = async () => {
-  console.log('🔨 Building CJS...')
+  console.log('🔨 Building CJS (node)...')
 
   const result = await build({
     entrypoints: ['./src/index.ts'], // ✅ Single entry point only
-    outfile: './dist/index.cjs',
+    outdir: distDir,
     format: 'cjs',
-    target: 'es2022',
+    target: 'node', // Target node for CJS
     minify: false,
     sourcemap: 'external',
+    naming: 'index.cjs',
     external: [] // No external dependencies
   })
 
   if (!result.success) {
-    console.error('❌ CJS build failed')
+    console.error('❌ CJS (node) build failed')
     process.exit(1)
   }
 
-  console.log('✅ CJS build complete')
+  console.log('✅ CJS (node) build complete')
 }
 
 const buildTypes = async () => {
@@ -80,6 +81,28 @@ const buildTypes = async () => {
   }
 
   console.log('✅ Types generated')
+}
+
+const buildMinifiedESM = async () => {
+  console.log('🔨 Building minified ESM (browser)...')
+
+  const result = await build({
+    entrypoints: ['./src/index.ts'],
+    outdir: distDir,
+    format: 'esm',
+    target: 'browser',
+    minify: true,
+    sourcemap: 'external',
+    naming: 'index.min.js',
+    external: []
+  })
+
+  if (!result.success) {
+    console.error('❌ Minified ESM (browser) build failed')
+    process.exit(1)
+  }
+
+  console.log('✅ Minified ESM (browser) build complete')
 }
 
 const analyzeBundles = async () => {
@@ -113,7 +136,7 @@ const main = async () => {
     await Bun.spawn(['rm', '-rf', 'dist']).exited
 
     // Build in parallel where possible
-    await Promise.all([buildTypes(), buildESM()])
+    await Promise.all([buildTypes(), buildESM(), buildMinifiedESM()])
 
     // CJS build after ESM (potential dependency)
     await buildCJS()

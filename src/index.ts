@@ -111,7 +111,7 @@ import {useGroup} from './hooks/use-group'
 import {useCyre} from './hooks/use-cyre'
 import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
-import {log} from './components/cyre-log'
+import {sensor} from './components/sensor'
 
 // Main exports with branch system
 export {
@@ -121,7 +121,8 @@ export {
   useBranch,
   useCollective,
   //orchestration, //advanced task setup// not sure to expose this
-  log //utility logger function
+  sensor, //utility logger function
+  sensor as log //utility logger function
   // metrics //Cyre stats fro external live stat monitors
 }
 

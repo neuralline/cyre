@@ -3,7 +3,6 @@
 
 import type {Timer, TimerDuration, TimerRepeat} from '../types/timer'
 import {TIMING} from '../config/cyre-config'
-import {log} from './cyre-log'
 import {sensor} from '../components/sensor'
 import {timeline} from '../context/state'
 import {metricsState} from '../context/metrics-state'
@@ -566,7 +565,7 @@ export const TimeKeeper = {
     const systemState = getMetricsState().get()
 
     if (systemState.hibernating) {
-      log.warn('Cannot resume timers while hibernating')
+      sensor.warn('Cannot resume timers while hibernating')
       return
     }
 
@@ -609,7 +608,7 @@ export const TimeKeeper = {
   },
 
   hibernate: (): void => {
-    log.debug('TimeKeeper entering hibernation')
+    sensor.debug('TimeKeeper entering hibernation')
 
     // Stop quartz first
     QuartzEngine.stop()

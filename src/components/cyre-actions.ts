@@ -4,7 +4,6 @@
 import {sensor} from '../components/sensor'
 import type {IO} from '../types/core'
 import payloadState from '../context/payload-state'
-import {log} from './cyre-log'
 import {io, stores} from '../context/state'
 import {isValidPath} from '../libs/utils'
 import {compileAction} from '../schema/compile-pipeline'
@@ -37,7 +36,6 @@ export const CyreActions = (action: IO): RegistrationResult => {
   try {
     // 1. VALIDATE ID AND COMPILE ACTION
     if (!action.id) {
-      log.error('Channel creation failed: Channel ID is required')
       sensor.error('unknown', 'Channel ID is required', 'cyre-action')
       return {
         ok: false,

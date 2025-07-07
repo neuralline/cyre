@@ -1,15 +1,9 @@
 // src/components/cyre-logger.ts
 
+import {LogLevel} from './sensor'
+
 // Define log levels and their corresponding colors
-export enum LogLevel {
-  DEBUG = 'DEBUG',
-  INFO = 'INFO',
-  WARN = 'WARN',
-  ERROR = 'ERROR',
-  SUCCESS = 'SUCCESS',
-  CRITICAL = 'CRITICAL',
-  SYS = 'SYS' // System LOG
-}
+
 /* 
 
       C.Y.R.E - L.O.G

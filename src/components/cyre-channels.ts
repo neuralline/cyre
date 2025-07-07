@@ -3,9 +3,9 @@
 
 import {io} from '../context/state'
 import {IO} from '../types/core'
-import {log} from './cyre-log'
 import {MSG} from '../config/cyre-config'
 import payloadState from '../context/payload-state'
+import {sensor} from './sensor'
 
 /*
 
@@ -82,7 +82,7 @@ export const CyreChannel = (action: IO): ChannelResult => {
     // 1. Validate ID requirements
     const idValidation = validateChannelId(action.id)
     if (!idValidation.valid) {
-      log.error(idValidation.error!)
+      sensor.error(idValidation.error!)
       return {
         ok: false,
         message: idValidation.error!
@@ -111,7 +111,7 @@ export const CyreChannel = (action: IO): ChannelResult => {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Channel processing failed: ${errorMessage}`)
+    sensor.error(`Channel processing failed: ${errorMessage}`)
     return {
       ok: false,
       message: MSG.CHANNEL_CREATION_FAILED

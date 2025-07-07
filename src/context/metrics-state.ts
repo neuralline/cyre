@@ -348,8 +348,7 @@ export const metricsState = {
     try {
       initializeQuantumStore()
       metricsState.update({_init: true})
-      sensor.success('Cyre Metrics State online')
-      sensor.success(
+      sensor.debug(
         'Cyre Metrics State online',
         'metrics-state',
         'system',
@@ -417,13 +416,6 @@ export const metricsState = {
         ...defaultMetrics,
         lastUpdate: Date.now()
       })
-
-      sensor.success(
-        'Metrics state reset completed',
-        'metrics-state',
-        'system',
-        'success'
-      )
     } catch (error) {
       sensor.critical(`Metrics reset failed: ${error}`)
       throw error

@@ -2,7 +2,7 @@
 
 > Neural Line - Reactive Event Manager  
 > **C.Y.R.E** ~/`SAYER`/  
-> Version 4.3.0
+> Version 4.6.0
 
 **The fastest, most reliable reactive state/event management library with industry-leading performance and zero-error. A unique channel-based architecture that runs both in Node and Browser. It's designed for 24/7 operation with advanced protection mechanisms like "Breath system". Task schedule with TimeKeeper etc... and its 60k. bEvolved from the original Quantum-Inception clock project (2016).**
 
@@ -268,31 +268,6 @@ cyre.on('step1', payload => {
 await cyre.call('step1', {start: true})
 ```
 
-## Performance Benchmarks
-
-### Industry-Standard Benchmark Results
-
-**Test Environment**: Node.js, following React/Redux/RxJS benchmark methodologies
-
-| Benchmark                 | Operations | Throughput         | Avg Latency | P95 Latency | Errors |
-| ------------------------- | ---------- | ------------------ | ----------- | ----------- | ------ |
-| **Basic Action/Call**     | 10,000     | **18,602 ops/sec** | **0.054ms** | 0.076ms     | 0      |
-| **Multi-Subscriber**      | 5,000      | 2,134 ops/sec      | 0.468ms     | 0.529ms     | 0      |
-| **Throttle Protection**   | 2,000      | 2,671 ops/sec      | 0.144ms     | 0.216ms     | 0      |
-| **Memory Stress**         | 5,000 ops  | 236 cycles/sec     | 4.118ms     | 5.680ms     | 0      |
-| **Concurrent Load**       | 5,000      | **18,248 ops/sec** | 0.547ms     | 0.808ms     | 0      |
-| **Real-World Simulation** | 1,000      | 4,136 ops/sec      | 0.124ms     | 0.178ms     | 0      |
-
-### Advanced Features Performance
-
-| Feature               | Operations                | Success Rate | Performance Metric   |
-| --------------------- | ------------------------- | ------------ | -------------------- |
-| **Debounce**          | 200 calls → 20 executions | **100%**     | 90% call collapsing  |
-| **Repeat Execution**  | 50 executions             | **100%**     | 0.2ms timing error   |
-| **IntraLink Chains**  | 200 chains (1,000 links)  | **100%**     | 2,770 links/sec      |
-| **Delay Scheduling**  | 100 scheduled actions     | **100%**     | <1ms timing accuracy |
-| **Combined Features** | 10 complex scenarios      | **100%**     | 229ms avg scenario   |
-
 ## Multi-Handler Channels: 1-to-Many `.on` Handlers
 
 Cyre supports multiple `.on` handlers per channel, enabling powerful event-driven workflows. Each channel can have many subscribers, and you can control how handlers are dispatched:
@@ -321,8 +296,8 @@ cyre.action({
 
 ### Handler Techniques: Factory vs Outpost
 
-- **Factory Handlers**: Stateless, pure functions that process payloads and return results. Ideal for data transformation, validation, or chaining.
-- **Outpost Handlers**: Side-effectful, stateful, or integration handlers (e.g., logging, network calls, UI updates). Use for effects, monitoring, or external communication.
+- **Factory Handlers**: Main business logic handlers, ideally kept outside your application codebase to avoid reloads and app errors. Organize all factory handlers in a single location/directory, and prefer a 1-to-1 relationship between channel and handler. These are responsible for core processing, validation, and transformation of data.
+- **Outpost Handlers**: Instead of polling or awaiting, outpost `.on` handlers reactively receive payloads/signals and interpret them as local environment changes (e.g., updating UI, state, or triggering side effects). Outpost handlers are located inside your app, support a 1-to-many relationship, and are best suited for delivery, UI updates, and actions—not for core business logic.
 
 ```typescript
 // Factory handler (pure)
@@ -408,15 +383,8 @@ CYRE includes an adaptive "breathing" system that automatically adjusts performa
 ### Performance Metrics
 
 ```typescript
-// Get detailed performance insights
-const metrics = cyre.getMetricsReport()
-console.log(metrics.global.totalCalls) // Total operations
-console.log(metrics.global.callRate) // Current ops/sec
-console.log(metrics.breathing.stress) // System stress level
-
 // Channel-specific metrics
-const actionMetrics = cyre.getMetrics('user-login')
-console.log(actionMetrics.avgExecutionTime) // Performance tracking
+const actionMetrics = cyre.getMetrics()
 ```
 
 ### Debug Tools

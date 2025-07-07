@@ -8,7 +8,6 @@ import type {
   RequestResponsePair
 } from '../types/core'
 import {createStore} from './create-store'
-import {log} from '../components/cyre-log'
 import {sensor} from '../components/sensor'
 import {PAYLOAD_CONFIG} from '../config/cyre-config'
 
@@ -274,7 +273,7 @@ export const payloadState = {
     } catch (error) {
       // Defer error logging to avoid blocking call path
       process.nextTick(() => {
-        log.error(`Failed to set payload for ${channelId}: ${error}`)
+        sensor.error(`Failed to set payload for ${channelId}: ${error}`)
         sensor.error(channelId, String(error), 'payload-set')
       })
     }
@@ -306,7 +305,7 @@ export const payloadState = {
 
     const existing = payloadStore.get(channelId)
     if (!existing) {
-      log.warn(`Cannot set response for non-existent channel: ${channelId}`)
+      sensor.warn(`Cannot set response for non-existent channel: ${channelId}`)
       return
     }
 
@@ -362,7 +361,7 @@ export const payloadState = {
       // })
     } catch (error) {
       process.nextTick(() => {
-        log.error(`Failed to set response for ${channelId}: ${error}`)
+        sensor.error(`Failed to set response for ${channelId}: ${error}`)
         sensor.error(channelId, String(error), 'payload-response-set')
       })
     }
@@ -438,7 +437,7 @@ export const payloadState = {
 
       return transformed
     } catch (error) {
-      log.error(`Payload transform failed for ${channelId}: ${error}`)
+      sensor.error(`Payload transform failed for ${channelId}: ${error}`)
       sensor.error(channelId, String(error), 'payload-transform')
       return undefined
     }
@@ -467,7 +466,7 @@ export const payloadState = {
 
       return merged
     } catch (error) {
-      log.error(`Payload merge failed for ${channelId}: ${error}`)
+      sensor.error(`Payload merge failed for ${channelId}: ${error}`)
       return undefined
     }
   },
@@ -485,7 +484,7 @@ export const payloadState = {
 
       return true
     } catch (error) {
-      log.error(`Failed to freeze payload for ${channelId}: ${error}`)
+      sensor.error(`Failed to freeze payload for ${channelId}: ${error}`)
       return false
     }
   },
@@ -503,7 +502,7 @@ export const payloadState = {
 
       return true
     } catch (error) {
-      log.error(`Failed to unfreeze payload for ${channelId}: ${error}`)
+      sensor.error(`Failed to unfreeze payload for ${channelId}: ${error}`)
       return false
     }
   },
