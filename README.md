@@ -171,62 +171,101 @@ function UserProfile() {
 
 ### Channel Composition
 
-```typescript
-import {cyreCompose} from 'cyre'
-
-// Compose multiple channels into workflows
-const dataWorkflow = cyreCompose(
-  [validationChannel, processingChannel, persistenceChannel],
-  {
-    continueOnError: false, // Fail fast for data integrity
-    collectDetailedMetrics: true
-  }
-)
-
-const result = await dataWorkflow.call(inputData)
-// All channels execute in sequence with detailed metrics
-```
-
 ## Reactive Streams
-
-```typescript
-import {createStream} from 'cyre'
-
-// Create reactive streams with CYRE infrastructure
-const dataStream = createStream()
-  .map(data => transform(data))
-  .filter(data => data.isValid)
-  .debounce(300) // Uses CYRE's high-performance debounce
-  .distinctUntilChanged()
-
-dataStream.subscribe(data => {
-  console.log('Processed data:', data)
-})
-
-// Emit data
-dataStream.next({value: 42, isValid: true})
-```
 
 ## State Machines
 
+## Monitoring & Debugging
+
+---
+
+## Advanced Usage Examples
+
+### Buffer Usage in cyre.action
+
 ```typescript
-import {machine} from 'cyre'
+cyre.action({
+  id: 'batch-upload',
+  buffer: {window: 1000, strategy: 'append', maxSize: 10}
+})
 
-// XState-compatible state machine patterns
-const loginMachine = machine('login')
-  .initial('idle')
-  .state('idle')
-  .on('LOGIN_START', 'authenticating')
-  .state('authenticating')
-  .on('LOGIN_SUCCESS', 'authenticated')
-  .on('LOGIN_ERROR', 'error')
-  .state('authenticated')
-  .on('LOGOUT', 'idle')
-  .build()
+cyre.on('batch-upload', batch => {
+  // batch is an array of payloads collected within 1s or up to 10 items
+  uploadBatchToServer(batch)
+})
 
-const authService = cyre.stateMachine.create(loginMachine)
-authService.start()
-authService.send('LOGIN_START')
+// Calls within 1s are batched
+cyre.call('batch-upload', {file: 'a.txt'})
+cyre.call('batch-upload', {file: 'b.txt'})
+```
+
+### Advanced Dispatching
+
+```typescript
+cyre.action({
+  id: 'multi-handler',
+  dispatch: 'race' // Only the fastest handler result is used
+})
+
+cyre.on('multi-handler', async payload => {
+  await delay(100)
+  return 'slow handler'
+})
+cyre.on('multi-handler', async payload => {
+  await delay(10)
+  return 'fast handler'
+})
+
+const result = await cyre.call('multi-handler', {data: 1})
+// result.payload === 'fast handler'
+
+// Waterfall example
+cyre.action({
+  id: 'waterfall-demo',
+  dispatch: 'waterfall'
+})
+cyre.on('waterfall-demo', payload => payload + 1)
+cyre.on('waterfall-demo', payload => payload * 2)
+const res = await cyre.call('waterfall-demo', 3) // (3+1)*2 = 8
+```
+
+### Handler Removal & Statistics
+
+```typescript
+const handler = payload => doSomething(payload)
+cyre.on('removable', handler)
+// ...
+cyre.removeHandler('removable', handler) // Removes the handler
+const stats = cyre.getHandlerStats('removable')
+console.log(stats.handlerCount) // 0 if removed
+```
+
+### Direct Use of cyre.payloadState
+
+```typescript
+cyre.action({id: 'user-update', payload: {name: 'Alice'}})
+
+// Get current payload
+const current = cyre.payloadState.get('user-update')
+// Set new payload
+cyre.payloadState.set('user-update', {name: 'Bob'})
+// Check if changed
+const changed = cyre.payloadState.hasChanged('user-update', {name: 'Bob'})
+```
+
+### (Optional) Orchestration Example
+
+```typescript
+cyre.action({id: 'step1'})
+cyre.action({id: 'step2'})
+
+cyre.on('step1', payload => {
+  // ...
+  return {id: 'step2', payload: {...payload, step1: true}}
+})
+
+// Orchestrate a workflow
+await cyre.call('step1', {start: true})
 ```
 
 ## Performance Benchmarks
@@ -246,22 +285,79 @@ authService.send('LOGIN_START')
 
 ### Advanced Features Performance
 
-| Feature               | Operations                | Success Rate | Performance Metric   | Industry Comparison                 |
-| --------------------- | ------------------------- | ------------ | -------------------- | ----------------------------------- |
-| **Debounce**          | 200 calls → 20 executions | **100%**     | 90% call collapsing  | 🏆 15% more efficient than Lodash   |
-| **Repeat Execution**  | 50 executions             | **100%**     | 0.2ms timing error   | 🏆 25x more precise than setTimeout |
-| **IntraLink Chains**  | 200 chains (1,000 links)  | **100%**     | 2,770 links/sec      | 🏆 3x faster than Redux middleware  |
-| **Delay Scheduling**  | 100 scheduled actions     | **100%**     | <1ms timing accuracy | 🏆 Hardware-level precision         |
-| **Combined Features** | 10 complex scenarios      | **100%**     | 229ms avg scenario   | 🏆 Unique capability                |
+| Feature               | Operations                | Success Rate | Performance Metric   |
+| --------------------- | ------------------------- | ------------ | -------------------- |
+| **Debounce**          | 200 calls → 20 executions | **100%**     | 90% call collapsing  |
+| **Repeat Execution**  | 50 executions             | **100%**     | 0.2ms timing error   |
+| **IntraLink Chains**  | 200 chains (1,000 links)  | **100%**     | 2,770 links/sec      |
+| **Delay Scheduling**  | 100 scheduled actions     | **100%**     | <1ms timing accuracy |
+| **Combined Features** | 10 complex scenarios      | **100%**     | 229ms avg scenario   |
 
-### Industry Comparison
+## Multi-Handler Channels: 1-to-Many `.on` Handlers
 
-| Framework | Basic Ops/Sec | Concurrent Ops/Sec | Memory (5k ops) | Error Rate | Verdict       |
-| --------- | ------------- | ------------------ | --------------- | ---------- | ------------- |
-| **CYRE**  | **18,602**    | **18,248**         | **5.37MB**      | **0.000%** | 🥇 **Leader** |
-| Redux     | ~12,000       | ~10,000            | ~50MB           | ~0.1%      | 🥈            |
-| RxJS      | ~15,000       | ~12,000            | ~30MB           | ~0.1%      | 🥉            |
-| MobX      | ~8,000        | ~6,000             | ~40MB           | ~0.5%      | 4th           |
+Cyre supports multiple `.on` handlers per channel, enabling powerful event-driven workflows. Each channel can have many subscribers, and you can control how handlers are dispatched:
+
+- **Parallel Dispatch**: All handlers are invoked concurrently (default for async handlers).
+- **Sequential Dispatch**: Handlers are invoked in registration order, each waiting for the previous to complete (useful for ordered side effects).
+
+```typescript
+// Register multiple handlers for the same channel
+cyre.on('user-login', payload => {
+  // Handler 1
+  logLogin(payload)
+})
+
+cyre.on('user-login', async payload => {
+  // Handler 2 (async)
+  await sendAnalytics(payload)
+})
+
+// By default, async handlers run in parallel. For sequential execution:
+cyre.action({
+  id: 'user-login',
+  sequential: true // Ensures handlers run one after another
+})
+```
+
+### Handler Techniques: Factory vs Outpost
+
+- **Factory Handlers**: Stateless, pure functions that process payloads and return results. Ideal for data transformation, validation, or chaining.
+- **Outpost Handlers**: Side-effectful, stateful, or integration handlers (e.g., logging, network calls, UI updates). Use for effects, monitoring, or external communication.
+
+```typescript
+// Factory handler (pure)
+cyre.on('data-validate', payload => validateData(payload))
+
+// Outpost handler (side effect)
+cyre.on('data-validate', payload => {
+  reportValidation(payload)
+  // No return needed
+})
+```
+
+## New: Buffer Operator
+
+The `buffer` operator allows you to collect and process events in batches, reducing overhead and enabling batch workflows.
+
+```typescript
+import {createStream} from 'cyre'
+
+const stream = createStream()
+  .buffer(5) // Collects 5 events before emitting as an array
+  .map(batch => processBatch(batch))
+
+stream.subscribe(batchResult => {
+  // Handle processed batch
+})
+
+// Emit events
+stream.next(event1)
+stream.next(event2)
+// ...
+```
+
+- Use `buffer(timeMs)` to emit batches based on time windows.
+- Combine with other operators for advanced stream processing.
 
 ## 🛡️ Built-in Protection Systems
 
@@ -360,48 +456,112 @@ CYRE includes comprehensive test suites following industry standards:
 ### Core Methods
 
 ```typescript
-// Action management
-cyre.action(config: ActionConfig)     // Register action
-cyre.on(id: string, handler: Function) // Subscribe to action
-cyre.call(id: string, payload?: any)  // Trigger action
-cyre.forget(id: string)               // Remove action
+// Channel management
+cyre.action(config: IO | IO[])           // Register one or more channels
+cyre.on(id: string, handler: Function)   // Subscribe handler(s) to a channel
+cyre.call(id: string, payload?: any)     // Trigger a channel/action
+cyre.forget(id: string)                  // Remove a channel and its handlers
+cyre.get(id: string)                     // Get the current channel payload by id. will include {req,res}
 
-// System control
-cyre.init(config?: CyreConfig)  // Initialize system
-cyre.pause(id?: string)               // Pause actions
-cyre.resume(id?: string)              // Resume actions
-cyre.clear()                          // Clear all actions
+// System & State Control
+cyre.init()                              // Initialize the system
+cyre.clear()                             // Clear all channels, handlers, and state
+cyre.reset()                             // Alias for clear, resets all state
+cyre.pause(id?: string)                  // Pause all or specific channels
+cyre.resume(id?: string)                 // Resume all or specific channels
+cyre.lock()               // Lock/unlock the system
+cyre.shutdown()                          // Full system shutdown
 
-// Monitoring
-cyre.getMetrics(id?: string)          // Performance metrics
-cyre.getBreathingState()              // System health
-cyre.exportMetrics(filter?)           // Export detailed metrics
+// Metrics & Monitoring
+cyre.getMetrics(channelId?: string)      // Get system or channel-specific metrics
+cyre.status()                           // Returns if system is hibernating
+
+// Advanced/Experimental
+// cyre.payloadState                       // Direct access to dual payload state system
+// cyre.orchestration                      // Orchestration engine for complex workflows
+// cyre.schedule                           // Scheduling utility for advanced timing
+// cyre.path()                             // Path system for hierarchical channel addressing (stub)
 ```
 
-### Action Configuration
+### React Hooks & Utilities
 
 ```typescript
-interface ActionConfig {
-  id: string // Unique identifier
-  type?: string // Optional grouping
+import {useCyre, useGroup, useBranch, useCollective, log} from 'cyre'
+```
+
+- `useCyre`: React hook for channel integration
+- `useGroup`: React hook for group/channel management
+- `useBranch`: React hook for branch system
+- `useCollective`: React hook for collective channel patterns
+- `log`: Utility logger
+
+---
+
+### Channel/Action Configuration (IO options)
+
+```typescript
+interface IO {
+  id: string // Channel identifier (required)
   payload?: any // Initial/default payload
+  path?: string // Hierarchical path for organization
+  group?: string
+  tags?: string[]
+  description?: string
+  version?: string
 
-  // Timing
-  interval?: number // Repeat interval (ms)
-  delay?: number // Initial delay (ms)
-  repeat?: number | boolean // Execution count or infinite
+  // Protections
+  required?: boolean
+  throttle?: number
+  debounce?: number
+  maxWait?: number
+  detectChanges?: boolean
+  block?: boolean
+  buffer?: { window: number, strategy?: 'overwrite' | 'append' | 'ignore', maxSize?: number }
 
-  // Protection
-  throttle?: number // Rate limiting (ms)
-  debounce?: number // Call collapsing (ms)
-  detectChanges?: boolean // Skip unchanged payloads
+  // Scheduling
+  interval?: number
+  repeat?: number | boolean
+  delay?: number
 
-  // System
-  priority?: PriorityConfig // Execution priority
-  middleware?: string[] // Middleware chain
-  log?: boolean // Enable logging
+  // Execution
+  dispatch?: 'single' | 'parallel' | 'sequential' | 'race' | 'waterfall'
+  errorStrategy?: 'fail-fast' | 'continue' | 'retry'
+  collectResults?: 'first' | 'last' | 'all' | boolean
+  dispatchTimeout?: number
+
+  // Pipeline
+  schema?: Schema<any>
+  condition?: (payload: any) => boolean
+  selector?: (payload: any) => any
+  transform?: (payload: any) => any
+
+  // Priority
+  priority?: { level: string, ... }
+
+  // Auth
+  auth?: { mode: 'token' | 'context' | 'group' | 'disabled', ... }
+
+  // Logging
+  log?: boolean
 }
 ```
+
+---
+
+### Multi-Handler & Dispatching
+
+- Multiple `.on` handlers per channel, with smart operator selection:
+  - Default: parallel for async, single for sync
+  - User can force: `dispatch: 'sequential' | 'race' | 'waterfall' | 'parallel'`
+- Handler types: Factory (pure) and Outpost (side-effect)
+- Handler removal and stats supported
+
+### Buffer Operator
+
+- `buffer: { window: number, strategy?: 'overwrite' | 'append' | 'ignore', maxSize?: number }`
+- Batches calls within a time window or by count
+
+---
 
 ## 🔮 Advanced Use Cases
 
@@ -464,8 +624,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - [ ] **Multi-subscriber support** - Single action, multiple handlers
 - [ ] **Queue option** - Call queuing until subscribers ready
 - [ ] **Enhanced React integration** - Custom ID support for useCyre
-- [ ] **Server-side rendering** - SSR-compatible state hydration
-- [ ] **Cron scheduling** - TimeKeeper.cron() for periodic tasks
 - [ ] **State persistence** - Automatic save/restore functionality
 
 ## 📞 Support
