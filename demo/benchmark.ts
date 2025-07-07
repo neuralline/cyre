@@ -488,7 +488,7 @@ async function runRealisticPerformanceTest(): Promise<void> {
   } catch (error) {
     console.error('❌ Test suite failed:', error)
   } finally {
-    cyre.clear()
+    cyre.shutdown()
   }
 }
 

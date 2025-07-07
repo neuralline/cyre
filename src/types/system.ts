@@ -190,7 +190,15 @@ export interface MetricsExportResult {
 
 // Shared metrics types to prevent circular imports
 import type {ActionId, Priority} from './core'
-import {LogLevel} from '../components/cyre-log'
+export enum LogLevel {
+  DEBUG = 'DEBUG',
+  INFO = 'INFO',
+  WARN = 'WARN',
+  ERROR = 'ERROR',
+  SUCCESS = 'SUCCESS',
+  CRITICAL = 'CRITICAL',
+  SYS = 'SYS' // System LOG
+}
 
 // Core metric event types - what happened
 export type MetricEvent =

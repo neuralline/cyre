@@ -9,7 +9,6 @@ import {
   MultiHandlerResult
 } from '../types/core'
 import {MSG} from '../config/cyre-config'
-import {log} from './cyre-log'
 import {sensor} from '../components/sensor'
 import payloadState from '../context/payload-state'
 import {getHandlers} from './cyre-on'
@@ -634,7 +633,7 @@ export const useDispatch = async (
 
       default:
         // Fallback to single execution
-        log.warn(
+        sensor.warn(
           `Unknown execution operator: ${executionOperator}, falling back to single`
         )
         response = await executeSingleHandler(
@@ -656,7 +655,7 @@ export const useDispatch = async (
     const totalTime = performance.now() - startTime
 
     sensor.error(action.id, errorMessage, 'dispatch-exception')
-    log.error(`Dispatch failed: ${errorMessage}`)
+    sensor.error(`Dispatch failed: ${errorMessage}`)
 
     const errorResponse = {
       ok: false,

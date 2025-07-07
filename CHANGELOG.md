@@ -319,13 +319,13 @@ function UserComponent() {
   - build in data/payload validation
   - -
 
-- 4.2.0: Stream
+- 4.2.0: Stream [depreciated]
 
   - cyre/stream functional process chaining for live events
   - experimental
   - -
 
-- 4.3.0: SateMachine
+- 4.3.0: SateMachine [depreciated]
 
   - experimental
   - -
@@ -334,9 +334,17 @@ function UserComponent() {
 
   - experimental
   - use payload as state
-  - -
+  - in progress. cyre now supports {req, res}
 
-- 4.4.0: cyre.group
-  - early stages
+- 4.4.0: useCollective
+
+  - Introduced collective intelligence system for multi-participant coordination, shared state, and distributed decision making in Cyre.
+
+- 4.5.0: .on one to many
+
+  - Added support for one-to-many event subscriptions, allowing a single channel to notify multiple listeners efficiently.
+
+- 4.6.0: buffer
+  - Introduced buffer protection for ultra-fast event batching and windowed execution, reducing redundant calls and improving throughput.
 
 For more detailed examples and API reference, see the [documentation](/docs).

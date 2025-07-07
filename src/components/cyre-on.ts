@@ -11,7 +11,6 @@ import type {
   IO,
   ExecutionOperator
 } from '../types/core'
-import {log} from './cyre-log'
 import {sensor} from './sensor'
 
 /* 
@@ -141,7 +140,7 @@ const addSingleSubscriber = (
   try {
     const validation = validateSubscriber(id, handler)
     if (!validation.ok || !validation.subscriber) {
-      log.error(validation.error || validation.message)
+      sensor.error(validation.error || validation.message)
       return {
         ok: false,
         message: validation.message
@@ -157,8 +156,8 @@ const addSingleSubscriber = (
     // Check for duplicate handlers
     if (existingHandlers.includes(handler)) {
       const duplicateMessage = `DUPLICATE HANDLER DETECTED: Identical handler already registered for channel "${subscriber.id}"`
-      log.warn(duplicateMessage)
-      console.warn(duplicateMessage)
+      sensor.warn(duplicateMessage)
+      sensor.warn(duplicateMessage)
       return {
         ok: false,
         message: 'Duplicate handler registration prevented'
@@ -172,7 +171,7 @@ const addSingleSubscriber = (
     // Get current action configuration
     const currentAction = io.get(subscriber.id)
     if (!currentAction) {
-      log.error(
+      sensor.error(
         `Action not found: ${subscriber.id}. Create action before subscribing.`
       )
       return {
@@ -222,7 +221,7 @@ const addSingleSubscriber = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Subscription failed: ${errorMessage}`)
+    sensor.error(`Subscription failed: ${errorMessage}`)
     sensor.error('subscription-error', errorMessage, 'cyre-on')
 
     return {
@@ -264,7 +263,7 @@ const addMultipleSubscribers = (
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.error(`Batch subscription failed: ${errorMessage}`)
+    sensor.error(`Batch subscription failed: ${errorMessage}`)
 
     return {
       ok: false,

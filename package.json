@@ -1,6 +1,6 @@
 {
   "name": "cyre",
-  "version": "4.4.0",
+  "version": "4.6.0",
   "author": "Cyre Team",
   "repository": {
     "type": "git",
@@ -8,6 +8,7 @@
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
+  "browser": "./dist/index.umd.js",
   "devDependencies": {
     "@jest/globals": "30.0.3",
     "@rollup/plugin-commonjs": "^28.0.6",
@@ -33,7 +34,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "require": "./dist/index.cjs",
+      "browser": "./dist/index.min.js"
     }
   },
   "bugs": {
@@ -61,6 +63,7 @@
   ],
   "license": "MIT",
   "scripts": {
+    "build:all": "bun run clean && bun run build:types && bun run build.ts",
     "build": "bun run clean && bun run build:types && bun run build:esm",
     "build:vite": "vite build",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
@@ -73,7 +76,7 @@
     "test:coverage": "bun test --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "bun run typecheck",
-    "benchmark": "bun run example/industry-standard-tests.ts",
+    "benchmark": "tsx demo/benchmark.ts",
     "dev": "tsx scripts/cyre-server.ts"
   },
   "sideEffects": false,

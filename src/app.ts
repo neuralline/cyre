@@ -8,7 +8,6 @@ import type {
   SubscriptionResponse
 } from './types/core'
 import {MSG} from './config/cyre-config'
-import {log} from './components/cyre-log'
 import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
 import {io, subscribers, timeline} from './context/state'
@@ -101,7 +100,7 @@ export interface CyreInstance {
   updatePayload: (id: string, payload: ActionPayload) => void
 
   // NEW: Dual payload system access
-  payloadState
+  //payloadState
 
   // Control methods with metrics
   pause: (id?: string) => void
@@ -130,11 +129,11 @@ const init = async (): Promise<{
 }> => {
   try {
     if (metricsState.isInit()) {
-      log.sys('System already initialized')
+      sensor.sys('System already initialized')
       return {ok: true, payload: Date.now(), message: MSG.ONLINE}
     }
 
-    log.sys(MSG.QUANTUM_HEADER)
+    sensor.sys(MSG.QUANTUM_HEADER)
 
     // Initialize advanced systems
     //initializeQuerySystem()
@@ -146,14 +145,14 @@ const init = async (): Promise<{
 
     metricsState.init()
 
-    log.success('Cyre initialized with system intelligence')
+    sensor.success('Cyre initialized with system intelligence')
     sensor.success('initialize', 'Cyre initialized with system intelligence')
-    log.debug('System online!')
+    sensor.debug('System online!')
 
     return {ok: true, payload: Date.now(), message: MSG.ONLINE}
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    log.critical(`Cyre failed to initialize : ${errorMessage}`)
+    sensor.critical(`Cyre failed to initialize : ${errorMessage}`)
     sensor.critical('system', errorMessage, 'system-initialization')
     shutdown()
     return {ok: false, payload: null, message: errorMessage}
@@ -246,7 +245,7 @@ export const call = async (
     }
     const action = io.get(id)
     if (!action) {
-      log.error(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
+      sensor.error(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
 
       return {
         ok: false,
@@ -256,7 +255,7 @@ export const call = async (
     }
 
     if (action._isBlocked) {
-      log.critical(`${MSG.CALL_NOT_RESPONDING}: ${id}`)
+      sensor.critical(`${MSG.CALL_NOT_RESPONDING}: ${id}`)
       return {
         ok: false,
         payload: null,
@@ -468,15 +467,15 @@ const forget = (id: string): boolean => {
     sensor.info(`No channel found to remove for id: ${id}`, 'action-removal')
     return false
   } catch (error) {
-    log.error(`Failed to forget ${id}: ${error}`)
+    sensor.error(`Failed to forget ${id}: ${error}`)
     sensor.error(id, String(error), 'action-removal')
     return false
   }
 }
 const shutdown = (): void => {
   try {
-    sensor.debug('system', 'critical', 'system-shutdown')
     sensor.sys('system', 'Initiating system shutdown')
+    sensor.debug('system', 'critical', 'system-shutdown')
 
     reset()
     sensor.debug('System offline!')
@@ -493,7 +492,7 @@ const shutdown = (): void => {
  */
 const reset = (): void => {
   try {
-    sensor.info('system', 'System clear initiated')
+    sensor.debug('System reset initiated')
 
     io.clear()
     subscribers.clear()
@@ -504,10 +503,10 @@ const reset = (): void => {
 
     // Clear all groups
 
-    log.success('System cleared')
+    sensor.success('System cleared')
   } catch (error) {
-    log.error(`Clear operation failed: ${error}`)
-    sensor.error('system', String(error), 'system-clear')
+    sensor.error(`Clear operation failed: ${error}`)
+    sensor.critical('system', String(error), 'system-clear')
   }
 }
 /**
@@ -573,12 +572,9 @@ export const cyre: CyreInstance = Object.freeze({
   shutdown,
 
   status: (): boolean => metricsState.get().hibernating,
-
-  // NEW: Metrics API integration
   /**
    * Get metrics for system or specific channel
    * @param channelId Optional channel ID for channel-specific metrics
-   * @returns Comprehensive metrics data
    */
   getMetrics: (channelId?: string) => {
     return metricsState.getMetrics(channelId)

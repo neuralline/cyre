@@ -4,9 +4,12 @@
  * Enables multi-participant coordination and shared decision making
  */
 
-import {cyre, log} from '../'
+import {cyre, sensor} from '../'
 
-// Collective configuration types
+/**
+ * Configuration options for creating a collective intelligence system.
+ * Controls permissions, state sync, conflict resolution, and advanced features.
+ */
 export interface CollectiveConfig {
   // Basic settings
   id: string
@@ -64,6 +67,9 @@ export interface CollectiveConfig {
   audit?: boolean
 }
 
+/**
+ * Represents a participant in a collective, including role, status, and metadata.
+ */
 export interface Participant {
   id: string
   role: 'member' | 'moderator' | 'admin' | 'owner'
@@ -75,12 +81,18 @@ export interface Participant {
   metadata?: Record<string, any>
 }
 
+/**
+ * Represents a single vote in a collective decision process.
+ */
 export interface Vote {
   vote: any
   weight: number
   timestamp: number
 }
 
+/**
+ * The full state of a collective, including participants, shared data, metrics, and status.
+ */
 export interface CollectiveState {
   id: string
   participants: Map<string, Participant>
@@ -99,6 +111,9 @@ export interface CollectiveState {
   lastActivity: number
 }
 
+/**
+ * The result of a collective operation, including success, data, consensus, and errors.
+ */
 export interface CollectiveResult {
   success: boolean
   data?: any
@@ -117,6 +132,9 @@ export interface CollectiveResult {
   metadata?: Record<string, any>
 }
 
+/**
+ * The main interface for a collective instance, exposing all core operations and state management.
+ */
 export interface CollectiveInstance {
   id: string
   config: CollectiveConfig
@@ -182,7 +200,12 @@ const activeProposals = new Map<string, any>()
 const activeTasks = new Map<string, any>()
 
 /**
- * Create or join a collective intelligence system
+ * Create or join a collective intelligence system.
+ * Returns a functional instance for managing participants, state, consensus, and distributed work.
+ *
+ * @param collectiveId Unique identifier for the collective
+ * @param config Optional configuration overrides
+ * @returns CollectiveInstance
  */
 export const useCollective = (
   collectiveId: string,
@@ -245,9 +268,9 @@ export const useCollective = (
     cyre.on(`collective://${collectiveId}`, async (data: any) => {
       return await handleCollectiveOperation(collectiveId, data)
     })
-    log.sys(collectiveId)
+    sensor.sys(collectiveId)
 
-    log.info(`Collective created: ${collectiveId}`)
+    sensor.info(`Collective created: ${collectiveId}`)
   }
 
   const collective = collectives.get(collectiveId)!
@@ -308,7 +331,7 @@ export const useCollective = (
           })
         }
 
-        log.info(
+        sensor.info(
           `Participant ${participantId} joined collective ${collectiveId}`
         )
 
@@ -353,7 +376,9 @@ export const useCollective = (
           await instance.destroy()
         }
 
-        log.info(`Participant ${participantId} left collective ${collectiveId}`)
+        sensor.info(
+          `Participant ${participantId} left collective ${collectiveId}`
+        )
 
         return {
           success: true,
@@ -398,7 +423,7 @@ export const useCollective = (
               timestamp: Date.now()
             })
           } catch (error) {
-            log.warn(`Failed to broadcast to ${participant.id}: ${error}`)
+            sensor.warn(`Failed to broadcast to ${participant.id}: ${error}`)
             return null
           }
         })
@@ -874,7 +899,7 @@ export const useCollective = (
           .filter(key => activeTasks.get(key)?.collectiveId === collectiveId)
           .forEach(key => activeTasks.delete(key))
 
-        log.info(`Collective destroyed: ${collectiveId}`)
+        sensor.info(`Collective destroyed: ${collectiveId}`)
 
         return {success: true}
       } catch (error) {
@@ -929,7 +954,8 @@ export const useCollective = (
 }
 
 /**
- * Handle collective operations
+ * Handles all incoming operations for a collective channel.
+ * Used internally for cyre.on handlers.
  */
 const handleCollectiveOperation = async (collectiveId: string, data: any) => {
   const collective = collectives.get(collectiveId)
@@ -964,21 +990,25 @@ const handleCollectiveOperation = async (collectiveId: string, data: any) => {
 }
 
 /**
- * Get all active collectives
+ * Get all active collective IDs.
+ * @returns Array of collective IDs
  */
 export const getCollectives = () => {
   return Array.from(collectives.keys())
 }
 
 /**
- * Get collective by ID
+ * Get the state of a collective by ID.
+ * @param id Collective ID
+ * @returns CollectiveState or undefined
  */
 export const getCollective = (id: string) => {
   return collectives.get(id)
 }
 
 /**
- * Destroy all collectives (cleanup utility)
+ * Destroy all collectives and clean up resources.
+ * Used for teardown/testing.
  */
 export const destroyAllCollectives = async () => {
   const destroyPromises = Array.from(collectives.keys()).map(async id => {
@@ -987,5 +1017,5 @@ export const destroyAllCollectives = async () => {
   })
 
   await Promise.all(destroyPromises)
-  log.info('All collectives destroyed')
+  sensor.info('All collectives destroyed')
 }
