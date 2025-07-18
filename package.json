@@ -64,7 +64,7 @@
     "test": "vitest",
     "vitest": "vitest run",
     "test:watch": "bun test --watch",
-    "test:coverage": " vitest --coverage",
+    "test:coverage": "vitest --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "bun run typecheck",
     "benchmark": "tsx demo/benchmark.ts",
