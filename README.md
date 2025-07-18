@@ -171,12 +171,6 @@ function UserProfile() {
 
 ### Channel Composition
 
-## Reactive Streams
-
-## State Machines
-
-## Monitoring & Debugging
-
 ---
 
 ## Advanced Usage Examples
@@ -227,17 +221,6 @@ cyre.action({
 cyre.on('waterfall-demo', payload => payload + 1)
 cyre.on('waterfall-demo', payload => payload * 2)
 const res = await cyre.call('waterfall-demo', 3) // (3+1)*2 = 8
-```
-
-### Handler Removal & Statistics
-
-```typescript
-const handler = payload => doSomething(payload)
-cyre.on('removable', handler)
-// ...
-cyre.removeHandler('removable', handler) // Removes the handler
-const stats = cyre.getHandlerStats('removable')
-console.log(stats.handlerCount) // 0 if removed
 ```
 
 ### Direct Use of cyre.payloadState

@@ -1,5 +1,5 @@
 // src/components/cyre-dispatch.ts
-// Enhanced dispatch with smart execution operators and hot path optimization
+// Updated dispatch with proper payload flow and fixed waterfall execution
 
 import {io} from '../context/state'
 import {
@@ -14,21 +14,145 @@ import payloadState from '../context/payload-state'
 import {getHandlers} from './cyre-on'
 
 /*
-
       C.Y.R.E - D.I.S.P.A.T.C.H 
       
-      Enhanced dispatch with smart execution operators:
-      1. Ultra-fast single handler path (zero overhead)
-      2. Optimized parallel execution for multiple handlers
-      3. Sequential execution with early termination
-      4. Race and waterfall execution strategies
-      5. Pre-compiled execution configuration from registration
-      6. Smart error handling and result collection
-
+      Fixed dispatch with proper payload flow:
+      1. Save request payload just before dispatch (execution certain)
+      2. Execute handlers with correct strategy
+      3. Save response payload after execution complete
+      4. FIXED: Waterfall execution now properly chains data between handlers
 */
 
 /**
- * Ultra-fast single handler execution (most common case)
+ * Main dispatch function with proper payload flow
+ */
+export const useDispatch = async (
+  action: IO,
+  payload?: ActionPayload
+): Promise<CyreResponse> => {
+  const startTime = performance.now()
+  const correlationId = `${action.id}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 9)}`
+
+  try {
+    // Get handlers using array-based storage
+    const handlers = getHandlers(action.id)
+
+    if (handlers.length === 0) {
+      const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
+      sensor.error(error, action.id)
+
+      const errorResponse: CyreResponse = {
+        ok: false,
+        payload: null,
+        message: error
+      }
+
+      // Save error response to payload state
+      // payloadState.setResponse(action.id, errorResponse, correlationId)
+      return errorResponse
+    }
+
+    // STEP 1: Save request payload just before dispatch (execution is certain)
+    const requestPayload = payload !== undefined ? payload : action.payload
+    payloadState.setReq(action.id, requestPayload, 'call')
+
+    // STEP 2: Execute handlers based on strategy - FIXED ROUTING
+    const executionOperator = action._executionOperator || 'single'
+    let response: CyreResponse
+
+    switch (executionOperator) {
+      case 'single':
+        response = await executeSingleHandler(
+          action,
+          handlers[0],
+          requestPayload
+        )
+        break
+
+      case 'parallel':
+        const parallelResult = await executeParallelHandlers(
+          action,
+          handlers,
+          requestPayload
+        )
+        response = convertMultiHandlerResult(parallelResult)
+        break
+
+      case 'sequential':
+        const sequentialResult = await executeSequentialHandlers(
+          action,
+          handlers,
+          requestPayload
+        )
+        response = convertMultiHandlerResult(sequentialResult)
+        break
+
+      case 'race':
+        const raceResult = await executeRaceHandlers(
+          action,
+          handlers,
+          requestPayload
+        )
+        response = convertMultiHandlerResult(raceResult)
+        break
+
+      case 'waterfall':
+        const waterfallResult = await executeWaterfallHandlers(
+          action,
+          handlers,
+          requestPayload
+        )
+        response = convertMultiHandlerResult(waterfallResult)
+        break
+
+      default:
+        sensor.warn(
+          `Unknown execution operator: ${executionOperator}, falling back to single`
+        )
+        response = await executeSingleHandler(
+          action,
+          handlers[0],
+          requestPayload
+        )
+        break
+    }
+
+    // STEP 3: Save response payload after execution complete
+    payloadState.setRes(action.id, response, correlationId)
+
+    return response
+  } catch (dispatchError) {
+    const errorMessage =
+      dispatchError instanceof Error
+        ? dispatchError.message
+        : String(dispatchError)
+    const totalTime = performance.now() - startTime
+
+    sensor.error(action.id, errorMessage, 'dispatch-exception')
+
+    const errorResponse: CyreResponse = {
+      ok: false,
+      payload: null,
+      message: `Dispatch failed: ${errorMessage}`,
+      error: true,
+      metadata: {
+        executionOperator: action._executionOperator || 'unknown',
+        handlerCount: 0,
+        executionTime: totalTime,
+        hasTimeout: false
+      }
+    }
+
+    // Save error response to payload state
+    payloadState.setRes(action.id, errorResponse, correlationId)
+    return errorResponse
+  }
+}
+
+/**
+ * Ultra-fast single handler execution
  */
 const executeSingleHandler = async (
   action: IO,
@@ -38,23 +162,16 @@ const executeSingleHandler = async (
   const startTime = performance.now()
 
   try {
-    // Direct handler execution - zero Promise.all overhead
     const result = await handler(payload)
-
     const executionTime = performance.now() - startTime
-    const lastExecTime = Date.now()
-    const executionCount = (action._executionCount || 0) + 1
 
     // Update action metrics
     io.set({
       ...action,
       _executionTime: executionTime,
-      _lastExecTime: lastExecTime,
-      _executionCount: executionCount
+      _lastExecTime: Date.now(),
+      _executionCount: (action._executionCount || 0) + 1
     })
-
-    // Update payload history for change detection
-    payloadState.set(action.id, payload, 'call')
 
     return {
       ok: true,
@@ -100,6 +217,122 @@ const executeSingleHandler = async (
 }
 
 /**
+ * Convert MultiHandlerResult to CyreResponse
+ */
+const convertMultiHandlerResult = (
+  result: MultiHandlerResult
+): CyreResponse => {
+  return {
+    ok: result.ok,
+    payload: result.payload,
+    message: result.message,
+    error: !result.ok,
+    metadata: result.metadata
+  }
+}
+
+/**
+ * 🔧 FIXED: Waterfall execution with proper payload chaining and comprehensive debug logging
+ */
+const executeWaterfallHandlers = async (
+  action: IO,
+  handlers: Function[],
+  payload: ActionPayload
+): Promise<MultiHandlerResult> => {
+  const startTime = performance.now()
+  const timeout = action._dispatchTimeout || 15000
+  const errorStrategy = action._errorStrategy || 'fail-fast'
+
+  try {
+    const executeWaterfall = async () => {
+      let currentPayload = payload
+
+      for (let i = 0; i < handlers.length; i++) {
+        try {
+          // 🔍 CRITICAL: Execute handler with current payload
+          const handlerResult = await handlers[i](currentPayload)
+
+          currentPayload = handlerResult
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
+
+          if (errorStrategy === 'fail-fast') {
+            throw new Error(
+              `Waterfall execution failed at handler ${i + 1}: ${errorMessage}`
+            )
+          }
+        }
+      }
+
+      return currentPayload
+    }
+
+    const result =
+      timeout > 0
+        ? await Promise.race([
+            executeWaterfall(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => {
+                console.log('⏰ TIMEOUT TRIGGERED')
+                reject(
+                  new Error(`Waterfall execution timeout after ${timeout}ms`)
+                )
+              }, timeout)
+            )
+          ])
+        : await executeWaterfall()
+
+    const executionTime = performance.now() - startTime
+
+    // Update action metrics
+    io.set({
+      ...action,
+      _executionTime: executionTime,
+      _lastExecTime: Date.now(),
+      _executionCount: (action._executionCount || 0) + 1
+    })
+
+    return {
+      ok: true,
+      payload: result,
+      message: `Waterfall execution completed through ${handlers.length} handlers`,
+      metadata: {
+        executionOperator: 'waterfall',
+        handlerCount: handlers.length,
+        strategy: errorStrategy,
+        collectStrategy: 'last',
+        executionTime,
+        hasTimeout: timeout > 0
+      },
+      successfulHandlers: handlers.length,
+      failedHandlers: 0
+    }
+  } catch (error) {
+    const executionTime = performance.now() - startTime
+    const errorMessage = error instanceof Error ? error.message : String(error)
+
+    sensor.error(action.id, errorMessage, 'waterfall-execution')
+
+    return {
+      ok: false,
+      payload: null,
+      message: `Waterfall execution failed: ${errorMessage}`,
+      metadata: {
+        executionOperator: 'waterfall',
+        handlerCount: handlers.length,
+        strategy: errorStrategy,
+        collectStrategy: 'last',
+        executionTime,
+        hasTimeout: timeout > 0
+      },
+      successfulHandlers: 0,
+      failedHandlers: handlers.length
+    }
+  }
+}
+
+/**
  * Parallel execution for multiple handlers
  */
 const executeParallelHandlers = async (
@@ -132,17 +365,14 @@ const executeParallelHandlers = async (
     const results = await executeWithTimeout
     const executionTime = performance.now() - startTime
 
-    // Analyze results
     const successful = results.filter(r => r.status === 'fulfilled')
     const failed = results.filter(r => r.status === 'rejected')
 
-    // Handle error strategy
     if (failed.length > 0 && errorStrategy === 'fail-fast') {
       const firstError = failed[0] as PromiseRejectedResult
       throw new Error(`Parallel execution failed: ${firstError.reason}`)
     }
 
-    // Collect results based on strategy
     let finalPayload: any
     switch (collectStrategy) {
       case 'first':
@@ -171,7 +401,6 @@ const executeParallelHandlers = async (
             : null
     }
 
-    // Update action metrics
     io.set({
       ...action,
       _executionTime: executionTime,
@@ -233,7 +462,7 @@ const executeSequentialHandlers = async (
   payload: ActionPayload
 ): Promise<MultiHandlerResult> => {
   const startTime = performance.now()
-  const timeout = action._dispatchTimeout || 10000
+  const timeout = action._dispatchTimeout || 15000
   const errorStrategy = action._errorStrategy || 'continue'
   const collectStrategy = action._collectStrategy || 'last'
 
@@ -397,13 +626,13 @@ const executeRaceHandlers = async (
       metadata: {
         executionOperator: 'race',
         handlerCount: handlers.length,
-        strategy: 'continue', // Race always continues
-        collectStrategy: 'first', // Race always returns first
+        strategy: 'continue',
+        collectStrategy: 'first',
         executionTime,
         hasTimeout: timeout > 0
       },
-      successfulHandlers: 1, // Only one wins in race
-      failedHandlers: 0 // Others are cancelled, not failed
+      successfulHandlers: 1,
+      failedHandlers: 0
     }
   } catch (error) {
     const executionTime = performance.now() - startTime
@@ -426,252 +655,5 @@ const executeRaceHandlers = async (
       successfulHandlers: 0,
       failedHandlers: handlers.length
     }
-  }
-}
-
-/**
- * Waterfall execution - each handler processes the result of the previous
- */
-const executeWaterfallHandlers = async (
-  action: IO,
-  handlers: Function[],
-  payload: ActionPayload
-): Promise<MultiHandlerResult> => {
-  const startTime = performance.now()
-  const timeout = action._dispatchTimeout || 15000 // Longer default for waterfall
-  const errorStrategy = action._errorStrategy || 'fail-fast' // Waterfall usually wants fail-fast
-
-  try {
-    const executeWaterfall = async () => {
-      let currentPayload = payload
-
-      for (let i = 0; i < handlers.length; i++) {
-        try {
-          currentPayload = await handlers[i](currentPayload)
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error)
-
-          if (errorStrategy === 'fail-fast') {
-            throw new Error(
-              `Waterfall execution failed at handler ${i + 1}: ${errorMessage}`
-            )
-          }
-          // For 'continue' strategy, pass original payload to next handler
-        }
-      }
-
-      return currentPayload
-    }
-
-    const result =
-      timeout > 0
-        ? await Promise.race([
-            executeWaterfall(),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Waterfall execution timeout after ${timeout}ms`)
-                  ),
-                timeout
-              )
-            )
-          ])
-        : await executeWaterfall()
-
-    const executionTime = performance.now() - startTime
-
-    // Update action metrics
-    io.set({
-      ...action,
-      _executionTime: executionTime,
-      _lastExecTime: Date.now(),
-      _executionCount: (action._executionCount || 0) + 1
-    })
-
-    return {
-      ok: true,
-      payload: result,
-      message: `Waterfall execution completed through ${handlers.length} handlers`,
-      metadata: {
-        executionOperator: 'waterfall',
-        handlerCount: handlers.length,
-        strategy: errorStrategy,
-        collectStrategy: 'last', // Waterfall always returns final result
-        executionTime,
-        hasTimeout: timeout > 0
-      },
-      successfulHandlers: handlers.length,
-      failedHandlers: 0
-    }
-  } catch (error) {
-    const executionTime = performance.now() - startTime
-    const errorMessage = error instanceof Error ? error.message : String(error)
-
-    sensor.error(action.id, errorMessage, 'waterfall-execution')
-
-    return {
-      ok: false,
-      payload: null,
-      message: `Waterfall execution failed: ${errorMessage}`,
-      metadata: {
-        executionOperator: 'waterfall',
-        handlerCount: handlers.length,
-        strategy: errorStrategy,
-        collectStrategy: 'last',
-        executionTime,
-        hasTimeout: timeout > 0
-      },
-      successfulHandlers: 0,
-      failedHandlers: handlers.length
-    }
-  }
-}
-
-/**
- * Main dispatch function with smart execution operator routing
- */
-export const useDispatch = async (
-  action: IO,
-  payload?: ActionPayload
-): Promise<CyreResponse> => {
-  const startTime = performance.now()
-
-  // Preserve falsy values like 0, undefined, false, ''
-  const currentPayload = payload !== undefined ? payload : action.payload
-
-  try {
-    // Get handlers using new array-based storage
-    const handlers = getHandlers(action.id)
-
-    if (handlers.length === 0) {
-      const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
-      sensor.error(error, action.id)
-      const errorResponse = {ok: false, payload: null, message: error}
-
-      // Store error response in payload state
-      payloadState.setResponse(action.id, errorResponse)
-      return errorResponse
-    }
-
-    // Route to appropriate execution strategy based on pre-compiled operator
-    const executionOperator = action._executionOperator || 'single'
-
-    let response: CyreResponse
-
-    switch (executionOperator) {
-      case 'single':
-        // Ultra-fast path for single handler
-        response = await executeSingleHandler(
-          action,
-          handlers[0],
-          currentPayload
-        )
-        break
-
-      case 'parallel':
-        const parallelResult = await executeParallelHandlers(
-          action,
-          handlers,
-          currentPayload
-        )
-        // Convert MultiHandlerResult to CyreResponse
-        response = {
-          ok: parallelResult.ok,
-          payload: parallelResult.payload,
-          message: parallelResult.message,
-          error: !parallelResult.ok,
-          metadata: parallelResult.metadata
-        }
-        break
-
-      case 'sequential':
-        const sequentialResult = await executeSequentialHandlers(
-          action,
-          handlers,
-          currentPayload
-        )
-        response = {
-          ok: sequentialResult.ok,
-          payload: sequentialResult.payload,
-          message: sequentialResult.message,
-          error: !sequentialResult.ok,
-          metadata: sequentialResult.metadata
-        }
-        break
-
-      case 'race':
-        const raceResult = await executeRaceHandlers(
-          action,
-          handlers,
-          currentPayload
-        )
-        response = {
-          ok: raceResult.ok,
-          payload: raceResult.payload,
-          message: raceResult.message,
-          error: !raceResult.ok,
-          metadata: raceResult.metadata
-        }
-        break
-
-      case 'waterfall':
-        const waterfallResult = await executeWaterfallHandlers(
-          action,
-          handlers,
-          currentPayload
-        )
-        response = {
-          ok: waterfallResult.ok,
-          payload: waterfallResult.payload,
-          message: waterfallResult.message,
-          error: !waterfallResult.ok,
-          metadata: waterfallResult.metadata
-        }
-        break
-
-      default:
-        // Fallback to single execution
-        sensor.warn(
-          `Unknown execution operator: ${executionOperator}, falling back to single`
-        )
-        response = await executeSingleHandler(
-          action,
-          handlers[0],
-          currentPayload
-        )
-        break
-    }
-
-    // Store response in payload state
-    payloadState.setResponse(action.id, response)
-    return response
-  } catch (dispatchError) {
-    const errorMessage =
-      dispatchError instanceof Error
-        ? dispatchError.message
-        : String(dispatchError)
-    const totalTime = performance.now() - startTime
-
-    sensor.error(action.id, errorMessage, 'dispatch-exception')
-    sensor.error(`Dispatch failed: ${errorMessage}`)
-
-    const errorResponse = {
-      ok: false,
-      payload: null,
-      message: `Dispatch failed: ${errorMessage}`,
-      error: true,
-      metadata: {
-        executionOperator: action._executionOperator || 'unknown',
-        handlerCount: 0,
-        executionTime: totalTime,
-        hasTimeout: false
-      }
-    }
-
-    // Store error response in payload state
-    payloadState.setResponse(action.id, errorResponse)
-    return errorResponse
   }
 }

@@ -14,7 +14,7 @@ import type {
 } from '../types/timeline'
 import {metricsState} from '../context/metrics-state'
 import {sensor} from '../components/sensor'
-import {TimeKeeper} from './cyre-timekeeper'
+import {TimeKeeper} from '../components/cyre-timekeeper'
 
 /*
   
@@ -174,9 +174,7 @@ const executeTrigger = async (
 
     // Execute orchestration if specified
     if (trigger.orchestration) {
-      const {orchestration} = await import(
-        '../orchestration/orchestration-engine'
-      )
+      const {orchestration} = await import('./orchestration-engine')
 
       const orchestrationResult = await orchestration.trigger(
         trigger.orchestration,

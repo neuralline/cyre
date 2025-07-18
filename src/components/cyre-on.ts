@@ -1,5 +1,5 @@
 // src/components/cyre-on.ts
-// Enhanced subscription system with pre-analysis and execution operator assignment
+// Pure handler registration system - order agnostic
 
 import {metricsState} from '../context/metrics-state'
 import {MSG} from '../config/cyre-config'
@@ -17,12 +17,11 @@ import {sensor} from './sensor'
 
       C.Y.R.E - O.N
       
-      Enhanced subscription system with pre-analysis and execution operator assignment:
+      Pure handler management system:
       1. Subscribe to ACTION IDs, not types
-      2. Pre-analyze execution strategy on registration
-      3. Assign optimal execution operator based on handler count
-      4. Store optimized configuration in io for hot path performance
-      5. Multiple subscription handling with smart operator selection
+      2. Store handlers independently of action existence
+      3. Optimize execution when actions are available
+      4. Allow registration in any order
 
 */
 
@@ -39,7 +38,10 @@ type SubscriptionResult = {
   subscriber?: ISubscriber
 }
 
-// Smart execution operator selection logic
+// Fix for determineExecutionOperator in src/components/cyre-on.ts
+// Replace the existing function with this corrected version
+
+// Smart execution operator selection logic - FIXED
 const determineExecutionOperator = (
   declaredDispatch: ExecutionOperator | undefined,
   handlerCount: number
@@ -52,8 +54,9 @@ const determineExecutionOperator = (
   // Multiple handlers - respect user preference or default to parallel
   switch (declaredDispatch) {
     case 'sequential':
-    case 'waterfall':
       return 'sequential'
+    case 'waterfall':
+      return 'waterfall' // 🔧 FIXED: Return waterfall instead of sequential
     case 'race':
       return 'race'
     case 'single':
@@ -65,9 +68,12 @@ const determineExecutionOperator = (
 }
 
 // Pre-analyze and assign execution configuration
-const preAnalyzeExecution = (action: IO, handlerCount: number): Partial<IO> => {
+const preAnalyzeExecution = (
+  action: IO | null,
+  handlerCount: number
+): Partial<IO> => {
   const executionOperator = determineExecutionOperator(
-    action.dispatch,
+    action?.dispatch,
     handlerCount
   )
 
@@ -75,9 +81,9 @@ const preAnalyzeExecution = (action: IO, handlerCount: number): Partial<IO> => {
   const executionConfig: Partial<IO> = {
     _executionOperator: executionOperator,
     _handlerCount: handlerCount,
-    _errorStrategy: action.errorStrategy || 'continue',
-    _collectStrategy: action.collectResults || 'last',
-    _dispatchTimeout: action.dispatchTimeout || 10000
+    _errorStrategy: action?.errorStrategy || 'continue',
+    _collectStrategy: action?.collectResults || 'last',
+    _dispatchTimeout: action?.dispatchTimeout || 10000
   }
 
   // Performance optimizations based on execution operator
@@ -131,7 +137,7 @@ const validateSubscriber = (
 }
 
 /**
- * Add single subscriber with pre-analysis and execution operator assignment
+ * Add single subscriber - pure handler registration
  */
 const addSingleSubscriber = (
   id: string,
@@ -157,7 +163,6 @@ const addSingleSubscriber = (
     if (existingHandlers.includes(handler)) {
       const duplicateMessage = `DUPLICATE HANDLER DETECTED: Identical handler already registered for channel "${subscriber.id}"`
       sensor.warn(duplicateMessage)
-      sensor.warn(duplicateMessage)
       return {
         ok: false,
         message: 'Duplicate handler registration prevented'
@@ -168,55 +173,40 @@ const addSingleSubscriber = (
     const updatedHandlers = [...existingHandlers, handler]
     handlerStorage.set(subscriber.id, updatedHandlers)
 
-    // Get current action configuration
+    // OPTIMIZATION: Update action configuration if it exists
     const currentAction = io.get(subscriber.id)
-    if (!currentAction) {
-      sensor.error(
-        `Action not found: ${subscriber.id}. Create action before subscribing.`
+    if (currentAction) {
+      // PRE-ANALYZE: Determine optimal execution configuration
+      const executionConfig = preAnalyzeExecution(
+        currentAction,
+        newHandlerCount
       )
-      return {
-        ok: false,
-        message: `Action "${subscriber.id}" not found. Use cyre.action() first.`
+
+      // Update action with optimized execution configuration
+      const optimizedAction: IO = {
+        ...currentAction,
+        ...executionConfig
       }
+
+      // Store optimized configuration for hot path access
+      io.set(optimizedAction)
     }
-
-    // PRE-ANALYZE: Determine optimal execution configuration
-    const executionConfig = preAnalyzeExecution(currentAction, newHandlerCount)
-
-    // Update action with optimized execution configuration
-    const optimizedAction: IO = {
-      ...currentAction,
-      ...executionConfig
-    }
-
-    // Store optimized configuration for hot path access
-    io.set(optimizedAction)
 
     // Update legacy subscribers map for backward compatibility
-    // (We'll phase this out as we move to array-based storage)
     if (newHandlerCount === 1) {
       subscribers.add(subscriber)
     }
-
-    // Update metrics
-    // metricsState.addSubscriber(subscriber.id)
-
-    // Log execution operator assignment for debugging
-    // sensor.info(
-    //   `Subscriber registered: ${subscriber.id} | ` +
-    //     `Handlers: ${newHandlerCount} | ` +
-    //     `Operator: ${executionConfig._executionOperator} | ` +
-    //     `Strategy: ${executionConfig._errorStrategy}`
-    // )
 
     return {
       ok: true,
       message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
       metadata: {
         handlerCount: newHandlerCount,
-        executionOperator: executionConfig._executionOperator,
-        errorStrategy: executionConfig._errorStrategy,
-        optimized: true
+        executionOperator: currentAction
+          ? preAnalyzeExecution(currentAction, newHandlerCount)
+              ._executionOperator
+          : 'single',
+        optimized: !!currentAction
       }
     }
   } catch (error) {
@@ -232,7 +222,7 @@ const addSingleSubscriber = (
 }
 
 /**
- * Add multiple subscribers with batch pre-analysis
+ * Add multiple subscribers with batch processing
  */
 const addMultipleSubscribers = (
   subscriptions: Array<{id: string; handler: EventHandler}>
@@ -273,6 +263,20 @@ const addMultipleSubscribers = (
 }
 
 /**
+ * Optimize existing action when handlers change
+ */
+export const optimizeActionIfExists = (actionId: string): void => {
+  const handlers = handlerStorage.get(actionId)
+  const action = io.get(actionId)
+
+  if (action && handlers) {
+    const executionConfig = preAnalyzeExecution(action, handlers.length)
+    const optimizedAction = {...action, ...executionConfig}
+    io.set(optimizedAction)
+  }
+}
+
+/**
  * Get handlers for execution (used by dispatch)
  */
 export const getHandlers = (actionId: string): EventHandler[] => {
@@ -301,15 +305,8 @@ export const removeHandler = (
     handlerStorage.set(actionId, updatedHandlers)
   }
 
-  // Re-optimize execution configuration
-  const currentAction = io.get(actionId)
-  if (currentAction) {
-    const executionConfig = preAnalyzeExecution(
-      currentAction,
-      updatedHandlers.length
-    )
-    io.set({...currentAction, ...executionConfig})
-  }
+  // Re-optimize execution configuration if action exists
+  optimizeActionIfExists(actionId)
 
   return true
 }
@@ -326,7 +323,8 @@ export const getHandlerStats = (actionId?: string) => {
       handlerCount: handlers.length,
       executionOperator: action?._executionOperator,
       errorStrategy: action?._errorStrategy,
-      collectStrategy: action?._collectStrategy
+      collectStrategy: action?._collectStrategy,
+      actionExists: !!action
     }
   }
 
@@ -338,13 +336,16 @@ export const getHandlerStats = (actionId?: string) => {
       handlerCount: handlers.length,
       executionOperator: action?._executionOperator,
       errorStrategy: action?._errorStrategy,
-      collectStrategy: action?._collectStrategy
+      collectStrategy: action?._collectStrategy,
+      actionExists: !!action
     }
   })
 
   return {
     totalChannels: stats.length,
     totalHandlers: stats.reduce((sum, s) => sum + s.handlerCount, 0),
+    channelsWithActions: stats.filter(s => s.actionExists).length,
+    orphanedHandlers: stats.filter(s => !s.actionExists).length,
     channels: stats
   }
 }
@@ -357,7 +358,6 @@ export const subscribe = (
   handler?: EventHandler
 ): SubscriptionResponse => {
   // HOT PATH OPTIMIZATION: Check system state before processing
-
   const {allowed, messages} = metricsState.canRegister()
   if (!allowed) {
     sensor.error(messages.join(', '))
@@ -367,23 +367,17 @@ export const subscribe = (
     }
   }
 
-  // Handle array of subscriptions
+  // Route to appropriate handler based on input type
   if (Array.isArray(idOrSubscriptions)) {
     return addMultipleSubscribers(idOrSubscriptions)
-  }
-
-  // Handle single subscription
-  if (typeof idOrSubscriptions === 'string' && handler) {
+  } else if (typeof idOrSubscriptions === 'string' && handler) {
     return addSingleSubscriber(idOrSubscriptions, handler)
-  }
-
-  return {
-    ok: false,
-    message: 'Invalid subscription parameters',
-    metadata: {}
+  } else {
+    return {
+      ok: false,
+      message: 'Invalid subscription parameters'
+    }
   }
 }
-
-// Export for external use
 
 export default subscribe

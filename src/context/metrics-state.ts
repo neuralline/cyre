@@ -637,6 +637,25 @@ export const metricsState = {
         timestamp: Date.now()
       }
     }
+  },
+
+  /**
+   * Soft clear: Reset runtime metrics, keep init/identity
+   */
+  clear: (): void => {
+    try {
+      const current = metricsStore.get('quantum') || defaultMetrics
+      metricsState.update({
+        ...defaultMetrics,
+        _init: current._init,
+        _isLocked: current._isLocked,
+        _shutdown: current._shutdown,
+        lastUpdate: Date.now()
+      })
+    } catch (error) {
+      sensor.critical(`Metrics clear failed: ${error}`)
+      throw error
+    }
   }
 }
 

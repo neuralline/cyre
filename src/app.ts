@@ -22,7 +22,7 @@ import payloadState from './context/payload-state'
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
 
-import {schedule} from './components/cyre-schedule'
+//import {schedule} from './orchestration/cyre-schedule'
 import {useDispatch} from './components/cyre-dispatch'
 
 /* 
@@ -80,7 +80,6 @@ export interface CyreInstance {
   action: (config: IO | IO[]) => {ok: boolean; message: string; payload?: any}
   on: (id: string, handler: EventHandler) => SubscriptionResponse
   call: (id: string, payload?: ActionPayload) => Promise<CyreResponse>
-  get: (id: string) => IO | undefined
   forget: (id: string) => boolean
   clear: () => void
   reset: () => void
@@ -95,9 +94,9 @@ export interface CyreInstance {
   //schedule: typeof import('./components/cyre-schedule').schedule
 
   // State methods
+  get: (id: string) => ActionPayload | undefined
   hasChanged: (id: string, payload: ActionPayload) => boolean
   getPrevious: (id: string) => ActionPayload | undefined
-  updatePayload: (id: string, payload: ActionPayload) => void
 
   // NEW: Dual payload system access
   //payloadState
@@ -240,36 +239,31 @@ export const call = async (
       return {
         ok: false,
         payload: null,
-        message: `${MSG.UNABLE_TO_COMPLY}: ${id} `
+        message: `${MSG.UNABLE_TO_COMPLY}: ${id}`
       }
     }
+
     const action = io.get(id)
     if (!action) {
       sensor.error(`${MSG.CALL_INVALID_ID}: ${id}. Channel does not exist`)
-
       return {
         ok: false,
         payload: null,
-        message: `${MSG.CALL_INVALID_ID}: ${id} `
+        message: `${MSG.CALL_INVALID_ID}: ${id}`
       }
-    }
-
-    if (action._isBlocked) {
+    } else if (action._isBlocked) {
       sensor.critical(`${MSG.CALL_NOT_RESPONDING}: ${id}`)
       return {
         ok: false,
         payload: null,
-        message: `${MSG.CALL_NOT_RESPONDING}: ${id} `
+        message: `${MSG.CALL_NOT_RESPONDING}: ${id}`
       }
     }
-    // log.debug(action)
 
-    // HOT PATH OPTIMIZATION: Single flag check for system conditions
     const {allowed, messages} = metricsState.canCall()
     if (!allowed) {
-      // Special case: Allow critical actions even during recuperation
       if (action.priority?.level === 'critical') {
-        // Continue with critical action
+        // Allow critical actions even during recuperation
       } else {
         sensor.error(
           'app/call/system',
@@ -284,25 +278,22 @@ export const call = async (
         }
       }
     }
-    const req = payload ?? payloadState.get(id)
-    //io.set(action)
 
-    // In call() - detect fast path early
+    // Get request payload - use payload from call or action default
+    const req = payload !== undefined ? payload : action.payload
+
+    // Fast path detection
     if (action._hasFastPath) {
-      // Direct dispatch - skip processCall entirely
-      return await useDispatch(action, payload)
+      return await useDispatch(action, req)
     }
-    // STEP 4: Throttle check
-    // ✅ STEP 4: FIXED Throttle check
-    else if (action.throttle && action.throttle > 0) {
+
+    // THROTTLE: Use buffer state for temporary storage
+    if (action.throttle && action.throttle > 0) {
       const currentTime = Date.now()
       const lastExecTime = action._lastExecTime || 0
-
-      // FIX 1: Calculate elapsed time from LAST EXECUTION, not action creation
       const elapsedSinceLastExec = currentTime - lastExecTime
       const remaining = Math.max(0, action.throttle - elapsedSinceLastExec)
 
-      // FIX 2: Check if we should throttle (industry standard: first call always passes)
       if (lastExecTime > 0 && elapsedSinceLastExec < action.throttle) {
         return {
           ok: false,
@@ -312,59 +303,47 @@ export const call = async (
       }
     }
 
-    // STEP 5: Debounce check (most complex protection)
-    // In call() function - simplified debounce check
-    else if (action.debounce && action.debounce > 0) {
+    // DEBOUNCE: Use buffer state for temporary storage
+    if (action.debounce && action.debounce > 0) {
       const debounceId = `debounce-${action.id}`
 
-      // Check if already in debounce state
+      // Store in buffer state (temporary) - ultra-fast set
+      bufferState.set(action.id, req)
+
       if (timeline.get(debounceId)) {
-        // Cancel existing debounce timer
         TimeKeeper.forget(debounceId)
 
-        // Check maxWait constraint
-        if (
-          action.maxWait &&
-          Date.now() - action._debounceStart >= action.maxWait
-        ) {
-          // MaxWait exceeded - execute immediately
+        const debounceStart = action._debounceStart || Date.now()
+        if (action.maxWait && Date.now() - debounceStart >= action.maxWait) {
+          const tempPayload = bufferState.get(action.id)
+          bufferState.forget(action.id)
           io.set({...action, _debounceStart: undefined})
-          return await processCall(action, payload)
+          return await processCall(action, tempPayload)
         }
       } else {
-        // First debounce call - set start time
         io.set({...action, _debounceStart: Date.now()})
       }
-
-      // Store latest payload and schedule debounced execution
-      payloadState.set(action.id, payload, 'call')
-
-      // Fix for the debounce callback in app.ts
-      // The catch block needs a return statement
 
       TimeKeeper.keep(
         action.debounce,
         async () => {
           try {
-            const latestPayload = payloadState.get(action.id) || payload
-            const currentAction = io.get(action.id) // Get the FULL action object
+            const latestPayload = bufferState.get(action.id)
+            const currentAction = io.get(action.id)
             if (!currentAction) return
-            // Clear debounce state PROPERLY
-            io.set({
-              ...currentAction, // Use the complete action object
-              _debounceStart: undefined
-            })
 
-            // Execute with the complete action
+            bufferState.forget(action.id)
+            io.set({...currentAction, _debounceStart: undefined})
+
             return await processCall(currentAction, latestPayload)
           } catch (error) {
-            // Handle error properly
+            bufferState.forget(action.id)
             return {
               ok: false,
               payload: null,
               message: `Debounced execution failed: ${error}`,
               error: String(error)
-            } // ✅ Add explicit return in catch block
+            }
           }
         },
         1,
@@ -373,29 +352,23 @@ export const call = async (
 
       return {
         ok: true,
-        payload,
+        payload: req,
         message: `Call debounced - execution scheduled in ${action.debounce}ms`,
         metadata: {delay: action.debounce}
       }
     }
 
-    // Buffer protection - ultra-fast buffering
-    else if (action.buffer && action.buffer.window > 0) {
+    // BUFFER: Use buffer state for temporary storage
+    if (action.buffer && action.buffer.window > 0) {
       const bufferId = `buffer-${action.id}`
 
       if (!timeline.get(bufferId)) {
-        // First call - start buffer window
         TimeKeeper.keep(
           action.buffer.window,
           async () => {
             try {
-              // Get final buffered payload
-              const finalPayload = bufferState.get(action.id) || payload
-
-              // Clear buffer
-              bufferState.clear(action.id)
-
-              // Execute with final payload
+              const finalPayload = bufferState.get(action.id) || req
+              bufferState.forget(action.id)
               return await processCall(action, finalPayload)
             } catch (error) {
               return {
@@ -411,28 +384,26 @@ export const call = async (
         )
       }
 
-      // Store payload in ultra-fast buffer (no payloadState!)
-      bufferState.set(action.id, payload, action.buffer.strategy || 'overwrite')
+      // Use dedicated append method for buffer strategy
+      if (action.buffer.strategy === 'append') {
+        bufferState.append(action.id, req)
+      } else {
+        bufferState.set(action.id, req) // Default overwrite
+      }
 
       return {
         ok: true,
-        payload,
+        payload: req,
         message: `Call buffered - execution scheduled in ${action.buffer.window}ms`,
         metadata: {bufferWindow: action.buffer.window}
       }
     }
 
-    // ALL PRE-PIPELINE PROTECTIONS PASSED - Continue to pipeline
-
-    // Execute the processing pipeline
-    const result = await processCall(action, req)
-
-    return result
+    // Direct execution - payload will be saved in processCall -> dispatch
+    return await processCall(action, req)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-
     sensor.error(id, errorMessage, 'call-execution')
-
     return {
       ok: false,
       payload: null,
@@ -478,6 +449,7 @@ const shutdown = (): void => {
     sensor.debug('system', 'critical', 'system-shutdown')
 
     reset()
+    metricsState.reset()
     sensor.debug('System offline!')
     if (typeof process !== 'undefined' && process.exit) {
       process.exit(0)
@@ -498,7 +470,7 @@ const reset = (): void => {
     subscribers.clear()
     timeline.clear()
     //metrics.reset()
-    metricsState.reset()
+    // metricsState.clear()
     payloadState.clear()
 
     // Clear all groups
@@ -531,39 +503,36 @@ export const cyre: CyreInstance = Object.freeze({
   },
   // DEVELOPER EXPERIENCE HELPERS
 
-  schedule,
+  //schedule,
   // ENHANCED METRICS SYSTEM
   // Add metrics interface
 
-  get: (id: string): IO | undefined => io.get(id),
+  get: (id: string) => payloadState.get(id),
   // Add this to the main cyre object, right before the closing brace
 
   // State methods
-  hasChanged: (id: string, payload: ActionPayload): boolean =>
+  hasChanged: (id: string, payload: ActionPayload) =>
     payloadState.hasChanged(id, payload),
-  getPrevious: (id: string): ActionPayload | undefined =>
-    payloadState.getPrevious(id),
-  updatePayload: (id: string, payload: ActionPayload): void =>
-    payloadState.set(id, payload),
+  getPrevious: (id: string) => payloadState.getPrevious(id),
 
   // Control methods with metrics
-  pause: (id?: string): void => {
+  pause: (id?: string) => {
     TimeKeeper.pause(id)
     sensor.debug(id || 'system', 'info', 'system-pause')
   },
 
-  resume: (id?: string): void => {
+  resume: (id?: string) => {
     TimeKeeper.resume(id)
     sensor.debug(id || 'system', 'info', 'system-resume')
   },
 
-  lock: (): {ok: boolean; message: string; payload: null} => {
+  lock: () => {
     metricsState.lock()
 
     return {ok: true, message: 'System locked', payload: null}
   },
 
-  unlock: (): {ok: boolean; message: string; payload: null} => {
+  unlock: () => {
     metricsState.unlock()
 
     return {ok: true, message: 'System unlocked', payload: null}
@@ -571,17 +540,14 @@ export const cyre: CyreInstance = Object.freeze({
 
   shutdown,
 
-  status: (): boolean => metricsState.get().hibernating,
+  status: () => metricsState.get().hibernating,
   /**
    * Get metrics for system or specific channel
    * @param channelId Optional channel ID for channel-specific metrics
    */
   getMetrics: (channelId?: string) => {
     return metricsState.getMetrics(channelId)
-  },
-
-  // NEW: Dual payload system access
-  payloadState
+  }
 })
 
 export default cyre

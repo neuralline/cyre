@@ -9,27 +9,28 @@ cyre.action({
   id: 'heartbeat://',
   type: 'system',
   interval: 1200, // 50 bpm
-  repeat: true
+  repeat: true,
+  dispatch: 'waterfall'
 })
 
 // Handle the action with visible output
-cyre.on('heartbeat://', () => {
-  log.debug('💓 Heartbeat')
-  return
+cyre.on('heartbeat://', a => {
+  log.debug('💓 Heartbeat 1 ', a)
+  return a + 1
 })
 
-cyre.on('heartbeat://', () => {
-  log.debug('💓 Heartbeat 2')
-  return
+cyre.on('heartbeat://', a => {
+  log.debug('💓 Heartbeat 2 ', a)
+  return a + 1
 })
 
-cyre.on('heartbeat://', () => {
-  log.debug('💓 Heartbeat 3')
-  return
+cyre.on('heartbeat://', a => {
+  log.debug('💓 Heartbeat 3 ', a)
+  return a + 1
 })
 
 // lock cyre from further registration
 cyre.lock()
 // Start the heartbeat
-const result = await cyre.call('heartbeat://')
+const result = await cyre.call('heartbeat://', 1)
 console.log(result)

@@ -71,6 +71,7 @@ export const compileAction = (
         case 'block':
         case 'throttle':
         case 'debounce':
+        case 'buffer':
           hasProtections = true
           break
 

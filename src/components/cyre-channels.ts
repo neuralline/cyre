@@ -100,7 +100,7 @@ export const CyreChannel = (action: IO): ChannelResult => {
 
     // 4. Store channel
     io.set(preparedChannel)
-    payloadState.set(preparedChannel.id, preparedChannel.payload, 'initial')
+    payloadState.setRes(preparedChannel.id, preparedChannel.payload, 'initial')
 
     const message = exists ? 'Channel updated' : MSG.CHANNEL_CREATED
 

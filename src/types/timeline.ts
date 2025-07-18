@@ -1,4 +1,4 @@
-// src/types/timeline-task.ts
+// src/types/timeline.ts
 // Unified timeline task system with trigger-based scheduling
 
 import type {ActionPayload, Priority, ConditionFunction} from './core'
