@@ -106,7 +106,7 @@ export const CyreActions = (action: IO): RegistrationResult => {
 
       // Initialize payload state if provided
       if ('payload' in action && action.payload !== undefined) {
-        payloadState.set(finalAction.id, action.payload, 'initial')
+        payloadState.setReq(finalAction.id, action.payload, 'initial')
       }
     } catch (error) {
       const errorMessage =

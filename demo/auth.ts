@@ -1,4 +1,4 @@
-// auth-demo-example.ts
+// demo/auth.ts
 // Terminal demo showing Cyre authentication system
 
 import {cyre} from '../src'
@@ -124,13 +124,13 @@ async function runAuthDemo() {
   })
 
   cyre.on('admin-panel', payload => {
-    if (!cyre.auth.hasRole('admin')) {
-      throw new Error('Admin role required')
-    }
+    // if (!cyre.auth.hasRole('admin')) {
+    //   throw new Error('Admin role required')
+    // }
 
     return {
       success: true,
-      message: `Admin panel accessed by ${cyre.auth.whoami()?.id}`,
+      message: `Admin panel accessed by `,
       data: {
         users: Array.from(userDatabase.keys()),
         action: payload.action

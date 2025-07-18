@@ -89,13 +89,12 @@ const printSummary = (testName: string) => {
 // ============================================
 // TEST 1: CONCURRENT CALLS TO SINGLE CHANNEL (PARALLEL)
 // ============================================
-
+cyre.init()
 const testConcurrentCalls = async () => {
   console.log('\n🚀 TEST 1: Concurrent Calls to Single Channel (Parallel)')
   console.log('='.repeat(60))
 
   // Clear previous state
-  cyre.clear()
 
   // Setup simple action - NO protections
   cyre.action({
@@ -148,7 +147,7 @@ const testRapidSequence = async () => {
   console.log('\n⚡ TEST 2: Rapid Sequence Calls to Single Channel')
   console.log('='.repeat(60))
 
-  cyre.clear()
+  // cyre.clear()
 
   // Setup action
   cyre.action({
@@ -199,7 +198,7 @@ const testAsyncCalls = async () => {
   console.log('\n🔄 TEST 3: Async Calls to Single Channel')
   console.log('='.repeat(60))
 
-  cyre.clear()
+  // cyre.clear()
 
   cyre.action({
     id: 'async-test'
@@ -247,7 +246,7 @@ const testLongRunningHandlers = async () => {
   console.log('\n⏰ TEST 4: Long Running Handlers - Conflict or Parallel?')
   console.log('='.repeat(60))
 
-  cyre.clear()
+  // cyre.clear()
 
   cyre.action({
     id: 'long-running-test'
@@ -301,7 +300,7 @@ const testDifferentChannels = async () => {
   console.log('\n🔀 TEST 5: Different Channels - Do They Interfere?')
   console.log('='.repeat(60))
 
-  cyre.clear()
+  // cyre.clear()
 
   // Setup multiple channels
   cyre.action({id: 'channel-a'})
@@ -372,7 +371,7 @@ const testScheduledConflicts = async () => {
   console.log('\n⏲️  TEST 6: Scheduled Tasks - Known Conflicts')
   console.log('='.repeat(60))
 
-  cyre.clear()
+  // cyre.clear()
 
   // Action with interval (known to cause conflicts)
   cyre.action({

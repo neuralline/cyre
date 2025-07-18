@@ -135,12 +135,17 @@ const testCoreScreenplayPipeline = async (
     let saveResult: any = null
 
     // Use core Cyre with clear channel IDs (no path separators)
-    cyre.on('screenplay-parse', (content: string) => {
+    cyre.on('screenplay-parse', (content: any) => {
       runner.logger.log('info', 'screenplay-parse', 'Processing content', {
-        length: content.length
+        contentType: typeof content,
+        length: typeof content === 'string' ? content.length : 0
       })
 
-      const lines = content.split('\n')
+      // Ensure content is a string
+      const contentString =
+        typeof content === 'string' ? content : String(content || '')
+
+      const lines = contentString.split('\n')
       const scenes = lines.filter(line => line.trim().match(/^(INT\.|EXT\.)/i))
       const characters = lines
         .filter(line => line.trim().match(/^[A-Z][A-Z\s]+$/))
@@ -159,10 +164,25 @@ const testCoreScreenplayPipeline = async (
       }
     })
 
-    cyre.on('screenplay-format', (text: string) => {
-      runner.logger.log('info', 'screenplay-format', 'Formatting text')
+    cyre.on('screenplay-format', (text: any) => {
+      runner.logger.log('info', 'screenplay-format', 'Formatting text', {
+        textType: typeof text,
+        textValue: text,
+        hasPayload: text && typeof text === 'object' && 'payload' in text
+      })
 
-      const formatted = text
+      // Ensure text is a string - handle Cyre's payload wrapper
+      let textString: string
+
+      if (typeof text === 'string') {
+        textString = text
+      } else if (text && typeof text === 'object' && 'payload' in text) {
+        textString = String(text.payload || '')
+      } else {
+        textString = String(text || '')
+      }
+
+      const formatted = textString
         .split('\n')
         .map(line => {
           const trimmed = line.trim()
@@ -177,7 +197,7 @@ const testCoreScreenplayPipeline = async (
         .join('\n')
 
       formatResult = {
-        original: text.length,
+        original: textString.length,
         formatted: formatted.length,
         timestamp: Date.now()
       }
@@ -190,11 +210,11 @@ const testCoreScreenplayPipeline = async (
     })
 
     cyre.on('screenplay-autosave', async (document: any) => {
-      runner.logger.log('info', 'screenplay-autosave', 'Auto-saving document', {
-        document: !!document,
-        documentType: typeof document,
-        keys: document ? Object.keys(document) : []
-      })
+      // runner.logger.log('info', 'screenplay-autosave', 'Auto-saving document', {
+      //   document: !!document,
+      //   documentType: typeof document,
+      //   keys: document ? Object.keys(document) : []
+      // })
 
       // Simulate save with realistic delay
       await new Promise(resolve => setTimeout(resolve, 10))
@@ -208,10 +228,10 @@ const testCoreScreenplayPipeline = async (
         size: documentString.length
       }
 
-      runner.logger.log('info', 'save-handler', 'Save result created', {
-        saveResult,
-        documentSize: documentString.length
-      })
+      // runner.logger.log('info', 'save-handler', 'Save result created', {
+      //   saveResult,
+      //   documentSize: documentString.length
+      // })
 
       return {
         ok: true,
@@ -302,19 +322,22 @@ const testBasicBranchFunctionality = async (
   return await runner.run('Basic Branch Operations', async () => {
     // Test branch creation and hierarchy
     const mainBranch = useBranch(cyre, {id: 'main-test'})
-    const childBranch = useBranch(mainBranch, {id: 'child-test'})
+    const childBranch = mainBranch
+      ? useBranch(mainBranch, {id: 'child-test'})
+      : false
 
     // Verify branch structure
-    const mainValid = mainBranch && mainBranch.id === 'main-test'
-    const childValid = childBranch && childBranch.id === 'child-test'
-    const hierarchyValid = childBranch.path === 'main-test/child-test'
+    const mainValid = mainBranch && (mainBranch as any).id === 'main-test'
+    const childValid = childBranch && (childBranch as any).id === 'child-test'
+    const hierarchyValid =
+      childBranch && childBranch.path() === 'main-test/child-test'
 
     runner.logger.log('info', 'branch-structure', 'Branch hierarchy', {
-      mainId: mainBranch?.id,
-      mainPath: mainBranch?.path,
-      childId: childBranch?.id,
-      childPath: childBranch?.path,
-      parentRef: !!childBranch?.parent
+      mainId: mainBranch ? (mainBranch as any).id : undefined,
+      mainPath: mainBranch?.path(),
+      childId: childBranch ? (childBranch as any).id : undefined,
+      childPath: childBranch?.path(),
+      parentRef: !!childBranch
     })
 
     // Test basic stats functionality
@@ -328,8 +351,8 @@ const testBasicBranchFunctionality = async (
     })
 
     // Test cleanup
-    const childDestroyed = childBranch?.destroy()
-    const mainDestroyed = mainBranch?.destroy()
+    const childDestroyed = childBranch ? childBranch.destroy() : false
+    const mainDestroyed = mainBranch ? mainBranch.destroy() : false
 
     return (
       mainValid &&

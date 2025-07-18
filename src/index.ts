@@ -21,17 +21,22 @@ CYRE TODO:
 
 [experimental]  Path-based cross-branch communication. location routing: use id as address bar eg 'home/branch/app'
 [x]  Component duplication and reuse capabilities
-[]   Multi .on subscribers to single .action channel 
+[x]  .on one to many. multiple subscribers per channel in parallel, sequential, race, waterfall and none[don't execute]
 []   Single .on subscriber to multi .action channels 
+[x]  Buffer operator
+[]  payload full {req, res} support 
+[]  detect change
 []   Add queue option to .action. if true .call to that channel will be queued until .on subscriber registered
 []   Improved react and nextjs support with hooks. low priority
-[]   useCyre could take optional ID. if set, it uses that id instead of generated id. so cyre.call can access that useCyre remotely
+[x]   useCyre could take optional ID. if set, it uses that id instead of generated id. so cyre.call can access that useCyre remotely
+[x]   Sensor. single source of metrics/console/terminal. 
+[]   orchestration. 
 
 //external services built on core cyre
 [on hold]   cyre/ssr: experimental/testing stage
 [on hold]   cyre/stream experimental/testing stage
 [on hold]   state-machine: experimental/testing stage
-[in progress]   cyre/server: server for client cyre applicants or others
+[on hold]   cyre/server: server for client cyre applicants or others
 
 [x]  schema: built in data validation
 
@@ -39,8 +44,10 @@ CYRE TODO:
 []   Cyre to operate smart, proactive, reactive, logical and be calculated than be full of features
 [in progress]   more test coverage
 [in progress]   more proactive decision on cyre init and registrations to minimize run time calculations and overheads
+[x]   hot path pipeline compiler
+[x]   hot path pipeline executePipeline
   
-[]   publish to NPM these are my current todo list. what do you think? any todo suggestions?
+[x]   publish to NPM: cyre v4.6.0 published
 
 [in progress]   system channels: instead of endless cyre.api create system .on listening channels for users to subscribe eg: on initialize, on error, on stress high etc
 [experimental]   persistent state. load Cyre from saved state, storage and sync with server
@@ -52,7 +59,7 @@ CYRE TODO:
 [in progress]   cyre/use: use-cyre hook easy use hook for cyre functional way
 [in progress]   cyre/collectives: use-collective hook
 [in progress]   cyre/group: use-group hook
-[in progress][testing]   cyre/branch: use-branch hook
+[in progress]   cyre/branch: use-branch hook
 
 //timers and scheduler
 [in progress]   Calendar for scheduling tasks
@@ -66,8 +73,8 @@ CYRE TODO:
     [done]  maxWait: number : boolean
       immutable: boolean // can't modify payload
       noDispatch: boolean //this channel won't be dispatch to .on listeners. 
-    [test] Multi-Sensor Fusion //combines data from multiple channel payload to create more accurate, reliable, and comprehensive environmental understanding.
-    [test] Event Pattern Recognition? // detects complex patterns, sequences, and anomalies in channel payload data streams using various algorithmic approaches.
+    [on hold] Multi-Sensor Fusion //combines data from multiple channel payload to create more accurate, reliable, and comprehensive environmental understanding.
+    [on hold] Event Pattern Recognition? // detects complex patterns, sequences, and anomalies in channel payload data streams using various algorithmic approaches.
     
     
     }

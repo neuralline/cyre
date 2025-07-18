@@ -217,7 +217,7 @@ export interface IO {
 
   // NEW: Execution Operators
   /** Execution strategy for multiple handlers */
-  dispatch?: ExecutionOperator
+  dispatch?: 'single' | 'parallel' | 'sequential' | 'race' | 'waterfall'
 
   /** Error handling strategy for multiple handlers */
   errorStrategy?: ErrorStrategy
