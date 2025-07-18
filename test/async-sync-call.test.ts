@@ -3,6 +3,7 @@
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/'
 
+cyre.init()
 /*
 This test suite examines how Cyre handles different call patterns:
 

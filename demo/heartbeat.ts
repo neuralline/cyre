@@ -26,6 +26,8 @@ cyre.on('heartbeat://', a => {
 
 cyre.on('heartbeat://', a => {
   log.debug('💓 Heartbeat 3 ', a)
+  const get = cyre.get('heartbeat://')
+  console.log('get: ', get)
   return a + 1
 })
 
@@ -33,4 +35,5 @@ cyre.on('heartbeat://', a => {
 cyre.lock()
 // Start the heartbeat
 const result = await cyre.call('heartbeat://', 1)
+
 console.log(result)
