@@ -1,6 +1,6 @@
 {
   "name": "cyre",
-  "version": "4.6.2",
+  "version": "4.6.3",
   "author": "Cyre Team",
   "repository": {
     "type": "git",
@@ -61,10 +61,10 @@
     "build:esm": "bun build ./src/index.ts --outfile ./dist/index.js --format esm",
     "build:cjs": "bun build ./src/index.ts --outfile ./dist/index.cjs --format cjs",
     "clean": "rm -rf dist",
-    "test": "bun test",
+    "test": "vitest",
     "vitest": "vitest run",
     "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage",
+    "test:coverage": " vitest --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "bun run typecheck",
     "benchmark": "tsx demo/benchmark.ts",
