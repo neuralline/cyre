@@ -25,7 +25,7 @@ cyre.on('heartbeat://', a => {
 })
 
 cyre.on('heartbeat://', a => {
-  log.debug('💓 Heartbeat 3 ', a)
+  //log.debug('💓 Heartbeat 3 ', a)
   const get = cyre.get('heartbeat://')
   console.log('get: ', get)
   return a + 1

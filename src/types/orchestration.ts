@@ -24,7 +24,14 @@ export interface OrchestrationTrigger {
     payload: any,
     context: ExecutionContext
   ) => boolean | Promise<boolean>
+  // Calendar schedule for `type: 'time'` triggers - a standard 5-field cron
+  // expression ('0 9 * * 1-5'). When set, this takes priority over `interval`
+  // and is computed via cyre-calendar.ts: the trigger fires once at the next
+  // matching occurrence, then recomputes and re-arms for the following one -
+  // it does not degrade into a fixed-interval repeat.
   schedule?: string
+  // IANA timezone for `schedule`, e.g. 'Europe/London'. Defaults to UTC.
+  timezone?: string
   interval?: number
   debounce?: number
   throttle?: number
@@ -47,6 +54,10 @@ export interface WorkflowStep {
   timeout?: number
   retries?: number
   steps?: WorkflowStep[]
+  // Only consulted for `type: 'loop'` - how many times to run `steps`.
+  // Defaults to 3 (the previously hardcoded value) when omitted, so
+  // existing configs that never set this keep their old behavior.
+  iterations?: number
   onError?: 'continue' | 'retry' | 'abort' | WorkflowStep[]
   enabled?: boolean
 }

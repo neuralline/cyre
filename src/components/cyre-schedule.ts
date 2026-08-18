@@ -13,138 +13,40 @@ import type {
   TaskFilter
 } from '../types/timeline'
 import {metricsState} from '../context/metrics-state'
+import {scheduleState} from '../context/schedule-state'
 import {sensor} from '../components/sensor'
 import {TimeKeeper} from '../components/cyre-timekeeper'
+import {computeNextOccurrence} from '../components/cyre-calendar'
 
 /*
-  
+
         C.Y.R.E - S.C.H.E.D.U.L.E
-        
+
         Unified scheduling system with trigger-based interface:
         - Your desired triggers: [{ time: '09:00', channels: ['morning-digest'] }]
+        - Calendar-correct: real cron parsing, IANA timezones + DST, one-off
+          calendar dates, weekday-restricted daily triggers - all computed by
+          cyre-calendar.ts and re-derived on every fire, so a "daily at 09:00"
+          trigger stays locked to 09:00 instead of drifting into a fixed
+          interval based on whatever the first day's delay happened to be
         - Deep integration with timeline and breathing system
         - Universal coordination for all scheduled work
         - Backward compatible with existing interval/repeat
-  
+
   */
 
-// Active task registry
-const activeTasks = new Map<string, TimelineTask>()
-const taskTimers = new Map<string, string[]>() // task ID -> timer IDs
-const triggerRegistry = new Map<string, TaskTrigger[]>() // task ID -> triggers
+const {
+  tasks: activeTasks,
+  timerIds: taskTimers,
+  triggers: triggerRegistry
+} = scheduleState
 
 /**
- * Parse time string to Date object
+ * True when a trigger is calendar-based (time-of-day, cron, or a specific
+ * date) rather than a plain fixed interval/delay
  */
-const parseTimeToday = (timeStr: string, timezone?: string): Date => {
-  const [hours, minutes] = timeStr.split(':').map(Number)
-  const date = new Date()
-  date.setHours(hours, minutes, 0, 0)
-
-  // Handle timezone if provided
-  if (timezone) {
-    // Simple timezone handling - could be enhanced with proper timezone library
-    const offset = getTimezoneOffset(timezone)
-    date.setMinutes(date.getMinutes() + offset)
-  }
-
-  return date
-}
-
-/**
- * Simple timezone offset calculation (could be enhanced)
- */
-const getTimezoneOffset = (timezone: string): number => {
-  // Basic timezone mapping - could be enhanced with full timezone support
-  const timezones: Record<string, number> = {
-    UTC: 0,
-    EST: -300, // UTC-5
-    PST: -480, // UTC-8
-    GMT: 0,
-    'user-local': new Date().getTimezoneOffset()
-  }
-
-  return timezones[timezone] || 0
-}
-
-/**
- * Calculate next execution time for trigger
- */
-const calculateNextExecution = (trigger: TaskTrigger): number => {
-  const now = Date.now()
-
-  if (trigger.time) {
-    // Time-based: '09:00', '14:30'
-    const targetTime = parseTimeToday(trigger.time, trigger.timezone)
-    if (targetTime.getTime() <= now) {
-      // If time has passed today, schedule for tomorrow
-      targetTime.setDate(targetTime.getDate() + 1)
-    }
-    return targetTime.getTime()
-  }
-
-  if (trigger.interval) {
-    // Interval-based: every X milliseconds
-    return now + (trigger.delay || 0) + trigger.interval
-  }
-
-  if (trigger.delay) {
-    // One-time delay
-    return now + trigger.delay
-  }
-
-  if (trigger.cron) {
-    // Cron expression - basic implementation
-    return calculateCronNext(trigger.cron, trigger.timezone)
-  }
-
-  // Default: execute immediately
-  return now
-}
-
-/**
- * Basic cron calculation (could be enhanced with full cron library)
- */
-const calculateCronNext = (cronExpr: string, timezone?: string): number => {
-  // Basic cron patterns - could be enhanced
-  const patterns: Record<string, number> = {
-    '0 9 * * MON': getNextWeekday(1, 9, 0), // Every Monday at 9 AM
-    '0 17 * * FRI': getNextWeekday(5, 17, 0), // Every Friday at 5 PM
-    '0 */4 * * *': getNextInterval(4 * 60 * 60 * 1000) // Every 4 hours
-  }
-
-  return patterns[cronExpr] || Date.now() + 60000 // Default: 1 minute
-}
-
-/**
- * Helper: Get next weekday at specific time
- */
-const getNextWeekday = (
-  targetDay: number,
-  hours: number,
-  minutes: number
-): number => {
-  const now = new Date()
-  const target = new Date()
-  target.setHours(hours, minutes, 0, 0)
-
-  const daysUntilTarget = (targetDay - now.getDay() + 7) % 7
-  if (daysUntilTarget === 0 && target.getTime() <= now.getTime()) {
-    // Target time has passed today, schedule for next week
-    target.setDate(target.getDate() + 7)
-  } else {
-    target.setDate(target.getDate() + daysUntilTarget)
-  }
-
-  return target.getTime()
-}
-
-/**
- * Helper: Get next interval execution
- */
-const getNextInterval = (intervalMs: number): number => {
-  return Date.now() + intervalMs
-}
+const isCalendarTrigger = (trigger: TaskTrigger): boolean =>
+  !!(trigger.time || trigger.cron || trigger.date)
 
 /**
  * Execute task trigger
@@ -174,7 +76,12 @@ const executeTrigger = async (
 
     // Execute orchestration if specified
     if (trigger.orchestration) {
-      const {orchestration} = await import('./orchestration-engine')
+      // orchestration-engine.ts actually lives in src/orchestration/, not
+      // next to this file in src/components/ - the previous relative path
+      // here ('./orchestration-engine') pointed at a nonexistent module and
+      // would have thrown the moment any trigger.orchestration ran
+      const {orchestration} =
+        await import('../orchestration/orchestration-engine')
 
       const orchestrationResult = await orchestration.trigger(
         trigger.orchestration,
@@ -194,26 +101,10 @@ const executeTrigger = async (
     const duration = performance.now() - startTime
     const allSuccessful = results.every(r => r.ok !== false)
 
-    // Calculate next execution if repeating
-    let nextExecution: number | undefined
-    if (
-      trigger.repeat === true ||
-      (typeof trigger.repeat === 'number' && trigger.repeat > 1)
-    ) {
-      if (trigger.time) {
-        // Daily repeat for time-based triggers
-        nextExecution = calculateNextExecution(trigger)
-      } else if (trigger.interval) {
-        // Interval repeat
-        nextExecution = Date.now() + trigger.interval
-      }
-    }
-
     return {
       ok: allSuccessful,
       duration,
-      result: results.length === 1 ? results[0] : results,
-      nextExecution
+      result: results.length === 1 ? results[0] : results
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -231,98 +122,180 @@ const executeTrigger = async (
 }
 
 /**
+ * Run one firing of a trigger: breathing/condition gates, then execute.
+ * Shared by both the calendar-armed path and the plain interval path.
+ */
+const runTriggerOnce = async (
+  task: TimelineTask,
+  trigger: TaskTrigger,
+  triggerId: string
+): Promise<void> => {
+  if (!activeTasks.get(task.id)) return
+
+  // Check breathing system if configured
+  if (task.breathing?.adaptToStress) {
+    const breathing = metricsState.get().breathing
+    if (breathing.stress > (task.breathing.pauseThreshold || 0.9)) {
+      return
+    }
+  }
+
+  // Check task conditions
+  if (task.conditions && task.conditions.length > 0) {
+    const conditionsMet = task.conditions.every(condition => {
+      try {
+        return condition({}) // Could pass more context here
+      } catch {
+        return false
+      }
+    })
+
+    if (!conditionsMet) {
+      sensor.debug(task.id, 'skip', 'task-conditions-not-met')
+      return
+    }
+  }
+
+  const context: TaskExecutionContext = {
+    taskId: task.id,
+    triggerId,
+    trigger,
+    executionCount: 0,
+    systemStress: metricsState.get().breathing.stress,
+    timestamp: Date.now()
+  }
+
+  const result = await executeTrigger(task, trigger, context)
+
+  if (!result.ok && result.shouldRetry && task.retry?.enabled) {
+    sensor.debug(task.id, 'info', 'task-retry-scheduled')
+  }
+}
+
+/**
+ * Arms a calendar-based trigger (time/cron/date) on TimeKeeper, using its
+ * native `recompute` hook (see Timer['recompute'] in types/timer.ts) for
+ * anything that should keep recurring, so TimeKeeper itself - not this
+ * function - is what recalculates the next occurrence on every reschedule.
+ * This is what keeps a "daily at 09:00" trigger locked to 09:00 forever
+ * instead of repeating on a fixed interval derived from day one's delay,
+ * and it's also what makes pause()/resume() correct for calendar triggers:
+ * resume() reschedules through the exact same recompute-aware path, so a
+ * task paused for three days resumes by recalculating from the actual
+ * resume time rather than reusing a stale pre-pause interval.
+ *
+ * Earlier version of this function re-armed itself from inside its own
+ * TimeKeeper callback via a same-tick `TimeKeeper.keep()` call, which raced
+ * QuartzEngine's own post-execution bookkeeping for that same timer id and
+ * silently died after firing once - see the git history for that bug if
+ * curious. Moving the recompute logic into TimeKeeper itself (this function
+ * now only runs ONCE, to make the initial arm) removes that whole class of
+ * bug rather than working around it.
+ */
+const armCalendarTrigger = (
+  task: TimelineTask,
+  trigger: TaskTrigger,
+  triggerId: string
+): void => {
+  const recurrenceRule = {
+    time: trigger.time,
+    cron: trigger.cron,
+    date: trigger.date,
+    days: trigger.days,
+    timezone: trigger.timezone
+  }
+
+  const nextOccurrence = computeNextOccurrence(recurrenceRule, Date.now())
+
+  if (nextOccurrence === undefined) {
+    sensor.debug(task.id, 'info', 'task-trigger-no-future-occurrence')
+    return
+  }
+
+  const delay = Math.max(0, nextOccurrence - Date.now())
+  // A specific calendar `date` fires once, ever. Everything else (time/cron)
+  // repeats unless the trigger explicitly opts out.
+  const shouldRearm = trigger.repeat !== false && !trigger.date
+
+  const timerResult = TimeKeeper.keep(
+    delay,
+    () => runTriggerOnce(task, trigger, triggerId),
+    shouldRearm ? true : 1,
+    triggerId,
+    undefined,
+    shouldRearm
+      ? from => computeNextOccurrence(recurrenceRule, from)
+      : undefined
+  )
+
+  if (timerResult.ok === 'ok') {
+    const existing = taskTimers.get(task.id) || []
+    if (!existing.includes(triggerId)) {
+      taskTimers.set(task.id, [...existing, triggerId])
+    }
+    sensor.debug(task.id, 'info', 'task-trigger-scheduled')
+  } else {
+    sensor.error(
+      task.id,
+      timerResult.error.message,
+      'task-trigger-schedule-failed'
+    )
+  }
+}
+
+/**
+ * Arms a plain interval/delay trigger using TimeKeeper's native repeat -
+ * a fixed cadence is the correct semantics here, so no calendar math needed.
+ */
+const armIntervalTrigger = (
+  task: TimelineTask,
+  trigger: TaskTrigger,
+  triggerId: string
+): void => {
+  const repeat: number | boolean =
+    trigger.repeat === true || trigger.repeat === false
+      ? trigger.repeat
+      : typeof trigger.repeat === 'number'
+        ? trigger.repeat
+        : false
+
+  const timerResult = TimeKeeper.keep(
+    trigger.interval || trigger.delay || 0,
+    () => runTriggerOnce(task, trigger, triggerId),
+    repeat,
+    triggerId,
+    trigger.delay
+  )
+
+  if (timerResult.ok === 'ok') {
+    const existing = taskTimers.get(task.id) || []
+    taskTimers.set(task.id, [...existing, triggerId])
+    sensor.debug(task.id, 'info', 'task-trigger-scheduled')
+  } else {
+    sensor.error(
+      task.id,
+      timerResult.error.message,
+      'task-trigger-schedule-failed'
+    )
+  }
+}
+
+/**
  * Schedule task triggers using TimeKeeper
  */
 const scheduleTaskTriggers = (task: TimelineTask): string[] => {
-  const timerIds: string[] = []
+  taskTimers.set(task.id, [])
 
   task.triggers.forEach((trigger, index) => {
     if (trigger.enabled === false) return
 
     const triggerId = `${task.id}-trigger-${index}`
-    const nextExecution = calculateNextExecution(trigger)
-    const delay = Math.max(0, nextExecution - Date.now())
-
-    // Determine repeat configuration
-    let repeat: number | boolean = false
-    if (trigger.repeat === true) {
-      repeat = true
-    } else if (typeof trigger.repeat === 'number') {
-      repeat = trigger.repeat
-    } else if (trigger.time || trigger.cron) {
-      repeat = true // Time and cron triggers repeat by default
-    }
 
     try {
-      const timerResult = TimeKeeper.keep(
-        trigger.interval || delay,
-        async () => {
-          // Check if task is still active
-          if (!activeTasks.has(task.id)) return
-
-          // Check breathing system if configured
-          if (task.breathing?.adaptToStress) {
-            const breathing = metricsState.get().breathing
-            if (breathing.stress > (task.breathing.pauseThreshold || 0.9)) {
-              return
-            }
-          }
-
-          // Check task conditions
-          if (task.conditions && task.conditions.length > 0) {
-            const conditionsMet = task.conditions.every(condition => {
-              try {
-                return condition({}) // Could pass more context here
-              } catch {
-                return false
-              }
-            })
-
-            if (!conditionsMet) {
-              sensor.debug(task.id, 'skip', 'task-conditions-not-met')
-              return
-            }
-          }
-
-          // Create execution context
-          const context: TaskExecutionContext = {
-            taskId: task.id,
-            triggerId,
-            trigger,
-            executionCount: 0, // Could track this
-            systemStress: metricsState.get().breathing.stress,
-            timestamp: Date.now()
-          }
-
-          // Execute trigger
-          const result = await executeTrigger(task, trigger, context)
-
-          // Handle result
-          if (!result.ok && result.shouldRetry && task.retry?.enabled) {
-            // Schedule retry (could implement retry logic here)
-            sensor.debug(task.id, 'info', 'task-retry-scheduled')
-          }
-
-          // Schedule next execution if needed
-          if (result.nextExecution && trigger.repeat) {
-            const nextDelay = Math.max(0, result.nextExecution - Date.now())
-            // Could reschedule here for dynamic timing
-          }
-        },
-        repeat,
-        triggerId,
-        delay
-      )
-
-      if (timerResult.ok === 'ok') {
-        timerIds.push(triggerId)
-        sensor.debug(task.id, 'info', 'task-trigger-scheduled')
+      if (isCalendarTrigger(trigger)) {
+        armCalendarTrigger(task, trigger, triggerId)
       } else {
-        sensor.error(
-          task.id,
-          timerResult.error.message,
-          'task-trigger-schedule-failed'
-        )
+        armIntervalTrigger(task, trigger, triggerId)
       }
     } catch (error) {
       const errorMessage =
@@ -331,7 +304,7 @@ const scheduleTaskTriggers = (task: TimelineTask): string[] => {
     }
   })
 
-  return timerIds
+  return taskTimers.get(task.id) || []
 }
 
 /**
@@ -351,7 +324,7 @@ export const schedule = {
       }
 
       // Check for existing task
-      if (activeTasks.has(config.id)) {
+      if (activeTasks.get(config.id)) {
         return {
           ok: false,
           message: `Task ${config.id} already exists`
@@ -379,31 +352,38 @@ export const schedule = {
       // Validate triggers
       const invalidTriggers = task.triggers.filter(
         trigger =>
-          !trigger.time && !trigger.interval && !trigger.cron && !trigger.delay
+          !trigger.time &&
+          !trigger.interval &&
+          !trigger.cron &&
+          !trigger.delay &&
+          !trigger.date
       )
 
       if (invalidTriggers.length > 0) {
         return {
           ok: false,
           message:
-            'All triggers must have time, interval, cron, or delay specified'
+            'All triggers must have time, interval, cron, date, or delay specified'
         }
       }
+
+      // Register task before arming triggers - runTriggerOnce() checks
+      // activeTasks for a still-active task, so it must exist first
+      activeTasks.set(task.id, task)
+      triggerRegistry.set(task.id, task.triggers)
 
       // Schedule all triggers
       const timerIds = scheduleTaskTriggers(task)
 
       if (timerIds.length === 0) {
+        activeTasks.forget(task.id)
+        triggerRegistry.forget(task.id)
+        taskTimers.forget(task.id)
         return {
           ok: false,
           message: 'Failed to schedule any triggers'
         }
       }
-
-      // Register task
-      activeTasks.set(task.id, task)
-      taskTimers.set(task.id, timerIds)
-      triggerRegistry.set(task.id, task.triggers)
 
       sensor.debug(task.id, 'success', 'task-scheduled')
 
@@ -449,32 +429,58 @@ export const schedule = {
     time: string,
     config: QuickScheduleConfig
   ): TaskResult => {
-    const dayMap: Record<string, string> = {
-      monday: '0 9 * * 1',
-      tuesday: '0 9 * * 2',
-      wednesday: '0 9 * * 3',
-      thursday: '0 9 * * 4',
-      friday: '0 9 * * 5',
-      saturday: '0 9 * * 6',
-      sunday: '0 9 * * 0'
+    const dayMap: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
     }
 
-    const [hours, minutes] = time.split(':')
-    const cronExpr = `${minutes} ${hours} * * ${
-      dayMap[day.toLowerCase()]?.split(' ')[4] || '1'
-    }`
+    const weekday = dayMap[day.toLowerCase()]
+    if (weekday === undefined) {
+      return {ok: false, message: `Unknown weekday: "${day}"`}
+    }
 
     return schedule.task({
       ...config,
       triggers: [
         {
-          cron: cronExpr,
+          time,
+          days: [weekday],
           channels: config.channels,
           orchestration: config.orchestration,
           function: config.function,
           payload: config.payload,
           timezone: config.timezone,
           repeat: true
+        }
+      ]
+    })
+  },
+
+  /**
+   * One-off run on a specific calendar date (and optional time-of-day)
+   */
+  onDate: (
+    date: string,
+    time: string | undefined,
+    config: QuickScheduleConfig
+  ): TaskResult => {
+    return schedule.task({
+      ...config,
+      triggers: [
+        {
+          date,
+          time,
+          channels: config.channels,
+          orchestration: config.orchestration,
+          function: config.function,
+          payload: config.payload,
+          timezone: config.timezone,
+          repeat: false
         }
       ]
     })
@@ -520,11 +526,11 @@ export const schedule = {
       const timerIds = taskTimers.get(taskId)
       if (timerIds) {
         timerIds.forEach(timerId => TimeKeeper.forget(timerId))
-        taskTimers.delete(taskId)
+        taskTimers.forget(taskId)
       }
 
-      activeTasks.delete(taskId)
-      triggerRegistry.delete(taskId)
+      activeTasks.forget(taskId)
+      triggerRegistry.forget(taskId)
 
       return true
     } catch (error) {
@@ -563,7 +569,7 @@ export const schedule = {
    * Query and monitoring
    */
   list: (filter?: TaskFilter): TimelineTask[] => {
-    let tasks = Array.from(activeTasks.values())
+    let tasks = activeTasks.getAll()
 
     if (filter) {
       if (filter.type) {
@@ -590,7 +596,7 @@ export const schedule = {
   },
 
   getLoad: (): TimelineLoad => {
-    const allTasks = Array.from(activeTasks.values())
+    const allTasks = activeTasks.getAll()
     const enabledTasks = allTasks.filter(task => task.enabled)
     const breathing = metricsState.get().breathing
 

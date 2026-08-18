@@ -7,6 +7,7 @@ import payloadState from '../context/payload-state'
 import {io, stores} from '../context/state'
 import {isValidPath} from '../libs/utils'
 import {compileAction} from '../schema/compile-pipeline'
+import {pathEngine} from '../schema/path-engine'
 
 /*
 
@@ -91,8 +92,19 @@ export const CyreActions = (action: IO): RegistrationResult => {
       // Store compiled action
       io.set(finalAction)
 
+      // Keep the path engine's foreign-key index in sync with this
+      // channel's current path. Always deindex first (a cheap no-op for a
+      // brand-new channel, and correct for a re-registration that changes
+      // or drops its path) so a stale entry never lingers under an old
+      // path once the channel moves. This is what pathPlugin.find/on/
+      // bulkCall search against - without it, wildcard/pattern discovery
+      // silently returns zero matches even though channels.path is set.
+      pathEngine.remove(finalAction.id)
+
       // Validate and index path if provided
       if (finalAction.path && isValidPath(finalAction.path)) {
+        pathEngine.add(finalAction.id, finalAction.path)
+
         // Check if this path corresponds to a branch and update branch metadata
         const branchEntry = stores.branch.get(finalAction.path)
         if (branchEntry) {

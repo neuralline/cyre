@@ -111,6 +111,16 @@ cyre.action({
 // Timeline: Wait 1s → Execute → Wait 5s → Execute → ... (10 total)
 ```
 
+### TimeKeeper Internals
+
+TimeKeeper is Cyre's single global scheduler ("Quartz engine") - every `delay`/`interval`/`repeat` action is scheduled through it rather than getting its own raw `setTimeout`. A few things worth knowing before relying on precise timing:
+
+- **Two precision tiers, not three.** Timers due sooner than `HIGH_PRECISION_THRESHOLD` (1016ms) run on a tight polling loop for sub-millisecond accuracy; everything else uses a bounded sleep. There is no separate "chunked" tier for very long intervals - a multi-minute `delay`/`interval` is handled by the engine's own internal poll bound (it never sleeps longer than roughly `TIMING.RECUPERATION`, ~60s, at a stretch), so a long timer just survives multiple wake-cycles before it's actually due rather than needing any special-casing on your end.
+- **Reentrancy-safe.** A slow handler on a fast-repeating timer will not be invoked again by the next tick before the previous call settles - each timer id is tracked while its callback is in flight.
+- **`cyre.pause(id)` / `cyre.resume(id)`** pause and resume a specific timer (or, with no id, the whole system) without losing its schedule - resuming picks the interval back up rather than restarting it. Passing a scheduled action's own id (its full/global id if it's on a branch) is what pauses that timer.
+- **TimeKeeper is not the error handler.** A handler that throws is reported via `sensor` and does not derail the rest of that timer's repeat schedule - retry/backoff/circuit-breaking, if you need it, is your application's concern (or `metricsState`'s, for system-wide stress), not TimeKeeper's.
+- **TimeKeeper doesn't decide when to stop running.** The engine adapts its own polling rate to load and to how many/what kind of timers are active, but whether the whole system should idle down is `metricsState`'s call, not something TimeKeeper does on its own.
+
 ### IntraLink Chain Reactions
 
 ```typescript
@@ -177,21 +187,54 @@ function UserProfile() {
 
 ### Buffer Usage in cyre.action
 
+Buffer collects calls made within a time window and delivers them together as a single execution when the window closes.
+
 ```typescript
 cyre.action({
   id: 'batch-upload',
-  buffer: {window: 1000, strategy: 'append', maxSize: 10}
+  buffer: {window: 1000, strategy: 'append'}
 })
 
 cyre.on('batch-upload', batch => {
-  // batch is an array of payloads collected within 1s or up to 10 items
+  // With strategy: 'append', batch is the accumulated payload(s)
+  // collected within the 1s window
   uploadBatchToServer(batch)
 })
 
-// Calls within 1s are batched
+// Calls within 1s are collapsed into one execution when the window closes
 cyre.call('batch-upload', {file: 'a.txt'})
 cyre.call('batch-upload', {file: 'b.txt'})
 ```
+
+**Strategies**
+
+- `'overwrite'` (default) — each call replaces the previous payload; only the most recent call in the window is delivered.
+- `'append'` — calls accumulate into an array (or the bare payload itself, if only one call lands in the window — see limitations below).
+- `'ignore'` — accepted by the config type but not implemented in the current runtime; behaves like `'overwrite'` instead of dropping calls after the first.
+
+**Known limitations (current implementation)**
+
+- `maxSize` is accepted in the config and passes validation, but is not read or enforced anywhere in the buffer dispatch path — an `'append'` buffer keeps growing for the full `window` regardless of `maxSize`.
+- With `strategy: 'append'`, if exactly one call lands in the window, the handler receives that single payload rather than a one-item array, so the batch shape is not guaranteed to always be an array — check `Array.isArray(batch)` in handlers that rely on `'append'`.
+- A call that lands _while the window's collection callback is still dispatching_ (a slow handler) is not lost - the buffer re-opens a fresh window for it - but this means a slow-enough handler chained with a steady stream of calls can keep re-opening windows indefinitely rather than ever fully draining. Keep buffer handlers fast, or expect back-to-back windows under sustained load.
+
+### Pipeline Talent Order: schema, condition, selector, transform, detectChanges
+
+These five are compiled into an ordered pipeline per channel and run **in the literal field order you write them in the `cyre.action()` config** - not a fixed internal order. Two things follow from that:
+
+1. **Protections run first, pipeline runs second.** `throttle`/`debounce`/`buffer` are handled before any of `schema`/`condition`/`selector`/`transform`/`detectChanges` ever runs. For a debounced or buffered channel, the pipeline only executes once the wait/window settles, against whatever payload was last collapsed/buffered - not against every individual call that came in.
+2. **Field order inside the pipeline changes behavior.** Putting `transform` before `detectChanges` is a common trap: if `transform` stamps something that changes on every call (a timestamp, a generated id), `detectChanges` - which runs next - will see a "different" payload every single time and never dedupe, even when the meaningful fields never changed. Validate → dedupe → normalize, in that order, is usually what you want:
+
+```typescript
+cyre.action({
+  id: 'sensor-ingest',
+  schema: mySchema, // 1. validate shape first
+  detectChanges: true, // 2. dedupe BEFORE stamping anything that always changes
+  transform: payload => ({...payload, receivedAt: Date.now()}) // 3. normalize last
+})
+```
+
+A buffered channel with a `selector` follows the same rule as point 1 above: the buffer collects the _raw_ payload(s) for the whole window, and `selector` only narrows the accumulated result down once the window closes and the pipeline finally runs.
 
 ### Advanced Dispatching
 
@@ -293,29 +336,46 @@ cyre.on('data-validate', payload => {
 })
 ```
 
-## New: Buffer Operator
+## Branches (`useBranch`)
 
-The `buffer` operator allows you to collect and process events in batches, reducing overhead and enabling batch workflows.
+Branches give a part of your app its own isolated channel namespace without hand-prefixing every id yourself. `useBranch(instance, {id})` hangs a new branch off an instance's path; channels registered on that branch get a globally-unique id (`parentPath/branchId/localId`) automatically, but you keep addressing them by their short local id from inside the branch.
 
 ```typescript
+import {cyre, useBranch} from 'cyre'
+
+const factory = useBranch(cyre, {id: 'factory-a'})
+const floor1 = useBranch(factory, {id: 'floor-1'})
+
+floor1.action({id: 'temperature'})
+floor1.on('temperature', celsius => console.log(celsius))
+
+await floor1.call('temperature', 21.4) // resolves to 'factory-a/floor-1/temperature'
+
+// Cross-branch calls: any target containing "/" is treated as an absolute
+// path instead of being prefixed with the calling branch's own path
+await floor1.call('factory-a/floor-2/alarm', 'reason')
+```
+
+**Known limitation:** `branch.getStats()`'s synchronously-returned object always reports `channelCount`, `subscriberCount`, `timerCount`, and `childCount` as `0` - the real counts are computed in a background async call whose result is never stored anywhere retrievable. Don't rely on `getStats()` for live counts today; check a channel's existence by calling it and inspecting `result.ok`/`result.message` instead. Also note that `branch.get(localId)` (like the top-level `cyre.get(id)` it wraps) returns that channel's current **payload**, not its config - it is not a way to check whether a channel exists or to read back its id.
+
+## Stream `.buffer()` Operator (planned, not yet available)
+
+`createStream()` exposes timing operators like `.debounce(ms)`, `.throttle(ms)`, and `.delay(ms)`, but a `.buffer()` operator is **not currently part of the `Stream` type interface** and is not implemented. Code like the example below will not type-check or run against the current library:
+
+```typescript
+// NOT YET AVAILABLE — shown for illustration of the intended API only
 import {createStream} from 'cyre'
 
 const stream = createStream()
-  .buffer(5) // Collects 5 events before emitting as an array
+  .buffer(5) // intended: collect 5 events before emitting as an array
   .map(batch => processBatch(batch))
 
 stream.subscribe(batchResult => {
   // Handle processed batch
 })
-
-// Emit events
-stream.next(event1)
-stream.next(event2)
-// ...
 ```
 
-- Use `buffer(timeMs)` to emit batches based on time windows.
-- Combine with other operators for advanced stream processing.
+If you need batching on a stream today, accumulate manually inside `.tap()`/`.map()`, or use the channel-level `buffer` config documented above via `cyre.action()`.
 
 ## 🛡️ Built-in Protection Systems
 
@@ -412,7 +472,7 @@ cyre.action(config: IO | IO[])           // Register one or more channels
 cyre.on(id: string, handler: Function)   // Subscribe handler(s) to a channel
 cyre.call(id: string, payload?: any)     // Trigger a channel/action
 cyre.forget(id: string)                  // Remove a channel and its handlers
-cyre.get(id: string)                     // Get the current channel payload by id. will include {req,res}
+cyre.get(id: string)                     // Returns the channel's current PAYLOAD (payloadState.get(id)) - NOT its config/IO object, and not a {req,res} wrapper
 
 // System & State Control
 cyre.init()                              // Initialize the system
@@ -510,7 +570,9 @@ interface IO {
 ### Buffer Operator
 
 - `buffer: { window: number, strategy?: 'overwrite' | 'append' | 'ignore', maxSize?: number }`
-- Batches calls within a time window or by count
+- Batches calls within a time window and executes once when the window closes.
+- `strategy: 'ignore'` and `maxSize` are accepted by the type but are **not currently enforced** by the runtime — see [Buffer Usage in cyre.action](#buffer-usage-in-cyreaction) for the full list of known limitations.
+- This is a channel-level (`cyre.action`) feature only; the stream-level `createStream().buffer()` operator described elsewhere in this doc is not yet implemented — see [Stream `.buffer()` Operator](#stream-buffer-operator-planned-not-yet-available).
 
 ---
 

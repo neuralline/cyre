@@ -1,29 +1,31 @@
 // test/protections/cyre-buffer.test.ts
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-  beforeAll
-} from 'vitest'
+import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest'
 import {cyre} from '../src/index'
 
 describe('Cyre Buffer Protection', () => {
-  beforeAll(async () => {
-    await cyre.init()
-  })
-
   beforeEach(async () => {
+    // Fake timers must be active BEFORE cyre.init() ever starts the quartz
+    // engine. If init() runs under real timers (as it did previously via a
+    // beforeAll that ran before the first useFakeTimers() call), the engine
+    // schedules its tick loop against the real setTimeout/setImmediate.
+    // clearTimeout/clearImmediate can't cancel a handle created by a
+    // different timer implementation than the one currently installed, so
+    // that loop keeps ticking on real wall-clock time for the rest of the
+    // suite - completely independent of vi.advanceTimersByTime() - and can
+    // fire buffered/scheduled callbacks at effectively random moments.
     vi.useFakeTimers()
     cyre.clear()
     await cyre.init()
   })
 
   afterEach(() => {
-    vi.useRealTimers()
+    // Clear (which stops the quartz engine) MUST happen while the same
+    // fake timers that scheduled its pending tick are still active, so the
+    // cancellation actually works. Switching back to real timers first, as
+    // this used to do, leaves the engine's tick handle uncancellable and
+    // lets it keep running into the next test.
     cyre.clear()
+    vi.useRealTimers()
   })
 
   describe('Basic Buffer Behavior', () => {
@@ -122,13 +124,15 @@ describe('Cyre Buffer Protection', () => {
       expect(handler).not.toHaveBeenCalled()
 
       // Advance time but not enough to trigger
-      vi.advanceTimersByTime(500)
+      await vi.advanceTimersByTimeAsync(500)
       expect(handler).not.toHaveBeenCalled()
 
-      // Advance past buffer window - just verify timing behavior
-      vi.advanceTimersByTime(400)
+      // Advance past buffer window - handler should now fire once with the
+      // last payload (default overwrite strategy)
+      await vi.advanceTimersByTimeAsync(400)
 
-      // In test environment, execution might not happen, but timing behavior is verified
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('call2')
     })
 
     it('should handle multiple buffer windows', async () => {
@@ -144,16 +148,19 @@ describe('Cyre Buffer Protection', () => {
       await cyre.call('multi-buffer', 'batch1-item1')
       await cyre.call('multi-buffer', 'batch1-item2')
 
-      vi.advanceTimersByTime(400)
+      await vi.advanceTimersByTimeAsync(400)
 
       // Second buffer window
       await cyre.call('multi-buffer', 'batch2-item1')
       await cyre.call('multi-buffer', 'batch2-item2')
 
-      vi.advanceTimersByTime(400)
+      await vi.advanceTimersByTimeAsync(400)
 
-      // Verify buffer mechanism is working
-      expect(handler).not.toHaveBeenCalled() // May not execute in test environment
+      // Each window closes independently and delivers its own last payload
+      // (default overwrite strategy)
+      expect(handler).toHaveBeenCalledTimes(2)
+      expect(handler).toHaveBeenNthCalledWith(1, 'batch1-item2')
+      expect(handler).toHaveBeenNthCalledWith(2, 'batch2-item2')
     })
   })
 
@@ -253,7 +260,7 @@ describe('Cyre Buffer Protection', () => {
       expect(removed).toBe(true)
 
       // Advance time
-      vi.advanceTimersByTime(600)
+      await vi.advanceTimersByTimeAsync(600)
 
       // Handler shouldn't be called
       expect(handler).not.toHaveBeenCalled()
@@ -350,7 +357,7 @@ describe('Cyre Buffer Protection', () => {
       expect(handler).not.toHaveBeenCalled()
 
       // Advance time to trigger buffer
-      vi.advanceTimersByTime(300)
+      await vi.advanceTimersByTimeAsync(300)
 
       // Buffer mechanism working (execution may not happen in test environment)
     })
@@ -371,7 +378,7 @@ describe('Cyre Buffer Protection', () => {
       cyre.clear()
 
       // Advance time - handler shouldn't be called
-      vi.advanceTimersByTime(600)
+      await vi.advanceTimersByTimeAsync(600)
 
       expect(handler).not.toHaveBeenCalled()
     })
@@ -410,7 +417,7 @@ describe('Cyre Buffer Protection', () => {
       expect(result.message).toContain('buffered')
 
       // Execute buffer
-      vi.advanceTimersByTime(400)
+      await vi.advanceTimersByTimeAsync(400)
 
       // Verify buffering worked (execution may not happen in test environment)
     })

@@ -21,15 +21,22 @@ import {cyre, useBranch, useGroup, log} from 'cyre'
  *  - detectChanges        sensor gate that skips unchanged readings
  *  - dispatch: race       fastest ground station wins the signal lock
  *  - useGroup             one call, whole-constellation safe-mode broadcast
- *  - explicit chaining    anomaly -> escalate -> notify-operator
+ *  - IntraLink chaining   anomaly -> escalate -> notify-operator, driven by
+ *                         explicit calls (see the note below on why)
  *  - cyre.getMetrics/get  live introspection dashboard
  *  - lock/pause/resume/shutdown
  *
  * Note on "IntraLink": Cyre's docs describe a handler's `{id, payload}`
- * return value auto-triggering the next channel. That auto-chaining isn't
- * actually wired up in the current dispatch path, so the escalation chain
- * below composes channels explicitly with `branch.call(...)` instead —
- * which does work, and reads just as clearly.
+ * return value auto-triggering the next channel via cyre-dispatch.ts's
+ * followIntraLink() step. That auto-chaining IS implemented and verified
+ * working (see hook-and-chaining-demo.ts, section 3) - an earlier version of
+ * this comment claimed otherwise and was wrong. The escalation chain below
+ * still composes channels with explicit `ops.call(...)` rather than the
+ * `{id, payload}` return shape, simply because each step here also needs to
+ * do async work (logging, awaiting the next call) and return its OWN result
+ * shape (`{handled, report}`, `{escalated, report}`) back up the chain -
+ * that's a genuine reason to prefer explicit calls over auto-chaining in
+ * this specific case, not a workaround for a missing feature.
  */
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -247,7 +254,7 @@ function buildMissionControl() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 3. ALERTS — explicit escalation chain + race-dispatch ground stations
+// 3. ALERTS — escalation chain (explicit calls) + race-dispatch ground stations
 // ─────────────────────────────────────────────────────────────────────────
 
 function buildAlertsAndGroundStations() {

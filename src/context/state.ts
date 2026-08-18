@@ -118,20 +118,15 @@ export const io = Object.freeze({
 
 // Keep existing subscribers and timeline exports (unchanged)
 export const subscribers = {
-  add: (subscriber: ISubscriber): void => {
-    if (!subscriber?.id || !subscriber?.handler) {
+  set: (subscriber: ISubscriber): void => {
+    if (!subscriber?.id || !Array.isArray(subscriber.handlers)) {
       throw new Error('Invalid subscriber format')
     }
     subscriberStore.set(subscriber.id, subscriber)
   },
   get: (id: StateKey): ISubscriber | undefined => subscriberStore.get(id),
-  forget: (id: StateKey): boolean => {
-    const result = subscriberStore.forget(id)
-    return result
-  },
-  clear: (): void => {
-    subscriberStore.clear()
-  },
+  forget: (id: StateKey): boolean => subscriberStore.forget(id),
+  clear: (): void => subscriberStore.clear(),
   getAll: (): ISubscriber[] => subscriberStore.getAll()
 }
 

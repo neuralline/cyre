@@ -16,25 +16,26 @@ import {sensor} from './components/sensor'
 import {bufferState} from './context/buffer-state'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
+import {pathEngine} from './schema/path-engine'
 
 import payloadState from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
 
-//import {schedule} from './orchestration/cyre-schedule'
+import {schedule} from './components/cyre-schedule'
 import {useDispatch} from './components/cyre-dispatch'
 
-/* 
+/*
     Neural Line
     Reactive event manager
     C.Y.R.E ~/`SAYER`/
     Q0.0U0.0A0.0N0.0T0.0U0.0M0 - I0.0N0.0C0.0E0.0P0.0T0.0I0.0O0.0N0.0S0
-    Version 4.5.0 2025 with Intelligent System Orchestration
+    Version 4.6.0 2026 with Intelligent System Orchestration
 
     Intelligent system processes:
     - Adaptive breathing with stress-responsive adjustments
-    - Smart memory cleanup with performance impact analysis  
+    - Smart memory cleanup with performance impact analysis
     - Proactive performance monitoring with actionable insights
     - Automated state persistence with conflict resolution
     - Comprehensive health checks with self-healing
@@ -45,9 +46,9 @@ import {useDispatch} from './components/cyre-dispatch'
         cyre.on('taxi', number => {
             console.log('Calling taxi @', number)
         })
-        cyre.call('taxi') 
+        cyre.call('taxi')
 
-       
+
 
         Path System Features:
         - Hierarchical channel organization: 'app/users/profile/settings'
@@ -61,15 +62,15 @@ import {useDispatch} from './components/cyre-dispatch'
         cyre.on('user-profile', handler)
         cyre.call('user-profile', newData)
 
-        // path-based  
+        // path-based
         cyre.action({id: 'user-profile', path: 'app/users/profile', payload: userData})
 
     Flow: call() → processCall() → applyPipeline() → dispatch() → cyreExecute() → .on() → [IntraLink → call()]
 
 
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
-    
-     
+
+
 
 */
 
@@ -85,13 +86,13 @@ export interface CyreInstance {
   reset: () => void
 
   // Orchestration integration
-  //orchestration: typeof import('./orchestration/orchestration-engine').orchestration
+  orchestration: typeof import('./orchestration/orchestration-engine').orchestration
 
   // Path system
   path: () => string
 
   // Developer experience helpers
-  //schedule: typeof import('./components/cyre-schedule').schedule
+  schedule: typeof import('./components/cyre-schedule').schedule
 
   // State methods
   get: (id: string) => ActionPayload | undefined
@@ -219,7 +220,7 @@ const action = (
     const errorMessage = error instanceof Error ? error.message : String(error)
     sensor.error(
       'system',
-      '`Channel registration failed: ${errorMessage}`',
+      `Channel registration failed: ${errorMessage}`,
       'app/channel'
     )
     return {ok: false, message: `Channel registration failed: ${errorMessage}`}
@@ -315,7 +316,12 @@ export const call = async (
 
         const debounceStart = action._debounceStart || Date.now()
         if (action.maxWait && Date.now() - debounceStart >= action.maxWait) {
-          const tempPayload = bufferState.get(action.id)
+          // bufferState.get() already returns the raw payload (not a
+          // wrapper) - has() distinguishes "no entry" from "entry exists
+          // and its payload happens to be falsy/undefined"
+          const tempPayload = bufferState.has(action.id)
+            ? bufferState.get(action.id)
+            : req
           bufferState.forget(action.id)
           io.set({...action, _debounceStart: undefined})
           return await processCall(action, tempPayload)
@@ -328,7 +334,11 @@ export const call = async (
         action.debounce,
         async () => {
           try {
-            const latestPayload = bufferState.get(action.id)
+            // Same has()/get() pattern as above - bufferState.get() already
+            // returns the raw payload
+            const latestPayload = bufferState.has(action.id)
+              ? bufferState.get(action.id)
+              : req
             const currentAction = io.get(action.id)
             if (!currentAction) return
 
@@ -361,31 +371,67 @@ export const call = async (
     // BUFFER: Use buffer state for temporary storage
     if (action.buffer && action.buffer.window > 0) {
       const bufferId = `buffer-${action.id}`
+      const bufferConfig = action.buffer
 
       if (!timeline.get(bufferId)) {
-        TimeKeeper.keep(
-          action.buffer.window,
-          async () => {
-            try {
-              const finalPayload = bufferState.get(action.id) || req
-              bufferState.forget(action.id)
-              return await processCall(action, finalPayload)
-            } catch (error) {
-              return {
-                ok: false,
-                payload: null,
-                message: `Buffer execution failed: ${error}`,
-                error: String(error)
+        // A named, self-recursive opener rather than a single inline
+        // TimeKeeper.keep call: if a new payload lands while this window's
+        // callback is still dispatching (processCall can take a while),
+        // the window below re-opens itself for that payload instead of
+        // leaving it stranded with nothing scheduled to collect it.
+        const openBufferWindow = (): void => {
+          TimeKeeper.keep(
+            bufferConfig.window,
+            async () => {
+              // bufferState.get() returns the raw payload directly (not a
+              // wrapper) - has() is what tells us whether an entry exists
+              // at all, since the payload itself may legitimately be
+              // falsy/undefined. getTimestamp() is the separate signal for
+              // "has this entry been overwritten since I last looked at it".
+              const hadEntry = bufferState.has(action.id)
+              const finalPayload = hadEntry ? bufferState.get(action.id) : req
+              const snapshotTimestamp = bufferState.getTimestamp(action.id)
+
+              const settleBuffer = (): void => {
+                if (!bufferState.has(action.id)) return // already gone
+
+                if (bufferState.getTimestamp(action.id) === snapshotTimestamp) {
+                  // Nothing new arrived during dispatch - safe to clear
+                  bufferState.forget(action.id)
+                } else {
+                  // A call landed mid-dispatch after this window's timer
+                  // was already committed to firing once (repeat: 1) and
+                  // self-removing - open the next window for it now rather
+                  // than losing it or silently folding it into whatever
+                  // window happens to be created by some later call
+                  openBufferWindow()
+                }
               }
-            }
-          },
-          1,
-          bufferId
-        )
+
+              try {
+                const result = await processCall(action, finalPayload)
+                settleBuffer()
+                return result
+              } catch (error) {
+                settleBuffer()
+                return {
+                  ok: false,
+                  payload: null,
+                  message: `Buffer execution failed: ${error}`,
+                  error: String(error)
+                }
+              }
+            },
+            1,
+            bufferId
+          )
+        }
+
+        openBufferWindow()
       }
 
       // Use dedicated append method for buffer strategy
-      if (action.buffer.strategy === 'append') {
+      if (bufferConfig.strategy === 'append') {
         bufferState.append(action.id, req)
       } else {
         bufferState.set(action.id, req) // Default overwrite
@@ -394,8 +440,8 @@ export const call = async (
       return {
         ok: true,
         payload: req,
-        message: `Call buffered - execution scheduled in ${action.buffer.window}ms`,
-        metadata: {bufferWindow: action.buffer.window}
+        message: `Call buffered - execution scheduled in ${bufferConfig.window}ms`,
+        metadata: {bufferWindow: bufferConfig.window}
       }
     }
 
@@ -424,7 +470,15 @@ const forget = (id: string): boolean => {
   try {
     const actionRemoved = io.forget(id)
     const subscriberRemoved = subscribers.forget(id)
-    timeline.forget(id)
+    // Route through TimeKeeper rather than clearing the timeline map
+    // directly - that also cleans up QuartzEngine's own bookkeeping
+    // (execution/precision groups, in-flight dispatch guard) for this id,
+    // which a bare timeline.forget() leaves stale
+    TimeKeeper.forget(id)
+    // Keep the path engine's index in sync too - otherwise a forgotten
+    // channel's id lingers in pathToChannels/the path tree and can still
+    // surface from pathPlugin.find/on/bulkCall after it's gone
+    pathEngine.remove(id)
 
     // Remove from groups
     //removeChannelFromGroups(id)
@@ -468,7 +522,20 @@ const reset = (): void => {
 
     io.clear()
     subscribers.clear()
-    timeline.clear()
+    // TimeKeeper.reset() rather than a bare timeline.clear() - it also
+    // stops the quartz engine and clears its own internal bookkeeping
+    // (execution/precision groups, in-flight dispatch guard, metrics),
+    // so nothing is left running against a timeline that was just wiped
+    // out from under it
+    TimeKeeper.reset()
+    // bufferState is a separate module-level store from timeline/io and
+    // was never cleared here - a buffer/debounce payload accumulated in
+    // one test (or one system generation) could leak into the next
+    bufferState.clear()
+    // Same reasoning as bufferState - pathEngine keeps its own foreign-key
+    // indexes (path/segment/depth -> channel id, plus the tree) separate
+    // from io, so clearing io alone left stale path entries behind
+    pathEngine.clear()
     //metrics.reset()
     // metricsState.clear()
     payloadState.clear()
@@ -482,7 +549,7 @@ const reset = (): void => {
   }
 }
 /**
- * Main CYRE instance with intelligent system orchestration
+ * Main CYRE instance
  */
 export const cyre: CyreInstance = Object.freeze({
   // Core methods
@@ -493,17 +560,13 @@ export const cyre: CyreInstance = Object.freeze({
   forget,
   clear: reset,
   reset,
-  // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
 
-  // SEAMLESS QUERY INTEGRATION
-  //query,
   path: () => {
     return ''
   },
   // DEVELOPER EXPERIENCE HELPERS
-
-  //schedule,
+  schedule,
   // ENHANCED METRICS SYSTEM
   // Add metrics interface
 

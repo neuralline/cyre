@@ -26,6 +26,52 @@ import {getHandlers} from './cyre-on'
 /**
  * Main dispatch function with proper payload flow
  */
+const isIntraLinkSignal = (
+  value: unknown
+): value is {id: string; payload?: ActionPayload} => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const keys = Object.keys(value as object)
+  const onlyExpectedKeys =
+    keys.every(k => k === 'id' || k === 'payload') && keys.includes('id')
+  if (!onlyExpectedKeys) return false
+  if (typeof (value as any).id !== 'string') return false
+  return io.get((value as any).id) !== undefined // only chain to a real, registered channel
+}
+
+const MAX_CHAIN_DEPTH = 10
+
+const followIntraLink = async (
+  response: CyreResponse,
+  depth: number
+): Promise<CyreResponse> => {
+  if (!response.ok || !isIntraLinkSignal(response.payload)) return response
+
+  if (depth >= MAX_CHAIN_DEPTH) {
+    sensor.warn(
+      `IntraLink chain aborted after ${MAX_CHAIN_DEPTH} hops (possible cycle) at "${(response.payload as any).id}"`
+    )
+    return response
+  }
+
+  const {id: nextId, payload: nextPayload} = response.payload as {
+    id: string
+    payload?: ActionPayload
+  }
+  // dynamic import to dodge the circular dependency with app.ts —
+  // same pattern already used in path-plugin.ts's bulk-call path
+  const {call} = await import('../app')
+  const chainResult = await call(nextId, nextPayload)
+
+  return {
+    ...response,
+    metadata: {
+      ...response.metadata,
+      intraLink: {id: nextId, payload: nextPayload},
+      chainResult
+    }
+  }
+}
+
 export const useDispatch = async (
   action: IO,
   payload?: ActionPayload
@@ -122,7 +168,7 @@ export const useDispatch = async (
     // STEP 3: Save response payload after execution complete
     payloadState.setRes(action.id, response, correlationId)
 
-    return response
+    return await followIntraLink(response, 0)
   } catch (dispatchError) {
     const errorMessage =
       dispatchError instanceof Error

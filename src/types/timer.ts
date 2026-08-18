@@ -50,6 +50,18 @@ export interface Timer {
   delay?: number
   interval?: number
   hasExecutedOnce?: boolean
+  // When set, TimeKeeper reschedules this timer by calling recompute(from)
+  // instead of doing fixed-interval math (baseInterval + drift compensation
+  // + stress stretching) - used for calendar-based recurrence (cron/time-of-
+  // day triggers) where the next fire time is an absolute wall-clock instant
+  // computed fresh each time, not a relative offset from the previous one.
+  // Returning undefined means "no future occurrence" - the timer is removed
+  // exactly as if a plain repeat count had hit zero. Because both
+  // QuartzEngine.scheduleNext() (the normal post-execution reschedule path)
+  // and TimeKeeper.resume() (after a pause) funnel through this same check,
+  // a paused calendar timer resumes by recomputing from the actual resume
+  // time rather than resuming on a stale pre-pause interval.
+  recompute?: (from: number) => number | undefined
 }
 
 export interface TimekeeperMetrics {

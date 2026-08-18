@@ -10,7 +10,7 @@ import payloadState from '../context/payload-state'
 /*
 
       C.Y.R.E - C.A.L.L - P.R.O.C.E.S.S.I.N.G
-      
+
       Fixed infinite repeats handling:
       - Proper repeat: true logic for TimeKeeper
       - Fixed callback execution pattern
@@ -48,7 +48,15 @@ export async function processCall(
 
     // SCHEDULING LOGIC
     if (action._hasScheduling) {
-      sensor.sys(action)
+      const scheduleDetails = [
+        `interval:${action.interval || 0}ms`,
+        action.delay !== undefined ? `delay:${action.delay}ms` : undefined,
+        `repeat:${action.repeat ?? 1}`
+      ]
+        .filter(Boolean)
+        .join(' ')
+      sensor.sys(action.id, 'scheduled execution', scheduleDetails)
+
       const result = TimeKeeper.keep(
         action.interval || 0,
         async () => await useDispatch(action, finalPayload),
