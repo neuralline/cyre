@@ -72,29 +72,24 @@ describe('CYRE Interval Behavior', () => {
       // Setup the handler
       cyre.on(ACTION_ID, (payload: any) => {
         const elapsed = getElapsedTime()
-        console.log(`[EXEC ${elapsed}ms] Counter: ${payload.counter}`)
         executionTimes.push(elapsed)
         return {executed: true}
       })
 
       // Call the action
-      console.log('[TEST] Calling action with interval', SMALL_INTERVAL)
       await cyre.call(ACTION_ID, {counter: 1})
 
       // Wait for execution to complete with buffer
       const waitTime = SMALL_INTERVAL * 2
-      console.log(`[TEST] Waiting ${waitTime}ms for execution...`)
       await new Promise(resolve => setTimeout(resolve, waitTime))
 
-      console.log('[TEST] Execution times:', executionTimes)
-
-      // Verify execution occurred
+      // Verify execution occurred - unconditional, so a regression that
+      // stops the interval from ever firing actually fails this test
+      // instead of silently passing on an empty array
       expect(executionTimes.length).toBeGreaterThan(0)
 
       // First execution should wait for interval (not immediate)
-      if (executionTimes.length > 0) {
-        expect(executionTimes[0]).toBeGreaterThanOrEqual(SMALL_INTERVAL * 0.9)
-      }
+      expect(executionTimes[0]).toBeGreaterThanOrEqual(SMALL_INTERVAL * 0.9)
     },
     TEST_TIMEOUT
   )
@@ -128,7 +123,6 @@ describe('CYRE Interval Behavior', () => {
       // Setup the handler
       cyre.on(ACTION_ID, (payload: any) => {
         const elapsed = getElapsedTime()
-        console.log(`[EXEC ${elapsed}ms] Payload:`, payload)
 
         executions.push({
           time: elapsed,
@@ -139,21 +133,17 @@ describe('CYRE Interval Behavior', () => {
       })
 
       // Call with final payload (we'll just test one payload to simplify)
-      console.log('[TEST] Calling with final payload')
       await cyre.call(ACTION_ID, {value: 'final'})
 
       // Wait for execution with buffer
-      console.log(`[TEST] Waiting ${SMALL_INTERVAL * 2}ms for execution...`)
       await new Promise(resolve => setTimeout(resolve, SMALL_INTERVAL * 2))
 
-      // Verify some execution occurred
+      // Verify execution occurred - unconditional
       expect(executions.length).toBeGreaterThan(0)
 
-      // If we have executions, the last one should have our payload
-      if (executions.length > 0) {
-        const lastExecution = executions[executions.length - 1]
-        expect(lastExecution.payload.value).toBe('final')
-      }
+      // The (only) execution should carry our payload
+      const lastExecution = executions[executions.length - 1]
+      expect(lastExecution.payload.value).toBe('final')
     },
     TEST_TIMEOUT
   )
@@ -182,7 +172,6 @@ describe('CYRE Interval Behavior', () => {
         // Setup handler
         cyre.on(actionId, (payload: any) => {
           const elapsed = getElapsedTime()
-          console.log(`[EXEC ${elapsed}ms] ${actionId}: ${payload.value}`)
           executionsByAction[actionId] = true // Mark as executed
           return {executed: true}
         })
@@ -198,17 +187,14 @@ describe('CYRE Interval Behavior', () => {
 
       // Call each action
       for (const actionId of ACTION_IDS) {
-        console.log(`[TEST] Calling ${actionId}`)
         await cyre.call(actionId, {value: actionId})
       }
 
       // Wait for all executions
-      console.log(`[TEST] Waiting ${SMALL_INTERVAL * 2}ms for executions...`)
       await new Promise(resolve => setTimeout(resolve, SMALL_INTERVAL * 2))
 
       // Verify each action executed at least once
       Object.entries(executionsByAction).forEach(([actionId, executed]) => {
-        console.log(`[TEST] ${actionId} executed: ${executed}`)
         expect(executed).toBe(true)
       })
     },
@@ -241,31 +227,27 @@ describe('CYRE Interval Behavior', () => {
       // Setup the handler
       cyre.on(ACTION_ID, (payload: any) => {
         const elapsed = getElapsedTime()
-        console.log(`[EXEC ${elapsed}ms] Value: ${payload.value}`)
         lastExecutedValue = payload.value
         return {executed: true}
       })
 
       // First call
-      console.log('[TEST] First call - value: first')
       await cyre.call(ACTION_ID, {value: 'first'})
 
       // Small delay, then override with second call
       await new Promise(resolve => setTimeout(resolve, 20))
-      console.log('[TEST] Second call - value: second (should override)')
       await cyre.call(ACTION_ID, {value: 'second'})
 
       // Wait for execution
-      console.log(`[TEST] Waiting ${SMALL_INTERVAL * 2}ms for execution...`)
       await new Promise(resolve => setTimeout(resolve, SMALL_INTERVAL * 2))
 
-      // Verify the last execution used the second value
-      console.log(`[TEST] Last executed value: ${lastExecutedValue}`)
-
-      // Only check if execution happened
-      if (lastExecutedValue !== null) {
-        expect(lastExecutedValue).toBe('second')
-      }
+      // Verify the last execution used the second value. This used to be
+      // guarded by `if (lastExecutedValue !== null)` with no unconditional
+      // check that execution happened at all - if the override silently
+      // broke and the handler never ran, the whole test passed without
+      // asserting anything. Now a missed execution actually fails it.
+      expect(lastExecutedValue).not.toBeNull()
+      expect(lastExecutedValue).toBe('second')
     },
     TEST_TIMEOUT
   )

@@ -14,18 +14,26 @@ import type {
 import type {Priority, StateKey} from '../types/core'
 import {memoize} from '../libs/utils'
 import {io, subscribers, timeline} from './state'
+import {scheduleState} from './schedule-state'
+import {orchestrationState} from './orchestration-state'
 import {createStore} from './create-store'
 
 /*
 
       C.Y.R.E - M.E.T.R.I.C.S - S.T.A.T.E
-      
+
       Centralized metrics state management with breathing authority:
       - Single source of truth via stores.quantum
       - Breathing system has authority over system flags
       - Clean separation: hibernating (TimeKeeper) vs recuperating (system)
       - Provides .getMetrics() API for cyre.getMetrics()
       - Pre-computed flags for hot path optimization
+      - Aware of scheduleState/orchestrationState (schedule tasks and
+        orchestrations), not just io/subscribers/timeline - the scheduler
+        and orchestration engine each keep their own domain-level registry
+        (see context/schedule-state.ts, context/orchestration-state.ts)
+        alongside the shared TimeKeeper timeline, so system-wide metrics
+        report their counts too instead of only knowing about raw timers
 
 */
 
@@ -530,7 +538,15 @@ export const metricsState = {
           channels: io.getAll().length,
           subscribers: subscribers.getAll().length,
           timeline: timeline.getAll().length,
-          activeFormations: state.activeFormations
+          activeFormations: state.activeFormations,
+          // scheduleState/orchestrationState are domain-level registries
+          // that sit alongside the shared TimeKeeper timeline (see
+          // context/schedule-state.ts, context/orchestration-state.ts) -
+          // without these, system-wide metrics only ever showed raw timer
+          // counts and had no idea scheduled tasks or orchestrations
+          // existed at all
+          scheduledTasks: scheduleState.tasks.size(),
+          orchestrations: orchestrationState.runtimes.size()
         },
         flags: {
           canCall: state.flags.canCall,
@@ -617,6 +633,13 @@ export const metricsState = {
             detectChanges: channel.detectChanges
           }
         }))
+
+        // Same domain-level registries surfaced in getMetrics()'s
+        // stores.scheduledTasks/orchestrations above, kept alongside the
+        // channels list here since exportMetrics() is the "give me
+        // everything registered" view
+        result.scheduledTasks = scheduleState.tasks.size()
+        result.orchestrations = orchestrationState.runtimes.size()
       }
 
       result.timestamp = Date.now()

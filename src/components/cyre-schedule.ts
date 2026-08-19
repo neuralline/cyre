@@ -316,6 +316,16 @@ export const schedule = {
    */
   task: (config: ScheduleConfig): TaskResult => {
     try {
+      // Same registration gate cyre.action()/cyre.on()/orchestration.keep()
+      // already go through - previously missing here, so cyre.lock() had
+      // no effect on schedule.task() at all, silently defeating the
+      // "no more registrations past this point" guarantee lock() gives
+      // for everything else.
+      const registerCheck = metricsState.canRegister()
+      if (!registerCheck.allowed) {
+        return {ok: false, message: registerCheck.messages.join(', ')}
+      }
+
       if (!config.id || !config.triggers || config.triggers.length === 0) {
         return {
           ok: false,
@@ -537,6 +547,19 @@ export const schedule = {
       sensor.error(taskId, String(error), 'task-cancel-error')
       return false
     }
+  },
+
+  /**
+   * Cancel every scheduled task - called from cyre's top-level reset()/
+   * shutdown() so a system reset doesn't leave stale scheduleState entries
+   * pointing at timers TimeKeeper.reset() just destroyed out from under
+   * them. cancel() already does the right per-task cleanup (forget each
+   * trigger timer + remove from all three scheduleState stores), so this
+   * is just "do that for everything, before the raw timeline/io stores it
+   * depends on get wiped".
+   */
+  reset: (): void => {
+    activeTasks.getAll().forEach(task => schedule.cancel(task.id))
   },
 
   pause: (taskId: string): boolean => {

@@ -4,7 +4,7 @@
 import {io, timeline} from '../context/state'
 import {sensor} from '../components/sensor'
 import {metricsState} from '../context/metrics-state'
-import {createStore} from '../context/create-store'
+import {orchestrationState} from '../context/orchestration-state'
 import {call as cyreCall} from '../app'
 import {subscribe, removeHandler} from '../components/cyre-on'
 import {TimeKeeper} from '../components/cyre-timekeeper'
@@ -32,12 +32,13 @@ import type {
 
 */
 
-// Runtime storage for orchestration state - shared createStore(), same pattern
-// as io/subscribers/timeline in context/state.ts, so orchestration runtime is
-// visible to the rest of the app (metrics export, introspection) instead of
-// living in a module-private Map only this file can see.
-const orchestrationRuntimes = createStore<OrchestrationRuntime>()
-const triggerSubscriptions = createStore<() => void>()
+// Runtime storage for orchestration state now lives in
+// context/orchestration-state.ts, same pattern as io/subscribers/timeline in
+// context/state.ts, so orchestration runtime is visible to the rest of the
+// app (metrics export, introspection, reset) instead of living in a
+// module-private store only this file can see.
+const {runtimes: orchestrationRuntimes, triggerSubscriptions} =
+  orchestrationState
 
 // Orchestration metadata for timeline entries
 interface OrchestrationMetadata {
@@ -216,6 +217,51 @@ const activate = (
 }
 
 /**
+ * Pause an orchestration's TimeKeeper-backed triggers ('time'/'condition')
+ * in place, without tearing down the runtime or its channel-trigger
+ * subscriptions - mirrors schedule.pause() in cyre-schedule.ts. Unlike
+ * activate(id, false), this doesn't forget the timers or flip
+ * runtime.status to 'inactive'; it just marks each trigger timer paused so
+ * resume() below can recalculate correctly. 'channel' triggers aren't
+ * TimeKeeper-backed at all (they're live cyre.on() subscriptions), so
+ * there's nothing to pause for them here - same scope as cyre.pause()
+ * never blocking direct cyre.call()s on regular channels either.
+ */
+const pause = (orchestrationId: string): boolean => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) return false
+
+  runtime.config.triggers?.forEach((trigger, index) => {
+    if (trigger.type === 'time' || trigger.type === 'condition') {
+      TimeKeeper.pause(`${orchestrationId}-trigger-${index}`)
+    }
+  })
+
+  return true
+}
+
+/**
+ * Resume an orchestration paused via pause() above. Goes through
+ * TimeKeeper.resume(), which is recompute-aware (see
+ * Timer['recompute'] in types/timer.ts and QuartzEngine.scheduleNext() in
+ * cyre-timekeeper.ts) - a cron-based 'time' trigger paused for hours
+ * recalculates its next occurrence from the actual resume time rather than
+ * reusing a stale pre-pause schedule.
+ */
+const resume = (orchestrationId: string): boolean => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) return false
+
+  runtime.config.triggers?.forEach((trigger, index) => {
+    if (trigger.type === 'time' || trigger.type === 'condition') {
+      TimeKeeper.resume(`${orchestrationId}-trigger-${index}`)
+    }
+  })
+
+  return true
+}
+
+/**
  * Call orchestration directly (like cyre.call) - replaces trigger
  * Immediate execution with payload, similar to channel calls
  */
@@ -303,6 +349,19 @@ const forget = (orchestrationId: string): boolean => {
 
   sensor.debug(orchestrationId, 'info', 'orchestration-forgotten')
   return true
+}
+
+/**
+ * Remove every orchestration - called from cyre's top-level reset()/
+ * shutdown() so a system reset doesn't leave stale OrchestrationRuntime /
+ * triggerSubscription entries pointing at timers TimeKeeper.reset() just
+ * destroyed out from under them. forget() already does the right thing
+ * per-orchestration (deactivate + unsubscribe channel triggers + remove
+ * runtime), so this is just "do that for everything, before the raw
+ * io/subscriber/timeline stores it depends on get wiped".
+ */
+const reset = (): void => {
+  list().forEach(runtime => forget(runtime.config.id))
 }
 
 /**
@@ -861,6 +920,9 @@ export const orchestration = {
   get,
   list,
   forget, // RENAMED: Remove orchestration (replaces remove)
+  pause, // NEW: pause TimeKeeper-backed triggers in place (mirrors schedule.pause)
+  resume, // NEW: resume paused triggers - recompute-aware via TimeKeeper
+  reset, // NEW: remove every orchestration - used by cyre.reset()/shutdown()
 
   // Additional utility methods
   getStatus: (orchestrationId: string) => {

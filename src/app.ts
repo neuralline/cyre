@@ -14,6 +14,7 @@ import {io, subscribers, timeline} from './context/state'
 import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
 import {sensor} from './components/sensor'
 import {bufferState} from './context/buffer-state'
+import {pendingState} from './context/pending-state'
 import {CyreActions} from './components/cyre-actions'
 import {processCall} from './components/cyre-call'
 import {pathEngine} from './schema/path-engine'
@@ -71,6 +72,24 @@ import {useDispatch} from './components/cyre-dispatch'
     Cyre's first law: A robot can not injure a human being or allow a human being to be harmed by not helping.
 
 
+
+    CYRE v4.7.0 BREAKING CHANGE - debounce/buffer now settle for real:
+    cyre.call() on a debounced or buffered channel used to return an
+    immediate {ok: true, payload: <echo of your request>, message:
+    "...scheduled..."} ack BEFORE the real handler ever ran - the actual
+    execution happened later inside a TimeKeeper callback whose result
+    nothing could reach. Any caller (HTTP handler, awaiting code, anything)
+    that used that return value got stale/empty data while believing it
+    had a real answer (see claude/server/cyre-client.ts for exactly this
+    surfacing as an empty 200 response). cyre.call() on a debounced/
+    buffered channel now returns a promise that resolves with the REAL
+    processCall() result once that window's deferred execution actually
+    runs - every caller who called into the same window shares and
+    resolves off the same promise. This means await cyre.call(...) on
+    such a channel now genuinely waits up to the full debounce/buffer
+    window before resolving, instead of returning near-instantly - if you
+    were relying on the old fire-and-forget timing, that has changed.
+    See src/context/pending-state.ts for the settle mechanism itself.
 
 */
 
@@ -304,12 +323,19 @@ export const call = async (
       }
     }
 
-    // DEBOUNCE: Use buffer state for temporary storage
+    // DEBOUNCE: shares ONE settle promise per window (pendingState) - every
+    // call landing in the same window returns the SAME promise, resolved
+    // with the REAL processCall() result once the deferred execution
+    // actually runs, instead of each call getting its own immediate
+    // "scheduled" ack that threw the real result away. See
+    // src/context/pending-state.ts for the settle mechanism.
     if (action.debounce && action.debounce > 0) {
       const debounceId = `debounce-${action.id}`
 
       // Store in buffer state (temporary) - ultra-fast set
       bufferState.set(action.id, req)
+
+      const existingPending = pendingState.get(action.id)
 
       if (timeline.get(debounceId)) {
         TimeKeeper.forget(debounceId)
@@ -324,11 +350,19 @@ export const call = async (
             : req
           bufferState.forget(action.id)
           io.set({...action, _debounceStart: undefined})
-          return await processCall(action, tempPayload)
+
+          const result = await processCall(action, tempPayload)
+          // The timer this window's OTHER callers were waiting on just got
+          // cancelled above (TimeKeeper.forget) - without this, they'd
+          // share a promise that would now never resolve on its own.
+          pendingState.settle(action.id, result)
+          return result
         }
       } else {
         io.set({...action, _debounceStart: Date.now()})
       }
+
+      const {promise} = existingPending ?? pendingState.create(action.id)
 
       TimeKeeper.keep(
         action.debounce,
@@ -340,38 +374,51 @@ export const call = async (
               ? bufferState.get(action.id)
               : req
             const currentAction = io.get(action.id)
-            if (!currentAction) return
+            if (!currentAction) {
+              pendingState.settle(action.id, {
+                ok: false,
+                payload: null,
+                message: 'Debounced execution failed: channel no longer exists'
+              })
+              return
+            }
 
             bufferState.forget(action.id)
             io.set({...currentAction, _debounceStart: undefined})
 
-            return await processCall(currentAction, latestPayload)
+            const result = await processCall(currentAction, latestPayload)
+            pendingState.settle(action.id, result)
+            return result
           } catch (error) {
             bufferState.forget(action.id)
-            return {
+            const errorResult: CyreResponse = {
               ok: false,
               payload: null,
               message: `Debounced execution failed: ${error}`,
               error: String(error)
             }
+            pendingState.settle(action.id, errorResult)
+            return errorResult
           }
         },
         1,
         debounceId
       )
 
-      return {
-        ok: true,
-        payload: req,
-        message: `Call debounced - execution scheduled in ${action.debounce}ms`,
-        metadata: {delay: action.debounce}
-      }
+      return promise
     }
 
-    // BUFFER: Use buffer state for temporary storage
+    // BUFFER: shares ONE settle promise per window, same mechanism as
+    // debounce above. Known limitation: a call landing in the narrow gap
+    // between this window's dispatch STARTING and settle() resolving will
+    // attach to and resolve with THIS window's result, even though (per
+    // the reopen logic below) their payload actually carries into the
+    // NEXT window - see src/context/pending-state.ts for the full note.
     if (action.buffer && action.buffer.window > 0) {
       const bufferId = `buffer-${action.id}`
       const bufferConfig = action.buffer
+
+      const existingPending = pendingState.get(action.id)
 
       if (!timeline.get(bufferId)) {
         // A named, self-recursive opener rather than a single inline
@@ -410,16 +457,23 @@ export const call = async (
 
               try {
                 const result = await processCall(action, finalPayload)
+                // Settle THIS window's waiters with THIS window's result
+                // before deciding whether a new window needs to open -
+                // a caller who lands in the reopened window gets its own
+                // new pending promise the next time this branch runs.
+                pendingState.settle(action.id, result)
                 settleBuffer()
                 return result
               } catch (error) {
-                settleBuffer()
-                return {
+                const errorResult: CyreResponse = {
                   ok: false,
                   payload: null,
                   message: `Buffer execution failed: ${error}`,
                   error: String(error)
                 }
+                pendingState.settle(action.id, errorResult)
+                settleBuffer()
+                return errorResult
               }
             },
             1,
@@ -437,12 +491,8 @@ export const call = async (
         bufferState.set(action.id, req) // Default overwrite
       }
 
-      return {
-        ok: true,
-        payload: req,
-        message: `Call buffered - execution scheduled in ${bufferConfig.window}ms`,
-        metadata: {bufferWindow: bufferConfig.window}
-      }
+      const {promise} = existingPending ?? pendingState.create(action.id)
+      return promise
     }
 
     // Direct execution - payload will be saved in processCall -> dispatch
@@ -479,6 +529,15 @@ const forget = (id: string): boolean => {
     // channel's id lingers in pathToChannels/the path tree and can still
     // surface from pathPlugin.find/on/bulkCall after it's gone
     pathEngine.remove(id)
+    // A forgotten channel's in-flight debounce/buffer settle promise (if
+    // any) would otherwise hang forever with no timer left to resolve it -
+    // forget() RESOLVES it (not just deletes it) so any caller still
+    // awaiting this channel's call() is released rather than left hanging
+    pendingState.forget(id, {
+      ok: false,
+      payload: null,
+      message: `Debounced/buffered call cancelled - channel ${id} was forgotten before its window settled`
+    })
 
     // Remove from groups
     //removeChannelFromGroups(id)
@@ -520,6 +579,17 @@ const reset = (): void => {
   try {
     sensor.debug('System reset initiated')
 
+    // Domain-level cleanup first: schedule.reset()/orchestration.reset()
+    // do proper per-task/per-orchestration teardown (forgetting each
+    // trigger timer, unsubscribing orchestration channel triggers via
+    // subscribers) - that needs io/subscribers/TimeKeeper's timeline
+    // still intact to do its job, so this has to run before those raw
+    // stores get wiped below. Skipping this left scheduleState/
+    // orchestrationState holding stale entries that pointed at timers
+    // TimeKeeper.reset() had already destroyed.
+    schedule.reset()
+    orchestration.reset()
+
     io.clear()
     subscribers.clear()
     // TimeKeeper.reset() rather than a bare timeline.clear() - it also
@@ -532,6 +602,17 @@ const reset = (): void => {
     // was never cleared here - a buffer/debounce payload accumulated in
     // one test (or one system generation) could leak into the next
     bufferState.clear()
+    // Same reasoning as bufferState - any debounce/buffer settle promise
+    // still in flight has no timer left to resolve it after
+    // TimeKeeper.reset(); clear() RESOLVES every in-flight entry (not just
+    // deletes it) so nothing is left hanging on a promise that will now
+    // never settle
+    pendingState.clear({
+      ok: false,
+      payload: null,
+      message:
+        'Debounced/buffered call cancelled - system was reset before its window settled'
+    })
     // Same reasoning as bufferState - pathEngine keeps its own foreign-key
     // indexes (path/segment/depth -> channel id, plus the tree) separate
     // from io, so clearing io alone left stale path entries behind
@@ -549,7 +630,7 @@ const reset = (): void => {
   }
 }
 /**
- * Main CYRE instance
+ * Main CYRE instance with intelligent system orchestration
  */
 export const cyre: CyreInstance = Object.freeze({
   // Core methods
@@ -560,8 +641,11 @@ export const cyre: CyreInstance = Object.freeze({
   forget,
   clear: reset,
   reset,
+  // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,
 
+  // SEAMLESS QUERY INTEGRATION
+  //query,
   path: () => {
     return ''
   },
@@ -580,12 +664,41 @@ export const cyre: CyreInstance = Object.freeze({
 
   // Control methods with metrics
   pause: (id?: string) => {
-    TimeKeeper.pause(id)
+    if (id) {
+      // A schedule task's or orchestration's real TimeKeeper timers are
+      // named "<id>-trigger-N", not the bare id (see armCalendarTrigger()
+      // in cyre-schedule.ts / registerTriggers() in orchestration-engine.ts)
+      // - a plain TimeKeeper.pause(id) silently matches nothing for them.
+      // Delegate to whichever subsystem actually owns this id.
+      if (schedule.get(id)) {
+        schedule.pause(id)
+      } else if (orchestration.get(id)) {
+        orchestration.pause(id)
+      } else {
+        TimeKeeper.pause(id)
+      }
+    } else {
+      // No id: pause everything. Every schedule/orchestration timer
+      // already lives in the same shared TimeKeeper timeline as regular
+      // channel timers (see context/state.ts), so this alone covers all
+      // three - nothing extra to delegate to here.
+      TimeKeeper.pause()
+    }
     sensor.debug(id || 'system', 'info', 'system-pause')
   },
 
   resume: (id?: string) => {
-    TimeKeeper.resume(id)
+    if (id) {
+      if (schedule.get(id)) {
+        schedule.resume(id)
+      } else if (orchestration.get(id)) {
+        orchestration.resume(id)
+      } else {
+        TimeKeeper.resume(id)
+      }
+    } else {
+      TimeKeeper.resume()
+    }
     sensor.debug(id || 'system', 'info', 'system-resume')
   },
 

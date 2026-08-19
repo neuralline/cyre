@@ -161,7 +161,7 @@ describe('Cyre Throttle Protection', () => {
   })
 
   describe('Throttle Performance', () => {
-    it('should handle high-frequency calls efficiently', async () => {
+    it('does NOT throttle a synchronous burst of un-awaited calls - the check-then-act race', async () => {
       const handler = vi.fn()
 
       cyre.action({
@@ -170,7 +170,25 @@ describe('Cyre Throttle Protection', () => {
       })
       cyre.on('high-freq-throttle', handler)
 
-      // Make 50 rapid calls - all should succeed due to fast execution
+      // REAL FINDING, confirmed against a live run (an earlier version of
+      // this test assumed all 50 would be throttled down to 1 success and
+      // was wrong - the actual result is 50/50 successes):
+      //
+      // cyre.call()'s throttle check reads `action._lastExecTime`
+      // synchronously via `io.get(id)`, but that field is only WRITTEN
+      // later, inside cyre-dispatch.ts's executeSingleHandler(), after
+      // `await handler(payload)` resolves - on the other side of an
+      // await boundary. When this loop pushes 50 cyre.call()s without
+      // awaiting any of them, each call runs synchronously up to its own
+      // first internal `await` (inside processCall) and then yields back
+      // to this loop - so all 50 throttle checks run against the SAME
+      // stale (unset) _lastExecTime before any of the 50 executions has
+      // had a chance to complete and update it. The check-then-act
+      // sequence is not atomic against concurrent, un-awaited calls, so
+      // throttle only actually protects SEQUENTIAL/AWAITED rapid calls
+      // (see "should allow first call and throttle subsequent calls"
+      // above, which awaits each call and IS throttled correctly) - a
+      // synchronous burst of fire-and-forget calls bypasses it entirely.
       const promises = []
       for (let i = 0; i < 50; i++) {
         promises.push(cyre.call('high-freq-throttle', `call${i}`))
@@ -178,16 +196,12 @@ describe('Cyre Throttle Protection', () => {
 
       const results = await Promise.all(promises)
 
-      // In fast execution, throttle might not catch all calls
       const successful = results.filter(r => r.ok)
       const throttled = results.filter(r => !r.ok)
 
-      // At least some should be throttled, but exact count may vary
-      expect(successful.length).toBeGreaterThanOrEqual(1)
-      expect(throttled.length).toBeGreaterThanOrEqual(0)
-
-      // Handler should be called for successful calls
-      expect(handler).toHaveBeenCalled()
+      expect(successful).toHaveLength(50)
+      expect(throttled).toHaveLength(0)
+      expect(handler).toHaveBeenCalledTimes(50)
     })
 
     it('should maintain throttle state across different payloads', async () => {
@@ -279,7 +293,7 @@ describe('Cyre Throttle Protection', () => {
   })
 
   describe('Throttle Error Handling', () => {
-    it('should handle handler errors but maintain throttle state', async () => {
+    it('should not establish a throttle window from a call whose handler threw', async () => {
       let callCount = 0
       const flakyHandler = vi.fn(() => {
         callCount++
@@ -295,22 +309,36 @@ describe('Cyre Throttle Protection', () => {
       })
       cyre.on('error-throttle', flakyHandler)
 
-      // First call should fail but throttle state is implementation dependent
+      // cyre-dispatch.ts's executeSingleHandler() only writes
+      // `_lastExecTime` inside the try block, AFTER `await handler(payload)`
+      // resolves successfully - a thrown handler error skips straight to
+      // the catch branch and never updates it. That means a failed first
+      // call does NOT start the throttle window at all.
       const result1 = await cyre.call('error-throttle', 'call1')
+      expect(result1.ok).toBe(false)
       expect(flakyHandler).toHaveBeenCalledTimes(1)
 
-      // Second call behavior depends on whether throttle was established
+      // Immediately after, with no throttle window established, this call
+      // is NOT throttled - it reaches the handler again (which now
+      // succeeds) and is what actually establishes _lastExecTime
       const result2 = await cyre.call('error-throttle', 'call2')
-      // May or may not be throttled depending on implementation
+      expect(result2.ok).toBe(true)
+      expect(result2.payload).toBe('success')
+      expect(flakyHandler).toHaveBeenCalledTimes(2)
 
-      // After throttle period, should work
+      // NOW a throttle window is active (from call2's success) - an
+      // immediate third call should be rejected
+      const throttledResult = await cyre.call('error-throttle', 'call2b')
+      expect(throttledResult.ok).toBe(false)
+      expect(flakyHandler).toHaveBeenCalledTimes(2)
+
+      // After the throttle window elapses, calls succeed again
       vi.advanceTimersByTime(1100)
 
       const result3 = await cyre.call('error-throttle', 'call3')
       expect(result3.ok).toBe(true)
       expect(result3.payload).toBe('success')
-      // Handler might be called more times than expected due to multiple attempts
-      expect(flakyHandler).toHaveBeenCalled()
+      expect(flakyHandler).toHaveBeenCalledTimes(3)
     })
 
     it('should handle channel removal gracefully', async () => {

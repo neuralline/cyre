@@ -3,9 +3,9 @@
 
 import {createServer, Server} from 'http'
 import cyre, {log} from '../src'
-import {metrics} from '../src/metrics/integration'
+//import {metrics} from '../src/metrics/integration'
 import {metricsState} from '../src/context/metrics-state'
-import {metricsCore} from '../src/metrics'
+//import {metricsCore} from '../src/metrics'
 
 /*
     C.Y.R.E - S.I.M.P.L.E - S.E.R.V.E.R

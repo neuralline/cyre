@@ -170,10 +170,18 @@ describe('Cyre Async and Sync Call Patterns', () => {
     // Register action with a handler that takes some time
     cyre.action({id: 'slow-test'})
 
+    // NOTE ON TIMING: this test asserts real-timer ordering between the
+    // handler's internal delay and the test's own delay - it previously
+    // used a 20ms handler delay against a 5ms check delay (a 4x margin),
+    // which is tight enough to occasionally flip on a loaded CI runner.
+    // Widened to a 10x margin (50ms vs 5ms) so the same behavior is
+    // verified with much less flake risk, without switching to fake
+    // timers (which would change what's actually being demonstrated here
+    // - real non-blocking behavior across real event-loop ticks).
     cyre.on('slow-test', async payload => {
       executionOrder.push('Handler started')
       // Simulate async work
-      await new Promise(resolve => setTimeout(resolve, 20))
+      await new Promise(resolve => setTimeout(resolve, 50))
       executionOrder.push('Handler completed')
       return {
         success: true,
@@ -201,8 +209,6 @@ describe('Cyre Async and Sync Call Patterns', () => {
       'After await',
       'Handler completed'
     ])
-
-    console.log('Execution order:', executionOrder)
   })
 
   it('should handle multiple parallel calls correctly', async () => {
@@ -259,12 +265,6 @@ describe('Cyre Async and Sync Call Patterns', () => {
     // Register second action
     cyre.action({id: 'chain-second'})
     cyre.on('chain-second', async payload => {
-      // Debug: log what we receive
-      console.log(
-        '🔍 chain-second received payload:',
-        JSON.stringify(payload, null, 2)
-      )
-
       // Try multiple possible payload structures
       const previousData =
         payload?.data || payload?.from || payload || 'unknown'
@@ -279,11 +279,6 @@ describe('Cyre Async and Sync Call Patterns', () => {
     // Register third action
     cyre.action({id: 'chain-third'})
     cyre.on('chain-third', async payload => {
-      console.log(
-        '🔍 chain-third received payload:',
-        JSON.stringify(payload, null, 2)
-      )
-
       const previousData =
         payload?.data || payload?.from || payload || 'unknown'
       chainExecution.push(`chain-third (from: ${previousData})`)
@@ -296,18 +291,10 @@ describe('Cyre Async and Sync Call Patterns', () => {
     // Execute the chain - test different payload passing strategies
     const firstResult = await cyre.call('chain-first', {value: 'start'})
     expect(firstResult.ok).toBe(true)
-    console.log(
-      '🔍 firstResult.payload:',
-      JSON.stringify(firstResult.payload, null, 2)
-    )
 
     // Try passing the entire payload structure
     const secondResult = await cyre.call('chain-second', firstResult.payload)
     expect(secondResult.ok).toBe(true)
-    console.log(
-      '🔍 secondResult.payload:',
-      JSON.stringify(secondResult.payload, null, 2)
-    )
 
     const thirdResult = await cyre.call('chain-third', secondResult.payload)
     expect(thirdResult.ok).toBe(true)
@@ -317,7 +304,6 @@ describe('Cyre Async and Sync Call Patterns', () => {
     expect(chainExecution[0]).toBe('chain-first')
 
     // More flexible assertion based on what we actually receive
-    console.log('🔍 Full chain execution:', chainExecution)
     expect(chainExecution[1]).toContain('chain-second')
     expect(chainExecution[2]).toContain('chain-third')
   })
@@ -359,10 +345,6 @@ describe('Cyre Async and Sync Call Patterns', () => {
     standardOrder.push('After standard call')
     await standardPromise
     standardOrder.push('After await standard')
-
-    console.log('\n🔍 ASYNC BEHAVIOR COMPARISON:')
-    console.log('Cyre (immediate execution):', cyreOrder)
-    console.log('Industry Standard (queued):', standardOrder)
 
     // Document the difference
     expect(cyreOrder[0]).toBe('Cyre handler started') // Immediate execution

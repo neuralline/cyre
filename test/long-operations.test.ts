@@ -8,34 +8,48 @@ import {cyre} from '../src/app'
  */
 
 describe('Quantum Breathing - Long Operations', () => {
+  // Track the dynamically-generated action id so afterEach can clean it up -
+  // this file previously registered a channel + handler and never forgot
+  // it, which (since cyre is a module-level singleton) could leave a
+  // lingering handler/timer bleeding into whatever test file runs next in
+  // the same worker.
+  let registeredActionId: string | undefined
+
   beforeEach(() => {
     // Mock process.exit
     vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
     // Initialize cyre
     cyre.init()
+    registeredActionId = undefined
   })
 
   afterEach(() => {
+    if (registeredActionId) {
+      cyre.forget(registeredActionId)
+    }
     vi.restoreAllMocks()
   })
 
   it('should handle long-running operations with adaptive timing', async () => {
-    console.log('[TEST] Testing long-running operations with adaptive timing')
-
     // Action ID for long-running operation
     const LONG_OPERATION_ID = 'long-operation-test-' + Date.now()
+    registeredActionId = LONG_OPERATION_ID
 
     // Track processed items
     let processedCount = 0
     const processingTimes: number[] = []
+    const itemCount = 10
+    // Require a majority of items to actually complete, not just "at least
+    // one" - the original assertion (processedCount > 0) would pass even if
+    // 9 of 10 calls were silently dropped, which tests almost nothing about
+    // whether the system holds up under a burst of long-running work.
+    const MIN_EXPECTED_PROCESSED = Math.ceil(itemCount / 2)
+
     const completionPromise = new Promise<void>(resolve => {
       // Set up a handler that will resolve the promise after some processing
       cyre.on(LONG_OPERATION_ID, async payload => {
         const startTime = Date.now()
-        console.log(
-          `[HANDLER] Processing item ${payload.index} at ${startTime}`
-        )
 
         // Simulate processing work with varying intensity
         let x = 0
@@ -50,12 +64,8 @@ describe('Quantum Breathing - Long Operations', () => {
         const processTime = endTime - startTime
         processingTimes.push(processTime)
 
-        console.log(
-          `[HANDLER] Processed item ${payload.index} in ${processTime}ms`
-        )
-
         // Resolve the promise once we've processed enough items
-        if (processedCount >= 3) {
+        if (processedCount >= MIN_EXPECTED_PROCESSED) {
           resolve()
         }
 
@@ -77,11 +87,7 @@ describe('Quantum Breathing - Long Operations', () => {
       priority: {level: 'medium'}
     })
 
-    // Start processing items
-    console.log('[TEST] Starting long-running operations')
-
     // Schedule multiple items with increasing processing requirements
-    const itemCount = 10
     for (let i = 0; i < itemCount; i++) {
       cyre
         .call(LONG_OPERATION_ID, {
@@ -107,23 +113,15 @@ describe('Quantum Breathing - Long Operations', () => {
       console.error('[TEST] Timeout waiting for processing:', error)
     }
 
-    console.log(
-      `[TEST] Processed ${processedCount} items with times:`,
-      processingTimes
-    )
+    // A meaningful floor, not just "something happened"
+    expect(processedCount).toBeGreaterThanOrEqual(MIN_EXPECTED_PROCESSED)
+    expect(processingTimes).toHaveLength(processedCount)
 
-    // Only require at least one item to be processed to pass the test
-    expect(processedCount).toBeGreaterThan(0)
-
-    // If we have multiple processed items, check for timing adaptation
-    if (processingTimes.length > 1) {
-      console.log('[TEST] Processing time analysis:', {
-        min: Math.min(...processingTimes),
-        max: Math.max(...processingTimes),
-        avg:
-          processingTimes.reduce((sum, t) => sum + t, 0) /
-          processingTimes.length
-      })
-    }
+    // Actually assert on the timing data instead of only logging it - every
+    // recorded processing time must be a real, non-negative duration
+    processingTimes.forEach(t => {
+      expect(t).toBeGreaterThanOrEqual(0)
+      expect(Number.isFinite(t)).toBe(true)
+    })
   })
 })

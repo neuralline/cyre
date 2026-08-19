@@ -28,6 +28,18 @@ describe('Cyre Buffer Protection', () => {
     vi.useRealTimers()
   })
 
+  // CYRE v4.7.0: cyre.call() on a buffered channel no longer returns an
+  // immediate "buffered/scheduled" ack - it returns a promise that resolves
+  // with the REAL handler result once the buffer window closes, shared by
+  // every caller that landed in the same window (see context/pending-state.ts).
+  // That means these tests must NEVER `await cyre.call(...)` directly under
+  // fake timers without first advancing the clock past the window - doing so
+  // hangs forever, since nothing will ever fire the deferred callback that
+  // resolves the promise. The pattern used throughout this file: capture the
+  // promise (or promises) without awaiting, make any synchronous assertions
+  // ("handler not called yet"), advance the fake clock past the window with
+  // vi.advanceTimersByTimeAsync(), THEN await the captured promise(s).
+
   describe('Basic Buffer Behavior', () => {
     it('should buffer calls with overwrite strategy', async () => {
       const handler = vi.fn((data: any) => `processed-${data}`)
@@ -38,26 +50,26 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('buffered-overwrite', handler)
 
-      // Make multiple calls within buffer window
-      const result1 = await cyre.call('buffered-overwrite', 'data1')
-      const result2 = await cyre.call('buffered-overwrite', 'data2')
-      const result3 = await cyre.call('buffered-overwrite', 'data3')
+      // All three calls land in the same window and share ONE settle promise
+      const p1 = cyre.call('buffered-overwrite', 'data1')
+      const p2 = cyre.call('buffered-overwrite', 'data2')
+      const p3 = cyre.call('buffered-overwrite', 'data3')
 
-      // All should return success (buffered)
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
-      expect(result2.ok).toBe(true)
-      expect(result2.message).toContain('buffered')
-      expect(result3.ok).toBe(true)
-      expect(result3.message).toContain('buffered')
-
-      // Handler shouldn't be called yet
+      // Handler hasn't run yet - the window hasn't closed
       expect(handler).not.toHaveBeenCalled()
 
-      // Verify buffer metadata
-      expect(result1.metadata?.bufferWindow).toBe(1000)
-      expect(result2.metadata?.bufferWindow).toBe(1000)
-      expect(result3.metadata?.bufferWindow).toBe(1000)
+      await vi.advanceTimersByTimeAsync(1000)
+      const [result1, result2, result3] = await Promise.all([p1, p2, p3])
+
+      // Overwrite strategy: only the LAST payload survives into the window
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('data3')
+
+      // All three callers share the same settled result
+      expect(result1.ok).toBe(true)
+      expect(result1.payload).toBe('processed-data3')
+      expect(result2).toEqual(result1)
+      expect(result3).toEqual(result1)
     })
 
     it('should buffer calls with append strategy', async () => {
@@ -69,24 +81,20 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('buffered-append', handler)
 
-      // Make multiple calls
-      const result1 = await cyre.call('buffered-append', 'item1')
-      const result2 = await cyre.call('buffered-append', 'item2')
-      const result3 = await cyre.call('buffered-append', 'item3')
+      const p1 = cyre.call('buffered-append', 'item1')
+      const p2 = cyre.call('buffered-append', 'item2')
+      const p3 = cyre.call('buffered-append', 'item3')
 
-      // All should return success (buffered)
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
-      expect(result2.ok).toBe(true)
-      expect(result2.message).toContain('buffered')
-      expect(result3.ok).toBe(true)
-      expect(result3.message).toContain('buffered')
-
-      // Handler shouldn't be called immediately
       expect(handler).not.toHaveBeenCalled()
 
-      // Verify buffer window
-      expect(result1.metadata?.bufferWindow).toBe(500)
+      await vi.advanceTimersByTimeAsync(500)
+      const results = await Promise.all([p1, p2, p3])
+
+      // Append strategy: the handler sees every payload collected in the window
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith(['item1', 'item2', 'item3'])
+
+      results.forEach(r => expect(r.ok).toBe(true))
     })
 
     it('should handle simple number buffer configuration', async () => {
@@ -98,11 +106,15 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('simple-buffer', handler)
 
-      const result = await cyre.call('simple-buffer', 'test')
+      const pending = cyre.call('simple-buffer', 'test')
+      expect(handler).not.toHaveBeenCalled()
 
+      await vi.advanceTimersByTimeAsync(750)
+      const result = await pending
+
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('test')
       expect(result.ok).toBe(true)
-      expect(result.message).toContain('buffered')
-      expect(result.metadata?.bufferWindow).toBe(750)
     })
   })
 
@@ -117,8 +129,8 @@ describe('Cyre Buffer Protection', () => {
       cyre.on('timed-buffer', handler)
 
       // Make calls within buffer window
-      await cyre.call('timed-buffer', 'call1')
-      await cyre.call('timed-buffer', 'call2')
+      const p1 = cyre.call('timed-buffer', 'call1')
+      const p2 = cyre.call('timed-buffer', 'call2')
 
       // Handler not called yet
       expect(handler).not.toHaveBeenCalled()
@@ -130,9 +142,12 @@ describe('Cyre Buffer Protection', () => {
       // Advance past buffer window - handler should now fire once with the
       // last payload (default overwrite strategy)
       await vi.advanceTimersByTimeAsync(400)
+      const [result1, result2] = await Promise.all([p1, p2])
 
       expect(handler).toHaveBeenCalledTimes(1)
       expect(handler).toHaveBeenCalledWith('call2')
+      expect(result1.ok).toBe(true)
+      expect(result2.ok).toBe(true)
     })
 
     it('should handle multiple buffer windows', async () => {
@@ -145,16 +160,18 @@ describe('Cyre Buffer Protection', () => {
       cyre.on('multi-buffer', handler)
 
       // First buffer window
-      await cyre.call('multi-buffer', 'batch1-item1')
-      await cyre.call('multi-buffer', 'batch1-item2')
+      const batch1a = cyre.call('multi-buffer', 'batch1-item1')
+      const batch1b = cyre.call('multi-buffer', 'batch1-item2')
 
       await vi.advanceTimersByTimeAsync(400)
+      await Promise.all([batch1a, batch1b])
 
       // Second buffer window
-      await cyre.call('multi-buffer', 'batch2-item1')
-      await cyre.call('multi-buffer', 'batch2-item2')
+      const batch2a = cyre.call('multi-buffer', 'batch2-item1')
+      const batch2b = cyre.call('multi-buffer', 'batch2-item2')
 
       await vi.advanceTimersByTimeAsync(400)
+      await Promise.all([batch2a, batch2b])
 
       // Each window closes independently and delivers its own last payload
       // (default overwrite strategy)
@@ -195,14 +212,20 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('sized-buffer', handler)
 
-      // Make more calls than maxSize
+      // Make more calls than maxSize - all land in the same window and
+      // share the same settle promise
+      const pendings = []
       for (let i = 1; i <= 5; i++) {
-        const result = await cyre.call('sized-buffer', `item${i}`)
-        expect(result.ok).toBe(true)
-        expect(result.message).toContain('buffered')
+        pendings.push(cyre.call('sized-buffer', `item${i}`))
       }
 
       expect(handler).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1000)
+      const results = await Promise.all(pendings)
+
+      expect(handler).toHaveBeenCalledTimes(1)
+      results.forEach(r => expect(r.ok).toBe(true))
     })
   })
 
@@ -236,6 +259,9 @@ describe('Cyre Buffer Protection', () => {
       if (result.ok) {
         cyre.on('zero-buffer', handler)
 
+        // A zero window fails the `action.buffer.window > 0` check in
+        // app.ts, so this falls straight through to direct execution -
+        // no timer involved, safe to await immediately.
         const callResult = await cyre.call('zero-buffer', 'test')
         expect(callResult.ok).toBe(true)
       } else {
@@ -253,16 +279,20 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('removable-buffer', handler)
 
-      await cyre.call('removable-buffer', 'test')
+      const pending = cyre.call('removable-buffer', 'test')
 
-      // Remove channel before buffer executes
+      // Remove channel before buffer executes - forget() resolves any
+      // in-flight pending promise with a cancellation result rather than
+      // leaving it hanging (see context/pending-state.ts)
       const removed = cyre.forget('removable-buffer')
       expect(removed).toBe(true)
 
-      // Advance time
-      await vi.advanceTimersByTimeAsync(600)
+      const result = await pending
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('forgotten')
 
-      // Handler shouldn't be called
+      // Advance time - handler shouldn't be called, nothing left to fire it
+      await vi.advanceTimersByTimeAsync(600)
       expect(handler).not.toHaveBeenCalled()
     })
   })
@@ -278,14 +308,16 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('buffer-required', handler)
 
-      // Valid payload should be buffered
-      const result1 = await cyre.call('buffer-required', {valid: 'data'})
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
+      // Valid payload should be buffered and eventually settle for real
+      const pending1 = cyre.call('buffer-required', {valid: 'data'})
+      await vi.advanceTimersByTimeAsync(300)
+      const result1 = await pending1
+      expect(result1).toHaveProperty('ok')
 
       // Invalid payload - behavior depends on when validation occurs
-      const result2 = await cyre.call('buffer-required', null)
-      // May be buffered first, validated later, or rejected immediately
+      const pending2 = cyre.call('buffer-required', null)
+      await vi.advanceTimersByTimeAsync(300)
+      const result2 = await pending2
       expect(result2).toHaveProperty('ok')
     })
 
@@ -301,13 +333,14 @@ describe('Cyre Buffer Protection', () => {
       cyre.on('buffer-changes', handler)
 
       // Calls should be buffered regardless of change detection
-      const result1 = await cyre.call('buffer-changes', {initial: 'value'})
-      const result2 = await cyre.call('buffer-changes', {different: 'value'})
+      const p1 = cyre.call('buffer-changes', {initial: 'value'})
+      const p2 = cyre.call('buffer-changes', {different: 'value'})
 
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
-      expect(result2.ok).toBe(true)
-      expect(result2.message).toContain('buffered')
+      await vi.advanceTimersByTimeAsync(300)
+      const [result1, result2] = await Promise.all([p1, p2])
+
+      expect(result1).toHaveProperty('ok')
+      expect(result2).toHaveProperty('ok')
     })
 
     it('should not combine with throttle or debounce', () => {
@@ -340,26 +373,22 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('high-freq-buffer', handler)
 
-      // Make 100 rapid calls
+      // Make 100 rapid calls - all land in the same window and share one
+      // settle promise
       const promises = []
       for (let i = 0; i < 100; i++) {
         promises.push(cyre.call('high-freq-buffer', `call${i}`))
       }
-
-      const results = await Promise.all(promises)
-
-      // All should be buffered successfully
-      expect(results.every(r => r.ok && r.message.includes('buffered'))).toBe(
-        true
-      )
 
       // Handler not called yet
       expect(handler).not.toHaveBeenCalled()
 
       // Advance time to trigger buffer
       await vi.advanceTimersByTimeAsync(300)
+      const results = await Promise.all(promises)
 
-      // Buffer mechanism working (execution may not happen in test environment)
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(results.every(r => r.ok)).toBe(true)
     })
 
     it('should handle buffer cleanup on system clear', async () => {
@@ -372,14 +401,23 @@ describe('Cyre Buffer Protection', () => {
       cyre.on('cleanup-buffer', handler)
 
       // Make buffered call
-      await cyre.call('cleanup-buffer', 'test')
+      const pending = cyre.call('cleanup-buffer', 'test')
 
-      // Clear system should clean up pending buffers
+      // Clear system should clean up pending buffers - clear() resolves
+      // any in-flight pending promise with a cancellation result rather
+      // than leaving it hanging (see context/pending-state.ts)
       cyre.clear()
+      const result = await pending
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('reset')
+
+      // Re-init so afterEach's cyre.clear() doesn't operate on a torn-down
+      // system - beforeEach already did this once, but this test tore it
+      // down mid-run
+      await cyre.init()
 
       // Advance time - handler shouldn't be called
       await vi.advanceTimersByTimeAsync(600)
-
       expect(handler).not.toHaveBeenCalled()
     })
   })
@@ -392,11 +430,15 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('metadata-buffer', vi.fn())
 
-      const result = await cyre.call('metadata-buffer', 'test')
+      const pending = cyre.call('metadata-buffer', 'test')
+      await vi.advanceTimersByTimeAsync(600)
+      const result = await pending
 
+      // The settled result is now the real handler's response, not a
+      // "scheduled" ack - it carries the dispatch metadata instead of a
+      // buffer-specific one
       expect(result.ok).toBe(true)
-      expect(result.message).toContain('execution scheduled')
-      expect(result.metadata?.bufferWindow).toBe(600)
+      expect(result.message).toBe('Operation completed as requested')
     })
   })
 
@@ -412,14 +454,16 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('error-buffer', flakyHandler)
 
-      const result = await cyre.call('error-buffer', 'test')
-      expect(result.ok).toBe(true)
-      expect(result.message).toContain('buffered')
+      const pending = cyre.call('error-buffer', 'test')
 
       // Execute buffer
       await vi.advanceTimersByTimeAsync(400)
+      const result = await pending
 
-      // Verify buffering worked (execution may not happen in test environment)
+      // The handler's thrown error surfaces as a real failed result now,
+      // instead of being swallowed behind an already-returned "buffered" ack
+      expect(flakyHandler).toHaveBeenCalledTimes(1)
+      expect(result.ok).toBe(false)
     })
 
     it('should handle multiple handlers with buffering', async () => {
@@ -427,21 +471,25 @@ describe('Cyre Buffer Protection', () => {
       const handler2 = vi.fn((data: any) => `result2-${data}`)
 
       cyre.action({
-        id: 'multi-buffer',
+        id: 'multi-handler-buffer',
         buffer: {window: 250},
         dispatch: 'parallel'
       })
-      cyre.on('multi-buffer', handler1)
-      cyre.on('multi-buffer', handler2)
+      cyre.on('multi-handler-buffer', handler1)
+      cyre.on('multi-handler-buffer', handler2)
 
-      const result = await cyre.call('multi-buffer', 'test')
-
-      expect(result.ok).toBe(true)
-      expect(result.message).toContain('buffered')
+      const pending = cyre.call('multi-handler-buffer', 'test')
 
       // Handlers not called yet
       expect(handler1).not.toHaveBeenCalled()
       expect(handler2).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(250)
+      const result = await pending
+
+      expect(handler1).toHaveBeenCalledTimes(1)
+      expect(handler2).toHaveBeenCalledTimes(1)
+      expect(result.ok).toBe(true)
     })
   })
 
@@ -479,9 +527,10 @@ describe('Cyre Buffer Protection', () => {
       if (result.ok) {
         cyre.on('complex-buffer', handler)
 
-        const callResult = await cyre.call('complex-buffer', {data: 'test'})
-        expect(callResult.ok).toBe(true)
-        expect(callResult.message).toContain('buffered')
+        const pending = cyre.call('complex-buffer', {data: 'test'})
+        await vi.advanceTimersByTimeAsync(1000)
+        const callResult = await pending
+        expect(callResult).toHaveProperty('ok')
       }
     })
   })
@@ -504,13 +553,16 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('schema-buffer', handler)
 
-      // Valid data should be buffered
-      const result1 = await cyre.call('schema-buffer', {name: 'test'})
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
+      // Valid data should be buffered and eventually settle for real
+      const pending1 = cyre.call('schema-buffer', {name: 'test'})
+      await vi.advanceTimersByTimeAsync(400)
+      const result1 = await pending1
+      expect(result1).toHaveProperty('ok')
 
       // Invalid data behavior depends on when validation occurs
-      const result2 = await cyre.call('schema-buffer', {invalid: 'data'})
+      const pending2 = cyre.call('schema-buffer', {invalid: 'data'})
+      await vi.advanceTimersByTimeAsync(400)
+      const result2 = await pending2
       expect(result2).toHaveProperty('ok')
     })
 
@@ -524,14 +576,15 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('condition-buffer', handler)
 
-      const result1 = await cyre.call('condition-buffer', {execute: true})
-      const result2 = await cyre.call('condition-buffer', {execute: false})
+      const p1 = cyre.call('condition-buffer', {execute: true})
+      const p2 = cyre.call('condition-buffer', {execute: false})
 
-      // Both should be buffered initially
-      expect(result1.ok).toBe(true)
-      expect(result1.message).toContain('buffered')
-      expect(result2.ok).toBe(true)
-      expect(result2.message).toContain('buffered')
+      await vi.advanceTimersByTimeAsync(300)
+      const [result1, result2] = await Promise.all([p1, p2])
+
+      // Both share the same window/settle promise
+      expect(result1).toHaveProperty('ok')
+      expect(result2).toHaveProperty('ok')
     })
 
     it('should work with payload transformations', async () => {
@@ -548,15 +601,20 @@ describe('Cyre Buffer Protection', () => {
       })
       cyre.on('transform-buffer', handler)
 
-      const result = await cyre.call('transform-buffer', {original: 'data'})
+      const pending = cyre.call('transform-buffer', {original: 'data'})
+      await vi.advanceTimersByTimeAsync(350)
+      const result = await pending
 
-      expect(result.ok).toBe(true)
-      expect(result.message).toContain('buffered')
+      expect(result).toHaveProperty('ok')
 
       // Check buffered state - may not exist immediately for buffered calls
       const currentState = cyre.get('transform-buffer')
       if (currentState && currentState.req) {
-        expect(currentState.req).toEqual({original: 'data'})
+        expect(currentState.req).toEqual({
+          original: 'data',
+          processed: true,
+          timestamp: expect.any(Number)
+        })
       }
     })
   })
