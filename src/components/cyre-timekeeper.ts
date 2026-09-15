@@ -42,7 +42,27 @@ const TimerEnvironment = {
   hasPerformance:
     typeof performance !== 'undefined' && typeof performance.now === 'function',
   isNode: typeof process !== 'undefined' && !!process.versions?.node,
-  isTest: typeof process !== 'undefined' && process.env.NODE_ENV === 'test'
+  isTest: typeof process !== 'undefined' && process.env.NODE_ENV === 'test',
+  // setImmediate/clearImmediate are Node-only globals - browsers have
+  // neither, and calling them unguarded threw "setImmediate is not
+  // defined" the moment the quartz engine's tight-loop mode (delay <= 0,
+  // used for sub-ms-accuracy fast-recurring timers, and by wake()) ran in
+  // a browser. scheduleImmediate()/clearImmediateHandle() below fall back
+  // to setTimeout(fn, 0)/clearTimeout, which the whole rest of this file
+  // already treats as the "not tight-loop" path - so the fallback costs a
+  // macrotask-queue hop (a few ms of jitter under real browser load)
+  // rather than true sub-ms precision, but it runs instead of crashing.
+  hasSetImmediate: typeof setImmediate === 'function'
+}
+
+const scheduleImmediate: (fn: () => void) => NodeJS.Immediate | NodeJS.Timeout =
+  TimerEnvironment.hasSetImmediate
+    ? fn => setImmediate(fn)
+    : fn => setTimeout(fn, 0)
+
+const clearImmediateHandle = (handle: NodeJS.Immediate | NodeJS.Timeout): void => {
+  if (TimerEnvironment.hasSetImmediate) clearImmediate(handle as NodeJS.Immediate)
+  else clearTimeout(handle as NodeJS.Timeout)
 }
 
 // High precision time measurement
@@ -73,6 +93,7 @@ interface MetricsInterface {
     hibernating: boolean
     stress?: {combined: number}
     breathing: {currentRate: number}
+    config?: {timing: {recuperation: number}}
   }
   update: (update: any) => void
 }
@@ -115,7 +136,14 @@ const HIGH_PRECISION_THRESHOLD = 1016 // ms
 // busy-polls) while guaranteeing very large intervals never overflow
 // setTimeout and are still checked on a bounded cadence
 const QUARTZ_MIN_POLL = 10 // ms
-const QUARTZ_MAX_POLL = TIMING.RECUPERATION // ms
+
+// Was a module-load-time constant (TIMING.RECUPERATION), captured once
+// before cyre.init(userConfig) could ever run. Now a live read off
+// metricsState so a user-supplied timing.recuperation override (applied
+// during init()) actually takes effect - falls back to the TIMING default
+// if metricsState hasn't been initialized yet (e.g. very first tick).
+const quartzMaxPoll = (): number =>
+  getMetricsState().get().config?.timing.recuperation ?? TIMING.RECUPERATION
 
 // Precision tier calculation
 const getPrecisionTier = (interval: number): 'high' | 'standard' =>
@@ -174,8 +202,7 @@ const QuartzEngine = {
     this.isRunning = false
 
     if (this.quartzHandle) {
-      if (this.isImmediateMode)
-        clearImmediate(this.quartzHandle as NodeJS.Immediate)
+      if (this.isImmediateMode) clearImmediateHandle(this.quartzHandle)
       else clearTimeout(this.quartzHandle as NodeJS.Timeout)
       this.quartzHandle = null
     }
@@ -197,7 +224,7 @@ const QuartzEngine = {
 
     if (delay <= 0) {
       this.isImmediateMode = true
-      this.quartzHandle = setImmediate(() => this.tick())
+      this.quartzHandle = scheduleImmediate(() => this.tick())
     } else {
       this.isImmediateMode = false
       this.quartzHandle = setTimeout(() => this.tick(), delay)
@@ -211,8 +238,7 @@ const QuartzEngine = {
     if (!this.isRunning) return
 
     if (this.quartzHandle) {
-      if (this.isImmediateMode)
-        clearImmediate(this.quartzHandle as NodeJS.Immediate)
+      if (this.isImmediateMode) clearImmediateHandle(this.quartzHandle)
       else clearTimeout(this.quartzHandle as NodeJS.Timeout)
     }
 
@@ -241,7 +267,7 @@ const QuartzEngine = {
     // Hibernation is a system-level decision made by metricsState - quartz
     // just obeys the flag rather than deciding shutdown itself
     if (systemState.hibernating) {
-      this.scheduleTick(QUARTZ_MAX_POLL)
+      this.scheduleTick(quartzMaxPoll())
       return
     }
 
@@ -300,14 +326,14 @@ const QuartzEngine = {
     if (earliestNextExecution === Infinity) {
       // Nothing scheduled - poll less often the more stressed the system is
       const idleStressFactor = 1 + (systemState.stress?.combined || 0)
-      this.scheduleTick(QUARTZ_MAX_POLL * idleStressFactor)
+      this.scheduleTick(quartzMaxPoll() * idleStressFactor)
       return
     }
 
     const rawDelay = earliestNextExecution - Date.now()
     const boundedDelay = Math.min(
       Math.max(rawDelay, QUARTZ_MIN_POLL),
-      QUARTZ_MAX_POLL
+      quartzMaxPoll()
     )
     this.scheduleTick(boundedDelay)
   },
@@ -431,7 +457,7 @@ const QuartzEngine = {
       const updatedTimer = createTimerState(timer, {
         nextExecutionTime,
         duration: Math.max(1, nextExecutionTime - currentTime),
-        isInRecuperation: nextExecutionTime - currentTime > QUARTZ_MAX_POLL
+        isInRecuperation: nextExecutionTime - currentTime > quartzMaxPoll()
       })
 
       this.addToGroups(updatedTimer)
@@ -468,12 +494,12 @@ const QuartzEngine = {
     const nextExecutionTime = currentTime + adaptedInterval
 
     // Update timer state - isInRecuperation is purely informational here:
-    // the engine's own bounded polling (QUARTZ_MAX_POLL) is what actually
+    // the engine's own bounded polling (quartzMaxPoll()) is what actually
     // keeps very large intervals safe, regardless of this flag
     const updatedTimer = createTimerState(timer, {
       nextExecutionTime,
       duration: adaptedInterval,
-      isInRecuperation: adaptedInterval > QUARTZ_MAX_POLL
+      isInRecuperation: adaptedInterval > quartzMaxPoll()
     })
 
     // Update groups
@@ -547,7 +573,7 @@ const createTimer = (
     executionCount: 0,
     lastExecutionTime: 0,
     nextExecutionTime: currentTime + adaptedDuration,
-    isInRecuperation: adaptedDuration > QUARTZ_MAX_POLL,
+    isInRecuperation: adaptedDuration > quartzMaxPoll(),
     status: 'active',
     isActive: true,
     delay,

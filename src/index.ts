@@ -49,7 +49,7 @@ CYRE TODO:
   
 [x]   publish to NPM: cyre v4.6.0 published
 
-[in progress]   system channels: instead of endless cyre.api create system .on listening channels for users to subscribe eg: on initialize, on error, on stress high etc
+[x]  system channels: useLog subscribes to sensor's log/error stream, useMetrics watches cyre.getMetrics() - see hooks/use-log.ts, hooks/use-metrics.ts
 [experimental]   persistent state. load Cyre from saved state, storage and sync with server
 
 
@@ -118,7 +118,9 @@ import {useGroup} from './hooks/use-group'
 import {useCyre} from './hooks/use-cyre'
 import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
-import {sensor} from './components/sensor'
+import {useLog} from './hooks/use-log'
+import {useMetrics} from './hooks/use-metrics'
+import {sensor, LogLevel} from './components/sensor'
 
 // Main exports with branch system
 export {
@@ -127,11 +129,24 @@ export {
   useGroup,
   useBranch,
   useCollective,
+  useLog, //subscribe to sensor's log/error stream - the previously-TODO'd "system channels: ... on error" listed above
+  useMetrics, //watch cyre.getMetrics() - the previously-commented-out "metrics for external live stat monitors" listed above
   //orchestration, //advanced task setup// not sure to expose this
   sensor, //utility logger function
-  sensor as log //utility logger function
-  // metrics //Cyre stats fro external live stat monitors
+  sensor as log, //utility logger function
+  LogLevel //so a useLog({level}) filter can be written without a magic number
 }
+
+// Types for the two hooks above
+export type {UseLogConfig, LogHook} from './hooks/use-log'
+export type {UseMetricsConfig, MetricsHook, MetricsSnapshot} from './hooks/use-metrics'
+export type {SensorEvent, MetricEvent} from './components/sensor'
+export type {SensorLogEvent} from './context/sensor-state'
+export type {
+  ChannelMetricsResult,
+  SystemMetricsResult,
+  MetricsExportResult
+} from './types/system'
 
 // Version information
 export const version = '4.6.0'

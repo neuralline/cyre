@@ -393,8 +393,9 @@ const subscribeChannelTriggers = (config: OrchestrationConfig): void => {
         const runtime = orchestrationRuntimes.get(config.id)
         if (!runtime || runtime.status !== 'active') return
 
-        console.log(
-          `🔄 Orchestration trigger fired: ${config.id} (channel: ${channelId})`
+        sensor.debug(
+          config.id,
+          `orchestration-trigger-fired: channel ${channelId}`
         )
         const triggerEvent: TriggerEvent = {
           name: trigger.name,
@@ -407,14 +408,15 @@ const subscribeChannelTriggers = (config: OrchestrationConfig): void => {
         try {
           const result = await executeWorkflow(config, triggerEvent)
           if (result.ok) {
-            console.log(`✅ Orchestration ${config.id} executed successfully`)
+            sensor.debug(config.id, 'orchestration-executed-successfully')
           } else {
-            console.log(
-              `❌ Orchestration ${config.id} failed: ${result.message}`
+            sensor.error(
+              config.id,
+              `orchestration-failed: ${result.message}`
             )
           }
         } catch (error) {
-          console.error(`❌ Orchestration ${config.id} error:`, error)
+          sensor.error(config.id, `orchestration-error: ${error}`)
         }
       }
 
@@ -446,7 +448,7 @@ const fireTimeTrigger = async (
   config: OrchestrationConfig,
   trigger: OrchestrationTrigger
 ): Promise<void> => {
-  console.log(`🔄 Orchestration trigger fired: ${config.id}`)
+  sensor.debug(config.id, 'orchestration-trigger-fired')
   const triggerEvent: TriggerEvent = {
     name: trigger.name,
     type: 'time',
@@ -456,12 +458,12 @@ const fireTimeTrigger = async (
   try {
     const result = await executeWorkflow(config, triggerEvent)
     if (result.ok) {
-      console.log(`✅ Orchestration ${config.id} executed successfully`)
+      sensor.debug(config.id, 'orchestration-executed-successfully')
     } else {
-      console.log(`❌ Orchestration ${config.id} failed: ${result.message}`)
+      sensor.error(config.id, `orchestration-failed: ${result.message}`)
     }
   } catch (error) {
-    console.error(`❌ Orchestration ${config.id} error:`, error)
+    sensor.error(config.id, `orchestration-error: ${error}`)
   }
 }
 
@@ -507,14 +509,15 @@ const armOrchestrationScheduleTrigger = (
   )
 
   if (timerResult.ok === 'ok') {
-    console.log(
-      `✅ TimeKeeper scheduled: ${triggerId} (cron "${trigger.schedule}", next in ${delay}ms)`
+    sensor.debug(
+      config.id,
+      `timekeeper-scheduled: ${triggerId} (cron "${trigger.schedule}", next in ${delay}ms)`
     )
     timeline.add(timerResult.value)
   } else {
-    console.error(
-      `❌ TimeKeeper failed to schedule: ${triggerId}`,
-      timerResult.error
+    sensor.error(
+      config.id,
+      `timekeeper-schedule-failed: ${triggerId} - ${timerResult.error}`
     )
   }
 }
@@ -556,16 +559,17 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
           )
 
           if (timerResult.ok === 'ok') {
-            console.log(
-              `✅ TimeKeeper scheduled: ${triggerId} (${trigger.interval}ms interval)`
+            sensor.debug(
+              config.id,
+              `timekeeper-scheduled: ${triggerId} (${trigger.interval}ms interval)`
             )
 
             // Also add to timeline for tracking
             timeline.add(timerResult.value)
           } else {
-            console.error(
-              `❌ TimeKeeper failed to schedule: ${triggerId}`,
-              timerResult.error
+            sensor.error(
+              config.id,
+              `timekeeper-schedule-failed: ${triggerId} - ${timerResult.error}`
             )
           }
         }
@@ -599,7 +603,7 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
               )
               if (!conditionMet) return
 
-              console.log(`🔄 Orchestration trigger fired: ${config.id}`)
+              sensor.debug(config.id, 'orchestration-trigger-fired')
               const triggerEvent: TriggerEvent = {
                 name: trigger.name,
                 type: 'condition',
@@ -608,18 +612,17 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
 
               const result = await executeWorkflow(config, triggerEvent)
               if (result.ok) {
-                console.log(
-                  `✅ Orchestration ${config.id} executed successfully`
-                )
+                sensor.debug(config.id, 'orchestration-executed-successfully')
               } else {
-                console.log(
-                  `❌ Orchestration ${config.id} failed: ${result.message}`
+                sensor.error(
+                  config.id,
+                  `orchestration-failed: ${result.message}`
                 )
               }
             } catch (error) {
-              console.error(
-                `❌ Orchestration ${config.id} condition-trigger error:`,
-                error
+              sensor.error(
+                config.id,
+                `orchestration-condition-trigger-error: ${error}`
               )
             }
           }
@@ -633,14 +636,15 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
           )
 
           if (timerResult.ok === 'ok') {
-            console.log(
-              `✅ TimeKeeper polling condition: ${triggerId} (every ${pollInterval}ms)`
+            sensor.debug(
+              config.id,
+              `timekeeper-polling-condition: ${triggerId} (every ${pollInterval}ms)`
             )
             timeline.add(timerResult.value)
           } else {
-            console.error(
-              `❌ TimeKeeper failed to schedule condition poll: ${triggerId}`,
-              timerResult.error
+            sensor.error(
+              config.id,
+              `timekeeper-condition-poll-failed: ${triggerId} - ${timerResult.error}`
             )
           }
         } else {

@@ -14,8 +14,8 @@ import payloadState from '../context/payload-state'
 import {getHandlers} from './cyre-on'
 
 /*
-      C.Y.R.E - D.I.S.P.A.T.C.H 
-      
+      C.Y.R.E - D.I.S.P.A.T.C.H
+
       Fixed dispatch with proper payload flow:
       1. Save request payload just before dispatch (execution certain)
       2. Execute handlers with correct strategy
@@ -72,14 +72,23 @@ const followIntraLink = async (
   }
 }
 
+// A per-process monotonic counter for correlationId's uniqueness suffix -
+// cheaper than Math.random().toString(36).slice(2, 9) on every single
+// dispatch (correlationId is currently write-only: stored in payload
+// state's metadata but never read back anywhere in src/ - see
+// claude/cyre-codebase-analysis.md's hot-path notes) while keeping the
+// same id-timestamp-suffix shape in case anything outside this codebase
+// parses it.
+let dispatchSequence = 0
+
 export const useDispatch = async (
   action: IO,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
   const startTime = performance.now()
-  const correlationId = `${action.id}-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 9)}`
+  const correlationId = `${action.id}-${Date.now()}-${(
+    dispatchSequence++
+  ).toString(36)}`
 
   try {
     // Get handlers using array-based storage
@@ -212,8 +221,7 @@ const executeSingleHandler = async (
     const executionTime = performance.now() - startTime
 
     // Update action metrics
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
@@ -235,8 +243,7 @@ const executeSingleHandler = async (
     const errorMessage = error instanceof Error ? error.message : String(error)
 
     // Update action with error info
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _errorCount: (action._errorCount || 0) + 1,
       errors: [
@@ -278,7 +285,17 @@ const convertMultiHandlerResult = (
 }
 
 /**
- * 🔧 FIXED: Waterfall execution with proper payload chaining and comprehensive debug logging
+ * Waterfall execution with proper payload chaining.
+ *
+ * FIX: previously, the per-handler catch block only did anything when
+ * errorStrategy === 'fail-fast' (it threw); for every other strategy the
+ * error was silently dropped - not logged, not counted in failedHandlers,
+ * and the final response still reported ok: true and "completed through N
+ * handlers" even though a handler threw partway through. Sequential and
+ * parallel dispatch both correctly track per-handler failures; waterfall
+ * now does too, via the same successfulHandlers/failedHandlers accounting
+ * they use, and the same `ok: successful > 0 || errorStrategy === 'continue'`
+ * rule parallel/sequential already apply.
  */
 const executeWaterfallHandlers = async (
   action: IO,
@@ -292,6 +309,8 @@ const executeWaterfallHandlers = async (
   try {
     const executeWaterfall = async () => {
       let currentPayload = payload
+      let successfulHandlers = 0
+      const handlerErrors: string[] = []
 
       for (let i = 0; i < handlers.length; i++) {
         try {
@@ -299,6 +318,7 @@ const executeWaterfallHandlers = async (
           const handlerResult = await handlers[i](currentPayload)
 
           currentPayload = handlerResult
+          successfulHandlers++
         } catch (error) {
           const errorMessage =
             error instanceof Error ? error.message : String(error)
@@ -308,19 +328,25 @@ const executeWaterfallHandlers = async (
               `Waterfall execution failed at handler ${i + 1}: ${errorMessage}`
             )
           }
+
+          // Non-fail-fast: don't let this failure vanish silently. Log it
+          // and count it - currentPayload deliberately stays at its last
+          // successful value, so the next handler in the chain still gets
+          // sensible input instead of this handler's thrown error.
+          handlerErrors.push(`handler ${i + 1}: ${errorMessage}`)
+          sensor.error(action.id, errorMessage, `waterfall-handler-${i + 1}`)
         }
       }
 
-      return currentPayload
+      return {currentPayload, successfulHandlers, handlerErrors}
     }
 
-    const result =
+    const waterfallOutcome =
       timeout > 0
         ? await Promise.race([
             executeWaterfall(),
             new Promise<never>((_, reject) =>
               setTimeout(() => {
-                console.log('⏰ TIMEOUT TRIGGERED')
                 reject(
                   new Error(`Waterfall execution timeout after ${timeout}ms`)
                 )
@@ -329,20 +355,25 @@ const executeWaterfallHandlers = async (
           ])
         : await executeWaterfall()
 
+    const {currentPayload, successfulHandlers, handlerErrors} = waterfallOutcome
     const executionTime = performance.now() - startTime
 
     // Update action metrics
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
 
+    const isSuccess = successfulHandlers > 0 || errorStrategy === 'continue'
+
     return {
-      ok: true,
-      payload: result,
-      message: `Waterfall execution completed through ${handlers.length} handlers`,
+      ok: isSuccess,
+      payload: currentPayload,
+      message:
+        handlerErrors.length === 0
+          ? `Waterfall execution completed through ${handlers.length} handlers`
+          : `${successfulHandlers}/${handlers.length} handlers succeeded`,
       metadata: {
         executionOperator: 'waterfall',
         handlerCount: handlers.length,
@@ -351,8 +382,8 @@ const executeWaterfallHandlers = async (
         executionTime,
         hasTimeout: timeout > 0
       },
-      successfulHandlers: handlers.length,
-      failedHandlers: 0
+      successfulHandlers,
+      failedHandlers: handlerErrors.length
     }
   } catch (error) {
     const executionTime = performance.now() - startTime
@@ -447,8 +478,7 @@ const executeParallelHandlers = async (
             : null
     }
 
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
@@ -573,8 +603,7 @@ const executeSequentialHandlers = async (
     }
 
     // Update action metrics
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
@@ -658,8 +687,7 @@ const executeRaceHandlers = async (
     const executionTime = performance.now() - startTime
 
     // Update action metrics
-    io.set({
-      ...action,
+    io.touch(action.id, {
       _executionTime: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1

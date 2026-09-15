@@ -7,10 +7,11 @@ import type {
   EventHandler,
   SubscriptionResponse
 } from './types/core'
+import type {CyreUserConfig} from './types/system'
 import {MSG} from './config/cyre-config'
 import {subscribe} from './components/cyre-on'
 import TimeKeeper from './components/cyre-timekeeper'
-import {io, subscribers, timeline} from './context/state'
+import {io, subscribers, timeline, callTracker} from './context/state'
 import {metricsState, updateBreathingFromMetrics} from './context/metrics-state'
 import {sensor} from './components/sensor'
 import {bufferState} from './context/buffer-state'
@@ -20,6 +21,7 @@ import {processCall} from './components/cyre-call'
 import {pathEngine} from './schema/path-engine'
 
 import payloadState from './context/payload-state'
+import type {ChannelPayload} from './context/payload-state'
 
 // Import advanced systems
 import {orchestration} from './orchestration/orchestration-engine'
@@ -91,12 +93,31 @@ import {useDispatch} from './components/cyre-dispatch'
     were relying on the old fire-and-forget timing, that has changed.
     See src/context/pending-state.ts for the settle mechanism itself.
 
+    CYRE v4.7.1 FIX - throttle now closes a concurrent-burst race:
+    cyre.call()'s throttle gate used to check `action._lastExecTime`,
+    which is only written AFTER a handler resolves (see cyre-dispatch.ts's
+    executeSingleHandler) - on the other side of an await boundary. A
+    burst of concurrent, un-awaited cyre.call()s on the same throttled
+    channel (e.g. `for (...) { promises.push(cyre.call(id)) }` with no
+    await between iterations) would each run synchronously up to their
+    own first internal await before yielding back to the loop, so every
+    one of them read the same stale _lastExecTime and ALL passed the
+    gate - throttle only ever protected sequential/awaited calls, not
+    concurrent ones. Fixed by reserving the slot synchronously (via a new
+    `_throttleReservedAt` field, written with io.set() before any await)
+    the instant a call passes the gate, and rolling that reservation back
+    if the call's execution ultimately fails - so a failed call still
+    doesn't cost the caller a legitimate retry, matching prior behavior.
+    See the throttle branch in call() below.
+
 */
 
 // Track initialization state
 export interface CyreInstance {
   // Core methods
-  init: () => Promise<{ok: boolean; payload: number | null; message: string}>
+  init: (
+    userConfig?: CyreUserConfig
+  ) => Promise<{ok: boolean; payload: number | null; message: string}>
   action: (config: IO | IO[]) => {ok: boolean; message: string; payload?: any}
   on: (id: string, handler: EventHandler) => SubscriptionResponse
   call: (id: string, payload?: ActionPayload) => Promise<CyreResponse>
@@ -114,7 +135,12 @@ export interface CyreInstance {
   schedule: typeof import('./components/cyre-schedule').schedule
 
   // State methods
-  get: (id: string) => ActionPayload | undefined
+  // cyre.get(id) returns the channel's full request/response record -
+  // {req, prevReq, res, metadata} - not just the raw payload. Matches
+  // payloadState.get()'s actual return type (see context/payload-state.ts);
+  // this used to be mistyped as ActionPayload | undefined, which hid
+  // .req/.res/.metadata from TypeScript even though they worked at runtime.
+  get: (id: string) => ChannelPayload | undefined
   hasChanged: (id: string, payload: ActionPayload) => boolean
   getPrevious: (id: string) => ActionPayload | undefined
 
@@ -140,8 +166,18 @@ export interface CyreInstance {
 
 /**
  * Initialize with standardized system intelligence
+ *
+ * Accepts an optional userConfig (breathing rates/stress/limits, timing.
+ * recuperation) merged into metricsState's config - see types/system.ts's
+ * CyreUserConfig/CyreConfig and context/metrics-state.ts's mergeConfig().
+ * This runs BEFORE initializeBreathing()/TimeKeeper.resume() so the
+ * breathing loop and Quartz engine both read the live (possibly
+ * user-overridden) config from their very first tick, rather than racing
+ * against defaults that get swapped out underneath them.
  */
-const init = async (): Promise<{
+const init = async (
+  userConfig?: CyreUserConfig
+): Promise<{
   ok: boolean
   payload: number | null
   message: string
@@ -157,12 +193,12 @@ const init = async (): Promise<{
     // Initialize advanced systems
     //initializeQuerySystem()
 
+    metricsState.init(userConfig)
+
     initializeBreathing()
     TimeKeeper.resume()
 
     sensor.debug('system', 'success', 'system-initialization')
-
-    metricsState.init()
 
     sensor.success('Cyre initialized with system intelligence')
     sensor.success('initialize', 'Cyre initialized with system intelligence')
@@ -253,6 +289,14 @@ export const call = async (
   id: string,
   payload?: ActionPayload
 ): Promise<CyreResponse> => {
+  // Cheapest possible hot-path cost - a single module-level integer
+  // increment (see context/state.ts's callTracker), counting every call
+  // attempt (including ones about to be rejected below) so
+  // metricsState.performance.callsPerSecond reflects real load pressure,
+  // not just successful dispatches. Sampled + reset once a second by the
+  // breathing tick - nothing here does a full state write per call.
+  callTracker.increment()
+
   try {
     if (!id) {
       sensor.error(`${MSG.UNABLE_TO_COMPLY}: ${id}`)
@@ -307,20 +351,57 @@ export const call = async (
       return await useDispatch(action, req)
     }
 
-    // THROTTLE: Use buffer state for temporary storage
+    // THROTTLE: reserves its slot SYNCHRONOUSLY, before any await - this
+    // closes a real concurrency gap where a burst of concurrent,
+    // un-awaited cyre.call()s on the same throttled channel could ALL
+    // pass the gate. The old check-then-act here only ever read
+    // `_lastExecTime`, which is written later, after the handler resolves
+    // (see cyre-dispatch.ts's executeSingleHandler) - on the other side of
+    // an await boundary. A tight loop of `cyre.call(id)` with no await
+    // between calls runs each call synchronously up to ITS OWN first
+    // internal await before yielding back to the loop, so every one of
+    // them read the same stale `_lastExecTime` and all passed. Reserving
+    // via `_throttleReservedAt` synchronously here means the very next
+    // call() invocation in the same synchronous burst sees it immediately
+    // (io.set() is a synchronous Map write), instead of racing on state
+    // nothing has updated yet. The reservation is provisional: if this
+    // call's execution ultimately fails, it's rolled back below so a
+    // failed call doesn't cost the caller a legitimate retry - preserving
+    // the pre-existing (and separately tested) behavior that only a
+    // successful execution establishes a throttle window.
     if (action.throttle && action.throttle > 0) {
       const currentTime = Date.now()
       const lastExecTime = action._lastExecTime || 0
-      const elapsedSinceLastExec = currentTime - lastExecTime
+      const reservedAt = action._throttleReservedAt || 0
+      const effectiveLastTime = Math.max(lastExecTime, reservedAt)
+      const elapsedSinceLastExec = currentTime - effectiveLastTime
       const remaining = Math.max(0, action.throttle - elapsedSinceLastExec)
 
-      if (lastExecTime > 0 && elapsedSinceLastExec < action.throttle) {
+      if (effectiveLastTime > 0 && elapsedSinceLastExec < action.throttle) {
         return {
           ok: false,
           payload: undefined,
           message: `Call throttled - retry available in ${remaining}ms`
         }
       }
+
+      io.touch(action.id, {_throttleReservedAt: currentTime})
+
+      const result = await processCall(action, req)
+
+      if (!result.ok) {
+        // Roll back the reservation - this attempt didn't actually
+        // execute successfully, so it shouldn't cost the next caller
+        // their retry. Guarded by an identity check on the timestamp we
+        // set, in case a later call has already reserved a newer slot by
+        // the time this one's execution finishes.
+        const current = io.get(action.id)
+        if (current && current._throttleReservedAt === currentTime) {
+          io.touch(action.id, {_throttleReservedAt: undefined})
+        }
+      }
+
+      return result
     }
 
     // DEBOUNCE: shares ONE settle promise per window (pendingState) - every
@@ -349,7 +430,7 @@ export const call = async (
             ? bufferState.get(action.id)
             : req
           bufferState.forget(action.id)
-          io.set({...action, _debounceStart: undefined})
+          io.touch(action.id, {_debounceStart: undefined})
 
           const result = await processCall(action, tempPayload)
           // The timer this window's OTHER callers were waiting on just got
@@ -359,7 +440,7 @@ export const call = async (
           return result
         }
       } else {
-        io.set({...action, _debounceStart: Date.now()})
+        io.touch(action.id, {_debounceStart: Date.now()})
       }
 
       const {promise} = existingPending ?? pendingState.create(action.id)
@@ -384,7 +465,7 @@ export const call = async (
             }
 
             bufferState.forget(action.id)
-            io.set({...currentAction, _debounceStart: undefined})
+            io.touch(action.id, {_debounceStart: undefined})
 
             const result = await processCall(currentAction, latestPayload)
             pendingState.settle(action.id, result)
@@ -561,8 +642,10 @@ const shutdown = (): void => {
     sensor.sys('system', 'Initiating system shutdown')
     sensor.debug('system', 'critical', 'system-shutdown')
 
+    // reset() already performs the hard metricsState.reset() below - no
+    // need to call it again here. shutdown() only adds the process-exit
+    // step on top of a plain reset().
     reset()
-    metricsState.reset()
     sensor.debug('System offline!')
     if (typeof process !== 'undefined' && process.exit) {
       process.exit(0)
@@ -573,60 +656,87 @@ const shutdown = (): void => {
 }
 
 /**
- * Clear system with all integrations
+ * Domain-level cleanup shared by clear() and reset() - channels,
+ * subscribers, timers/timeline, buffers, pending calls, path index,
+ * payloads. Deliberately does NOT touch metricsState: clear() and
+ * reset() differ only in how they handle metricsState (soft vs hard),
+ * so that decision is made at each call site below, not in here.
  */
-const reset = (): void => {
+const clearDomainState = (): void => {
+  // Domain-level cleanup first: schedule.reset()/orchestration.reset()
+  // do proper per-task/per-orchestration teardown (forgetting each
+  // trigger timer, unsubscribing orchestration channel triggers via
+  // subscribers) - that needs io/subscribers/TimeKeeper's timeline
+  // still intact to do its job, so this has to run before those raw
+  // stores get wiped below. Skipping this left scheduleState/
+  // orchestrationState holding stale entries that pointed at timers
+  // TimeKeeper.reset() had already destroyed.
+  schedule.reset()
+  orchestration.reset()
+
+  io.clear()
+  subscribers.clear()
+  // TimeKeeper.reset() rather than a bare timeline.clear() - it also
+  // stops the quartz engine and clears its own internal bookkeeping
+  // (execution/precision groups, in-flight dispatch guard, metrics),
+  // so nothing is left running against a timeline that was just wiped
+  // out from under it
+  TimeKeeper.reset()
+  // bufferState is a separate module-level store from timeline/io and
+  // was never cleared here - a buffer/debounce payload accumulated in
+  // one test (or one system generation) could leak into the next
+  bufferState.clear()
+  // Same reasoning as bufferState - any debounce/buffer settle promise
+  // still in flight has no timer left to resolve it after
+  // TimeKeeper.reset(); clear() RESOLVES every in-flight entry (not just
+  // deletes it) so nothing is left hanging on a promise that will now
+  // never settle
+  pendingState.clear({
+    ok: false,
+    payload: null,
+    message:
+      'Debounced/buffered call cancelled - system was reset before its window settled'
+  })
+  // Same reasoning as bufferState - pathEngine keeps its own foreign-key
+  // indexes (path/segment/depth -> channel id, plus the tree) separate
+  // from io, so clearing io alone left stale path entries behind
+  pathEngine.clear()
+  payloadState.clear()
+}
+
+/**
+ * cyre.clear() - soft: wipes all channel/subscriber/timer/payload state
+ * but preserves system identity (_init/_isLocked/_shutdown) and the
+ * user's cyre.init(userConfig) overrides via metricsState.clear(). A
+ * subset of reset() - same domain cleanup, softer metrics handling.
+ */
+const clear = (): void => {
   try {
-    sensor.debug('System reset initiated')
-
-    // Domain-level cleanup first: schedule.reset()/orchestration.reset()
-    // do proper per-task/per-orchestration teardown (forgetting each
-    // trigger timer, unsubscribing orchestration channel triggers via
-    // subscribers) - that needs io/subscribers/TimeKeeper's timeline
-    // still intact to do its job, so this has to run before those raw
-    // stores get wiped below. Skipping this left scheduleState/
-    // orchestrationState holding stale entries that pointed at timers
-    // TimeKeeper.reset() had already destroyed.
-    schedule.reset()
-    orchestration.reset()
-
-    io.clear()
-    subscribers.clear()
-    // TimeKeeper.reset() rather than a bare timeline.clear() - it also
-    // stops the quartz engine and clears its own internal bookkeeping
-    // (execution/precision groups, in-flight dispatch guard, metrics),
-    // so nothing is left running against a timeline that was just wiped
-    // out from under it
-    TimeKeeper.reset()
-    // bufferState is a separate module-level store from timeline/io and
-    // was never cleared here - a buffer/debounce payload accumulated in
-    // one test (or one system generation) could leak into the next
-    bufferState.clear()
-    // Same reasoning as bufferState - any debounce/buffer settle promise
-    // still in flight has no timer left to resolve it after
-    // TimeKeeper.reset(); clear() RESOLVES every in-flight entry (not just
-    // deletes it) so nothing is left hanging on a promise that will now
-    // never settle
-    pendingState.clear({
-      ok: false,
-      payload: null,
-      message:
-        'Debounced/buffered call cancelled - system was reset before its window settled'
-    })
-    // Same reasoning as bufferState - pathEngine keeps its own foreign-key
-    // indexes (path/segment/depth -> channel id, plus the tree) separate
-    // from io, so clearing io alone left stale path entries behind
-    pathEngine.clear()
-    //metrics.reset()
-    // metricsState.clear()
-    payloadState.clear()
-
-    // Clear all groups
-
+    sensor.debug('System clear initiated')
+    clearDomainState()
+    metricsState.clear()
     sensor.success('System cleared')
   } catch (error) {
     sensor.error(`Clear operation failed: ${error}`)
     sensor.critical('system', String(error), 'system-clear')
+  }
+}
+
+/**
+ * cyre.reset() - hard: everything clear() does, plus a full
+ * metricsState.reset() back to defaults (identity flags AND config both
+ * wiped). Still stops short of shutdown() - no process.exit here, so the
+ * system stays callable afterward (cyre.init() again to re-enable it).
+ */
+const reset = (): void => {
+  try {
+    sensor.debug('System reset initiated')
+    clearDomainState()
+    metricsState.reset()
+    sensor.success('System reset')
+  } catch (error) {
+    sensor.error(`Reset operation failed: ${error}`)
+    sensor.critical('system', String(error), 'system-reset')
   }
 }
 /**
@@ -639,7 +749,7 @@ export const cyre: CyreInstance = Object.freeze({
   on: subscribe,
   call,
   forget,
-  clear: reset,
+  clear,
   reset,
   // ALIGNED ORCHESTRATION INTEGRATION
   orchestration,

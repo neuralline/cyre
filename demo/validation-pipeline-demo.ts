@@ -18,7 +18,6 @@ await cyre.init()
 // order would mean testing age against un-normalized data, or normalizing
 // data that never should have reached this channel in the first place.
 // =============================================================================
-console.log('\n=== 1) signup: schema -> transform -> condition ===')
 {
   cyre.action({
     id: 'user-signup://',
@@ -39,26 +38,6 @@ console.log('\n=== 1) signup: schema -> transform -> condition ===')
     log.debug(`  ✓ account created for ${payload.email} (age ${payload.age})`)
     return {accountId: crypto.randomUUID().slice(0, 8)}
   })
-
-  const attempts = [
-    {
-      label: 'valid adult',
-      payload: {name: 'Ada', email: 'ADA@Example.com', age: 34}
-    },
-    {
-      label: 'minor (condition should block)',
-      payload: {name: 'Ben', email: 'ben@example.com', age: 15}
-    },
-    {
-      label: 'malformed (schema should block)',
-      payload: {name: 'C', email: 'not-an-email', age: 22}
-    }
-  ]
-
-  for (const {label, payload} of attempts) {
-    const result = await cyre.call('user-signup://', payload)
-    console.log(`  [${label}] ok=${result.ok} - ${result.message}`)
-  }
 }
 
 // =============================================================================
@@ -70,10 +49,8 @@ console.log('\n=== 1) signup: schema -> transform -> condition ===')
 // detectChanges compares it - so a battery-percentage wiggle or a fresh
 // timestamp doesn't cause a false "changed" on every single tick.
 // =============================================================================
-console.log('\n=== 2) telemetry: selector -> detectChanges ===')
+let dispatched = 0
 {
-  let dispatched = 0
-
   cyre.action({
     id: 'gateway-telemetry://',
     selector: (payload: any) => ({
@@ -89,24 +66,6 @@ console.log('\n=== 2) telemetry: selector -> detectChanges ===')
       `  📡 dispatch #${dispatched}: temp=${reading.temp} humidity=${reading.humidity}`
     )
   })
-
-  const frames = [
-    {sensor: {temp: 21.5, humidity: 40}, battery: 91, ts: 1},
-    {sensor: {temp: 21.5, humidity: 40}, battery: 90, ts: 2}, // only battery/ts moved
-    {sensor: {temp: 21.5, humidity: 40}, battery: 88, ts: 3}, // still unchanged
-    {sensor: {temp: 22.1, humidity: 40}, battery: 87, ts: 4}, // real change
-    {sensor: {temp: 22.1, humidity: 39}, battery: 85, ts: 5} // real change
-  ]
-
-  for (const frame of frames) {
-    await cyre.call('gateway-telemetry://', frame)
-  }
-
-  console.log(
-    dispatched === 3
-      ? `✅ ${frames.length} raw frames in, only ${dispatched} real changes dispatched`
-      : `❌ expected 3 dispatches out of ${frames.length} frames, got ${dispatched}`
-  )
 }
 
 // =============================================================================
@@ -118,9 +77,6 @@ console.log('\n=== 2) telemetry: selector -> detectChanges ===')
 // for it - nothing leaks past required's "was there even a body" check into
 // schema's "is it shaped correctly" check.
 // =============================================================================
-console.log(
-  '\n=== 3) payment webhook: required -> schema -> condition -> transform ==='
-)
 {
   cyre.action({
     id: 'payment-webhook://',
@@ -144,7 +100,93 @@ console.log(
     )
     return {charged: true}
   })
+}
 
+// =============================================================================
+// 4) SEARCH BOX  →  transform → detectChanges → condition
+//
+// A UI-facing channel that intentionally puts transform BEFORE detectChanges
+// - the README's own "Pipeline Talent Order" section calls this out as the
+// common trap: transform here only lowercases/trims (idempotent, doesn't
+// stamp anything that always changes like a timestamp), so it's safe and
+// actually the right order for THIS case - detectChanges needs to compare
+// the NORMALIZED query ("  Cats " and "cats" should count as the same
+// search), and condition (a minimum-length gate) only needs to run once the
+// real, deduped query is known. This is the mirror image of case 1 above:
+// same three talents, different field order, both correct for their own use
+// case - proof that "pipeline order matters" doesn't mean "there's one right
+// order", it means "know what your own order actually does."
+// =============================================================================
+let searches = 0
+{
+  cyre.action({
+    id: 'search-box://',
+    transform: (payload: {query: string}) => ({
+      query: payload.query.trim().toLowerCase()
+    }),
+    detectChanges: true,
+    condition: (payload: {query: string}) => payload.query.length >= 2
+  })
+
+  cyre.on('search-box://', (payload: {query: string}) => {
+    searches++
+    log.debug(`  🔍 search #${searches}: "${payload.query}"`)
+  })
+}
+
+// All four channels are registered by this point - lock() here, before any
+// of the calls below, is what actually prevents a stray late registration or
+// a duplicate handler from slipping in while the rest of the script runs.
+cyre.lock()
+
+console.log('\n=== 1) signup: schema -> transform -> condition ===')
+{
+  const attempts = [
+    {
+      label: 'valid adult',
+      payload: {name: 'Ada', email: 'ADA@Example.com', age: 34}
+    },
+    {
+      label: 'minor (condition should block)',
+      payload: {name: 'Ben', email: 'ben@example.com', age: 15}
+    },
+    {
+      label: 'malformed (schema should block)',
+      payload: {name: 'C', email: 'not-an-email', age: 22}
+    }
+  ]
+
+  for (const {label, payload} of attempts) {
+    const result = await cyre.call('user-signup://', payload)
+    console.log(`  [${label}] ok=${result.ok} - ${result.message}`)
+  }
+}
+
+console.log('\n=== 2) telemetry: selector -> detectChanges ===')
+{
+  const frames = [
+    {sensor: {temp: 21.5, humidity: 40}, battery: 91, ts: 1},
+    {sensor: {temp: 21.5, humidity: 40}, battery: 90, ts: 2}, // only battery/ts moved
+    {sensor: {temp: 21.5, humidity: 40}, battery: 88, ts: 3}, // still unchanged
+    {sensor: {temp: 22.1, humidity: 40}, battery: 87, ts: 4}, // real change
+    {sensor: {temp: 22.1, humidity: 39}, battery: 85, ts: 5} // real change
+  ]
+
+  for (const frame of frames) {
+    await cyre.call('gateway-telemetry://', frame)
+  }
+
+  console.log(
+    dispatched === 3
+      ? `✅ ${frames.length} raw frames in, only ${dispatched} real changes dispatched`
+      : `❌ expected 3 dispatches out of ${frames.length} frames, got ${dispatched}`
+  )
+}
+
+console.log(
+  '\n=== 3) payment webhook: required -> schema -> condition -> transform ==='
+)
+{
   const attempts = [
     {label: 'empty body (required should block)', payload: undefined},
     {
@@ -167,5 +209,29 @@ console.log(
   }
 }
 
-cyre.lock()
-console.log('\ndone.')
+console.log('\n=== 4) search box: transform -> detectChanges -> condition ===')
+{
+  const queries = [
+    '  Cats  ',
+    'cats',
+    'cats ',
+    'Dogs',
+    '',
+    'a',
+    'dogs and cats'
+  ]
+
+  for (const query of queries) {
+    await cyre.call('search-box://', {query})
+  }
+
+  console.log(
+    searches === 3
+      ? `✅ ${queries.length} keystrokes in, only ${searches} real searches dispatched (dupes/short queries filtered)`
+      : `❌ expected 3 dispatches out of ${queries.length} queries, got ${searches}`
+  )
+}
+
+// No recurring/scheduled channels were created in this demo, so there's
+// nothing left running that a shutdown would cut off mid-flight.
+cyre.shutdown()

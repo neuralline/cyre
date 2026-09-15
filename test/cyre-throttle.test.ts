@@ -161,7 +161,7 @@ describe('Cyre Throttle Protection', () => {
   })
 
   describe('Throttle Performance', () => {
-    it('does NOT throttle a synchronous burst of un-awaited calls - the check-then-act race', async () => {
+    it('throttles a synchronous burst of un-awaited calls down to exactly one execution', async () => {
       const handler = vi.fn()
 
       cyre.action({
@@ -170,25 +170,22 @@ describe('Cyre Throttle Protection', () => {
       })
       cyre.on('high-freq-throttle', handler)
 
-      // REAL FINDING, confirmed against a live run (an earlier version of
-      // this test assumed all 50 would be throttled down to 1 success and
-      // was wrong - the actual result is 50/50 successes):
+      // REGRESSION TEST for a real concurrency bug, now fixed in app.ts:
+      // cyre.call()'s throttle gate used to check `action._lastExecTime`,
+      // which is only written AFTER a handler resolves (see
+      // cyre-dispatch.ts's executeSingleHandler) - on the other side of
+      // an await boundary. Pushing 50 cyre.call()s in a tight loop with
+      // no await between them meant every one of the 50 ran synchronously
+      // up to its own first internal await before yielding back to this
+      // loop, so all 50 throttle checks read the SAME stale
+      // _lastExecTime and ALL passed - a live run against the un-fixed
+      // source confirmed exactly that (50/50 successes, not 1/50).
       //
-      // cyre.call()'s throttle check reads `action._lastExecTime`
-      // synchronously via `io.get(id)`, but that field is only WRITTEN
-      // later, inside cyre-dispatch.ts's executeSingleHandler(), after
-      // `await handler(payload)` resolves - on the other side of an
-      // await boundary. When this loop pushes 50 cyre.call()s without
-      // awaiting any of them, each call runs synchronously up to its own
-      // first internal `await` (inside processCall) and then yields back
-      // to this loop - so all 50 throttle checks run against the SAME
-      // stale (unset) _lastExecTime before any of the 50 executions has
-      // had a chance to complete and update it. The check-then-act
-      // sequence is not atomic against concurrent, un-awaited calls, so
-      // throttle only actually protects SEQUENTIAL/AWAITED rapid calls
-      // (see "should allow first call and throttle subsequent calls"
-      // above, which awaits each call and IS throttled correctly) - a
-      // synchronous burst of fire-and-forget calls bypasses it entirely.
+      // The fix reserves the slot synchronously (`_throttleReservedAt`,
+      // written via io.set() before any await) the instant a call passes
+      // the gate - visible to the very next call() in the same
+      // synchronous burst, closing the race. See app.ts's throttle branch
+      // and the CYRE v4.7.1 note at the top of that file.
       const promises = []
       for (let i = 0; i < 50; i++) {
         promises.push(cyre.call('high-freq-throttle', `call${i}`))
@@ -199,9 +196,9 @@ describe('Cyre Throttle Protection', () => {
       const successful = results.filter(r => r.ok)
       const throttled = results.filter(r => !r.ok)
 
-      expect(successful).toHaveLength(50)
-      expect(throttled).toHaveLength(0)
-      expect(handler).toHaveBeenCalledTimes(50)
+      expect(successful).toHaveLength(1)
+      expect(throttled).toHaveLength(49)
+      expect(handler).toHaveBeenCalledTimes(1)
     })
 
     it('should maintain throttle state across different payloads', async () => {

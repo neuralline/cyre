@@ -1,6 +1,6 @@
 // src/config/cyre-config.ts
 
-import {QuantumState} from '../types/system'
+import {QuantumState, CyreConfig} from '../types/system'
 
 /*
 
@@ -240,8 +240,40 @@ export const BREATHING = {
   }
 } as const
 
+// Default user-tunable config - the shipped values for everything
+// CyreConfig exposes, mirroring TIMING/BREATHING above. This is what
+// metricsState seeds QuantumState.config with; cyre.init(userConfig)
+// merges overrides on top of this rather than replacing it, so an
+// unspecified field always falls back to these values.
+export const defaultConfig: CyreConfig = {
+  breathing: {
+    rates: {
+      min: BREATHING.RATES.MIN,
+      base: BREATHING.RATES.BASE,
+      max: BREATHING.RATES.MAX,
+      recovery: BREATHING.RATES.RECOVERY
+    },
+    stress: {
+      low: BREATHING.STRESS.LOW,
+      medium: BREATHING.STRESS.MEDIUM,
+      high: BREATHING.STRESS.HIGH,
+      critical: BREATHING.STRESS.CRITICAL
+    },
+    limits: {
+      maxCpu: BREATHING.LIMITS.MAX_CPU,
+      maxMemory: BREATHING.LIMITS.MAX_MEMORY,
+      maxEventLoop: BREATHING.LIMITS.MAX_EVENT_LOOP,
+      maxCallRate: BREATHING.LIMITS.MAX_CALL_RATE
+    }
+  },
+  timing: {
+    recuperation: TIMING.RECUPERATION
+  }
+}
+
 // Initialize default state
 export const defaultMetrics: QuantumState = {
+  config: defaultConfig,
   system: {
     cpu: 0,
     memory: 0,

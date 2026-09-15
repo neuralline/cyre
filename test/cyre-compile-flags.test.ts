@@ -229,16 +229,15 @@ describe('Cyre Compiled Action Flags', () => {
       expect(result.message).toContain('scheduling')
     })
 
-    it('documents a real mismatch: the status message always reports "0 processing talents"', () => {
-      // cyre-actions.ts builds its status message from
-      // `finalAction._processingTalents?.length` - but compile-pipeline.ts
-      // never sets a field called _processingTalents anywhere, it only
-      // sets _pipeline. So `_processingTalents` is always undefined and
-      // the reported count is always 0, even when _pipeline genuinely has
-      // several compiled talents. This test pins down the CURRENT
-      // (buggy) behavior rather than silently working around it - if
-      // cyre-actions.ts is ever fixed to read _pipeline.length instead,
-      // this assertion is the one that should change.
+    it('reports the real processing-talent count in the status message (regression test)', () => {
+      // FIXED: cyre-actions.ts used to build its status message from
+      // `finalAction._processingTalents?.length` - a field
+      // compile-pipeline.ts never actually sets (it only ever sets
+      // _pipeline), so the reported count was always 0 regardless of how
+      // many talents were really compiled. This test used to pin down
+      // that buggy "0 processing talents" behavior on purpose; now that
+      // cyre-actions.ts reads `_pipeline.length` instead, it asserts the
+      // real count so a regression back to the old field would be caught.
       const result = cyre.action({
         id: 'talent-count-message-bug',
         required: true,
@@ -247,7 +246,7 @@ describe('Cyre Compiled Action Flags', () => {
       })
 
       expect(result.payload?._pipeline).toHaveLength(3)
-      expect(result.message).toContain('0 processing talents')
+      expect(result.message).toContain('3 processing talents')
     })
   })
 

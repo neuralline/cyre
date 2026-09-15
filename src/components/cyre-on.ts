@@ -13,10 +13,10 @@ import type {
 } from '../types/core'
 import {sensor} from './sensor'
 
-/* 
+/*
 
       C.Y.R.E - O.N
-      
+
       Pure handler management system:
       1. Subscribe to ACTION IDs, not types
       2. Store handlers independently of action existence
@@ -197,6 +197,15 @@ const addSingleSubscriber = (
     return {
       ok: true,
       message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
+      // Previously always undefined - SubscriptionResponse has always had
+      // this field in its type, but nothing ever populated it, so callers
+      // had no supported way to remove a specific handler once cyre.on()
+      // registered it (see removeHandler() below, which this now exposes
+      // directly rather than requiring callers to reach into
+      // ../components/cyre-on internals themselves). Bound to this exact
+      // (id, handler) pair, so calling it only ever removes this one
+      // subscription, not every handler on the channel.
+      unsubscribe: () => removeHandler(subscriber.id, handler),
       metadata: {
         handlerCount: newHandlerCount,
         executionOperator: currentAction

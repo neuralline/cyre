@@ -150,7 +150,16 @@ export const CyreActions = (action: IO): RegistrationResult => {
       const features: string[] = []
       if (finalAction._hasProtections) features.push('protections')
       if (finalAction._hasProcessing) {
-        const talentCount = finalAction._processingTalents?.length || 0
+        // FIX: this used to read finalAction._processingTalents?.length,
+        // a field compile-pipeline.ts never actually sets (it only ever
+        // populates _pipeline) - so this count was always 0 regardless of
+        // how many processing talents (schema/condition/selector/
+        // transform/detectChanges/required) the channel actually had.
+        // _pipeline is the real compiled array of processing talent
+        // functions, in the same order they run in - see
+        // claude/cyre-compile-flags.test.ts's "documents a real mismatch"
+        // test, which pinned this down before this fix.
+        const talentCount = finalAction._pipeline?.length || 0
         features.push(`${talentCount} processing talents`)
       }
       if (finalAction._hasScheduling) features.push('scheduling')

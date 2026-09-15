@@ -68,6 +68,33 @@ export const io = Object.freeze({
   get: (id: StateKey): IO | undefined => ioStore.get(id),
 
   /**
+   * Patch a few fields onto an already-registered channel's config
+   * WITHOUT cloning the whole record - added because the hot dispatch
+   * path (cyre-dispatch.ts's per-strategy handlers, plus app.ts's
+   * throttle/debounce branches) was calling `io.set({...action, ...})`
+   * on every single successful call just to bump a handful of numeric
+   * counters (_executionTime/_lastExecTime/_executionCount, etc). That
+   * spread clones the ENTIRE IO record (which can carry a compiled
+   * `_pipeline` array, schema/condition/selector/transform closures, and
+   * every protection field) - and set() then spreads it AGAIN internally
+   * - twice per call, on the path this project's own comments call
+   * "ultra-fast single handler execution". touch() mutates the existing
+   * stored object's fields in place instead: no IO record is ever
+   * exposed through the public API by reference (cyre.get()/branch.get()
+   * both return payload state, not the raw channel config - see
+   * claude/cyre-codebase-analysis.md's README-vs-code section), so
+   * nothing depends on a channel's config object staying an immutable
+   * snapshot between calls. A no-op if the id isn't currently registered
+   * (e.g. a stale reference from mid-teardown), matching set()'s existing
+   * "channel must have an id" guard in spirit rather than throwing.
+   */
+  touch: (id: StateKey, patch: Partial<IO>): void => {
+    const existing = ioStore.get(id)
+    if (!existing) return
+    Object.assign(existing, patch, {_timestamp: Date.now()})
+  },
+
+  /**
    * Remove action configuration
    */
   forget: (id: StateKey): boolean => {
@@ -78,6 +105,15 @@ export const io = Object.freeze({
 
   /**
    * Clear all action configurations
+   *
+   * Channel/payload-store cleanup only - deliberately does NOT touch
+   * metricsState. It used to call metricsState.reset() directly here as
+   * an undocumented side effect, which meant any cyre.clear()/cyre.reset()
+   * call mid-session silently wiped _init/_shutdown/config back to
+   * defaults (system reported "System not initialized" right after a
+   * clear()). Callers that want metricsState reset too (app.ts's
+   * clear()/reset()) now do that explicitly at the call site, so the two
+   * concerns don't get bundled together again by accident.
    */
   clear: (): void => {
     try {
@@ -85,7 +121,6 @@ export const io = Object.freeze({
       ioStore.clear()
 
       payloadState.clear() // Clear payload state
-      metricsState.reset()
     } catch (error) {
       sensor.critical(`System clear failed: ${error}`)
       throw error
@@ -178,6 +213,33 @@ export const timeline = {
     return timelineStore.getAll().filter(timer => timer.status === 'active')
   }
 }
+
+// Call-rate tracking - a bare incrementing counter, not a full
+// metricsState.update() call. Cyre's fast path is the hot path this whole
+// library is built around ("agility and responsiveness is it's main
+// feature" - see the project's own notes) - doing a full state-store write
+// with flag recomputation on every single cyre.call() would undercut
+// exactly the thing breathing is supposed to protect. app.ts's call()
+// increments this once per invocation (including blocked/rejected calls -
+// it's meant to measure how hard the system is being hit, not just
+// successes); context/metrics-state.ts's updateBreathingFromMetrics()
+// (the breathing tick, once per second) is the only thing that ever reads
+// and resets it, folding the result into metricsState.performance.
+// callsPerSecond. This used to sit permanently at 0 - nothing in the
+// codebase ever wrote to it - which meant call-rate stress could never
+// contribute to the breathing system's combined stress score.
+let callCount = 0
+
+export const callTracker = Object.freeze({
+  increment: (): void => {
+    callCount++
+  },
+  sampleAndReset: (): number => {
+    const count = callCount
+    callCount = 0
+    return count
+  }
+})
 
 // Export readonly stores
 export const stores = Object.freeze({

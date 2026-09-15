@@ -55,7 +55,14 @@ export async function processCall(
       ]
         .filter(Boolean)
         .join(' ')
-      sensor.sys(action.id, 'scheduled execution', scheduleDetails)
+      // Per-call scheduling detail, not a system lifecycle event - sensor.sys()
+      // is force-printed regardless of minLogLevel (see sensor.ts), which meant
+      // every single scheduled cyre.call() (e.g. one per auto-animating carousel
+      // instance in holo-carousel) flooded the console even at the default
+      // ERROR-only threshold. sensor.debug() still reaches useLog() subscribers
+      // via sensorState.emit (that fan-out is independent of the console gate),
+      // it just no longer force-prints.
+      sensor.debug(action.id, 'scheduled execution', scheduleDetails)
 
       const result = TimeKeeper.keep(
         action.interval || 0,

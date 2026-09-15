@@ -158,8 +158,9 @@ export function useGroup<TPayload = ActionPayload>(
   let lastExecutionResults: ChannelExecutionResult[] = []
   const createdAt = Date.now()
 
-  console.log(
-    `🎯 useGroup created: ${groupName} (${adaptedChannels.length} channels)`
+  sensor.debug(
+    groupName,
+    `group-created: ${adaptedChannels.length} channels`
   )
 
   /**
@@ -234,8 +235,9 @@ export function useGroup<TPayload = ActionPayload>(
 
           // Stop on first failure if fail-fast strategy
           if (!result.ok && errorStrategy === 'fail-fast') {
-            console.log(
-              `🛑 Group execution stopped at channel ${i} due to fail-fast strategy`
+            sensor.debug(
+              groupName,
+              `group-execution-stopped: channel ${i} (fail-fast)`
             )
             break
           }
@@ -405,16 +407,14 @@ export function useGroup<TPayload = ActionPayload>(
       }
 
       activeChannels.push(adapted)
-      console.log(`➕ Added channel to group ${groupName}: ${adapted.name}`)
+      sensor.debug(groupName, `group-channel-added: ${adapted.name}`)
     },
 
     forget: (channelId: string) => {
       const index = activeChannels.findIndex(c => c.id === channelId)
       if (index !== -1) {
         const removed = activeChannels.splice(index, 1)[0]
-        console.log(
-          `➖ Removed channel from group ${groupName}: ${removed.name}`
-        )
+        sensor.debug(groupName, `group-channel-removed: ${removed.name}`)
         return true
       }
       return false
@@ -459,7 +459,7 @@ export function useGroup<TPayload = ActionPayload>(
 
     // NEW: Cleanup method
     destroy: () => {
-      console.log(`🗑️ Destroying group: ${groupName}`)
+      sensor.debug(groupName, 'group-destroyed')
       activeChannels.length = 0
       totalExecutions = 0
       successfulExecutions = 0
