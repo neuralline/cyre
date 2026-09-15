@@ -70,7 +70,7 @@
     "benchmark:speed": "tsx demo/speed-test-demo.ts",
     "dev": "tsx scripts/cyre-server.ts",
     "prepublishOnly": "pnpm test && pnpm run build:all",
-    "publish": "pnpm publish --access public --registry https://registry.npmjs.org/"
+    "publish": "npm publish --access public --registry https://registry.npmjs.org/"
   },
   "sideEffects": false,
   "type": "module",
