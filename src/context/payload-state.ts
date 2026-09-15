@@ -7,7 +7,7 @@ import {sensor} from '../components/sensor'
 
 /*
       C.Y.R.E. - P.A.Y.L.O.A.D. - S.T.A.T.E
-      
+
       Payload management with req/res separation:
       - Request payload saved just before dispatch (execution certain)
       - Response payload saved after execution complete
@@ -17,6 +17,12 @@ import {sensor} from '../components/sensor'
 
 export interface ChannelPayload {
   req?: ActionPayload
+  // The req value that was current immediately before the latest setReq()
+  // call overwrote it - a single slot of history, not a full log, which is
+  // all getPrevious() below needs. Previously getPrevious() was a stub that
+  // always returned undefined ("we don't store history - could be added
+  // later"); this is that one slot.
+  prevReq?: ActionPayload
   res?: CyreResponse
   metadata: {
     lastRequestTime?: number
@@ -48,6 +54,10 @@ export const payloadState = {
 
     const updated: ChannelPayload = {
       req: payload,
+      // Whatever req held before this call becomes the new "previous" -
+      // shifted here, once, right before it's overwritten, rather than
+      // tracked as a growing history the caller has to prune.
+      prevReq: existing?.req,
       res: existing?.res, // Keep existing response
       metadata: {
         lastRequestTime: currentTime,
@@ -81,6 +91,7 @@ export const payloadState = {
 
     const updated: ChannelPayload = {
       req: existing.req,
+      prevReq: existing.prevReq,
       res: response,
       metadata: {
         ...existing.metadata,
@@ -124,11 +135,13 @@ export const payloadState = {
   },
 
   /**
-   * Get previous request payload (for change detection)
+   * Get previous request payload (for change detection) - the req value
+   * that was current immediately before the most recent one, tracked as a
+   * single slot in setReq() above. Returns undefined if the channel has
+   * received fewer than two requests (there's no "previous" yet).
    */
   getPrevious: (channelId: string): ActionPayload | undefined => {
-    // For now, we don't store history - could be added later
-    return undefined
+    return payloadStore.get(channelId)?.prevReq
   },
 
   /**

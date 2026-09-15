@@ -5,8 +5,8 @@ import type {ActionPayload, Priority, ConditionFunction} from './core'
 
 /*
 
-      C.Y.R.E - T.I.M.E.L.I.N.E 
-      
+      C.Y.R.E - T.I.M.E.L.I.N.E
+
       Standardized task system for all scheduled work:
       - Channels, orchestrations, system tasks all become TimelineTasks
       - Trigger-based scheduling interface
@@ -33,7 +33,9 @@ export type TaskSource =
 export interface TaskTrigger {
   // Time-based triggers
   time?: string // '09:00', '14:30'
-  cron?: string // '0 9 * * MON'
+  cron?: string // '0 9 * * MON' - full 5-field cron, real parsing (lists/ranges/steps/dom-dow OR-semantics)
+  date?: string // 'YYYY-MM-DD' - one-off calendar date, combined with `time`; fires once, never reschedules
+  days?: number[] // Restrict a `time` trigger to these weekdays (0=Sun..6=Sat)
   interval?: number // Milliseconds
   delay?: number // Initial delay
 
@@ -49,7 +51,7 @@ export interface TaskTrigger {
 
   // Execution config
   payload?: ActionPayload // Payload for execution
-  timezone?: string // Timezone for time-based triggers
+  timezone?: string // IANA timezone for time/cron/date triggers, e.g. 'Europe/London'. Defaults to UTC
   repeat?: number | boolean // Repetition config
   enabled?: boolean // Enable/disable trigger
 }

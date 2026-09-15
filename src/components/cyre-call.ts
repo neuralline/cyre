@@ -10,7 +10,7 @@ import payloadState from '../context/payload-state'
 /*
 
       C.Y.R.E - C.A.L.L - P.R.O.C.E.S.S.I.N.G
-      
+
       Fixed infinite repeats handling:
       - Proper repeat: true logic for TimeKeeper
       - Fixed callback execution pattern
@@ -48,7 +48,22 @@ export async function processCall(
 
     // SCHEDULING LOGIC
     if (action._hasScheduling) {
-      sensor.sys(action)
+      const scheduleDetails = [
+        `interval:${action.interval || 0}ms`,
+        action.delay !== undefined ? `delay:${action.delay}ms` : undefined,
+        `repeat:${action.repeat ?? 1}`
+      ]
+        .filter(Boolean)
+        .join(' ')
+      // Per-call scheduling detail, not a system lifecycle event - sensor.sys()
+      // is force-printed regardless of minLogLevel (see sensor.ts), which meant
+      // every single scheduled cyre.call() (e.g. one per auto-animating carousel
+      // instance in holo-carousel) flooded the console even at the default
+      // ERROR-only threshold. sensor.debug() still reaches useLog() subscribers
+      // via sensorState.emit (that fan-out is independent of the console gate),
+      // it just no longer force-prints.
+      sensor.debug(action.id, 'scheduled execution', scheduleDetails)
+
       const result = TimeKeeper.keep(
         action.interval || 0,
         async () => await useDispatch(action, finalPayload),

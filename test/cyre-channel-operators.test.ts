@@ -84,6 +84,17 @@ describe('Cyre Channel Operators and Talents', () => {
     })
 
     describe('Debounce Operator', () => {
+      // NOTE: rewritten for the debounce settle-promise fix (see
+      // src/context/pending-state.ts, src/app.ts's call()). cyre.call() on
+      // a debounced channel now returns a promise that resolves with the
+      // REAL handler result once the window elapses, shared across every
+      // caller in that window - not an immediate "scheduled" ack. Under
+      // vi.useFakeTimers(), that means the call must NEVER be awaited
+      // inline before the clock is advanced (vi.advanceTimersByTimeAsync,
+      // not the sync variant - the deferred callback itself awaits
+      // processCall()), or the promise just hangs. See
+      // test/protections/cyre-debounce.test.ts for the full test suite
+      // this mirrors at a smaller scale.
       beforeEach(() => {
         vi.useFakeTimers()
       })
@@ -92,7 +103,7 @@ describe('Cyre Channel Operators and Talents', () => {
         vi.useRealTimers()
       })
 
-      it('should debounce rapid calls', async () => {
+      it('should debounce rapid calls and resolve once with the real result', async () => {
         const handler = vi.fn()
 
         cyre.action({
@@ -101,25 +112,24 @@ describe('Cyre Channel Operators and Talents', () => {
         })
         cyre.on('debounced-action', handler)
 
-        // Make rapid calls
-        const result1 = await cyre.call('debounced-action', 'call1')
-        const result2 = await cyre.call('debounced-action', 'call2')
-        const result3 = await cyre.call('debounced-action', 'call3')
+        // Fire rapid calls WITHOUT awaiting each one - they share one
+        // settle promise for this window
+        const p1 = cyre.call('debounced-action', 'call1')
+        const p2 = cyre.call('debounced-action', 'call2')
+        const p3 = cyre.call('debounced-action', 'call3')
 
-        // All should return success (debounced)
-        expect(result1.ok).toBe(true)
-        expect(result1.message).toContain('debounced')
-        expect(result2.ok).toBe(true)
-        expect(result2.message).toContain('debounced')
-        expect(result3.ok).toBe(true)
-        expect(result3.message).toContain('debounced')
-
-        // Handler shouldn't be called yet
+        // Handler shouldn't run yet - still inside the debounce window
         expect(handler).not.toHaveBeenCalled()
 
-        // Test that debounce mechanism is working - calls are scheduled
-        expect(result1.message).toContain('execution scheduled')
-        expect(result3.metadata?.delay).toBe(500)
+        await vi.advanceTimersByTimeAsync(500)
+        const [result1, result2, result3] = await Promise.all([p1, p2, p3])
+
+        // One real execution serves all 3 callers, off the LAST payload
+        expect(handler).toHaveBeenCalledTimes(1)
+        expect(handler).toHaveBeenCalledWith('call3')
+        expect(result1.ok).toBe(true)
+        expect(result1).toEqual(result2)
+        expect(result2).toEqual(result3)
       })
 
       it('should validate debounce mechanism without maxWait timing', async () => {
@@ -131,22 +141,26 @@ describe('Cyre Channel Operators and Talents', () => {
         })
         cyre.on('debounce-validation', handler)
 
-        // Make rapid calls
-        const result1 = await cyre.call('debounce-validation', 'call1')
-        const result2 = await cyre.call('debounce-validation', 'call2')
+        const p1 = cyre.call('debounce-validation', 'call1')
+        const p2 = cyre.call('debounce-validation', 'call2')
 
-        // Verify debounce is working (calls return success but are scheduled)
-        expect(result1.ok).toBe(true)
-        expect(result1.message).toContain('debounced')
-        expect(result2.ok).toBe(true)
-        expect(result2.message).toContain('debounced')
-
-        // Verify handler not called immediately
+        // Handler not called immediately - still pending
         expect(handler).not.toHaveBeenCalled()
+
+        await vi.advanceTimersByTimeAsync(1000)
+        const [result1, result2] = await Promise.all([p1, p2])
+
+        // Both calls resolve, sharing one real execution off the last payload
+        expect(handler).toHaveBeenCalledTimes(1)
+        expect(handler).toHaveBeenCalledWith('call2')
+        expect(result1.ok).toBe(true)
+        expect(result2.ok).toBe(true)
       })
     })
 
     describe('Buffer Operator', () => {
+      // Same rewrite rationale as Debounce Operator above - buffer shares
+      // the identical settle-promise mechanism (src/context/pending-state.ts).
       beforeEach(() => {
         vi.useFakeTimers()
       })
@@ -164,24 +178,22 @@ describe('Cyre Channel Operators and Talents', () => {
         })
         cyre.on('buffered-overwrite', handler)
 
-        // Make multiple calls within buffer window
-        const result1 = await cyre.call('buffered-overwrite', 'data1')
-        const result2 = await cyre.call('buffered-overwrite', 'data2')
-        const result3 = await cyre.call('buffered-overwrite', 'data3')
-
-        // All should return success (buffered)
-        expect(result1.ok).toBe(true)
-        expect(result1.message).toContain('buffered')
-        expect(result2.ok).toBe(true)
-        expect(result2.message).toContain('buffered')
-        expect(result3.ok).toBe(true)
-        expect(result3.message).toContain('buffered')
+        const p1 = cyre.call('buffered-overwrite', 'data1')
+        const p2 = cyre.call('buffered-overwrite', 'data2')
+        const p3 = cyre.call('buffered-overwrite', 'data3')
 
         // Handler shouldn't be called yet
         expect(handler).not.toHaveBeenCalled()
 
-        // Test that buffer mechanism is working
-        expect(result1.metadata?.bufferWindow).toBe(1000)
+        await vi.advanceTimersByTimeAsync(1000)
+        const [result1, result2, result3] = await Promise.all([p1, p2, p3])
+
+        // overwrite strategy: only the LAST payload survives to execution
+        expect(handler).toHaveBeenCalledTimes(1)
+        expect(handler).toHaveBeenCalledWith('data3')
+        expect(result1.ok).toBe(true)
+        expect(result1).toEqual(result2)
+        expect(result2).toEqual(result3)
       })
 
       it('should buffer calls with append strategy', async () => {
@@ -193,24 +205,23 @@ describe('Cyre Channel Operators and Talents', () => {
         })
         cyre.on('buffered-append', handler)
 
-        // Make multiple calls
-        const result1 = await cyre.call('buffered-append', 'item1')
-        const result2 = await cyre.call('buffered-append', 'item2')
-        const result3 = await cyre.call('buffered-append', 'item3')
-
-        // All should return success (buffered)
-        expect(result1.ok).toBe(true)
-        expect(result1.message).toContain('buffered')
-        expect(result2.ok).toBe(true)
-        expect(result2.message).toContain('buffered')
-        expect(result3.ok).toBe(true)
-        expect(result3.message).toContain('buffered')
+        const p1 = cyre.call('buffered-append', 'item1')
+        const p2 = cyre.call('buffered-append', 'item2')
+        const p3 = cyre.call('buffered-append', 'item3')
 
         // Handler shouldn't be called immediately
         expect(handler).not.toHaveBeenCalled()
 
-        // Test that buffer mechanism is working
-        expect(result1.metadata?.bufferWindow).toBe(500)
+        await vi.advanceTimersByTimeAsync(500)
+        const [result1, result2, result3] = await Promise.all([p1, p2, p3])
+
+        // append strategy: handler receives the whole collected array in
+        // ONE call, not one call per item
+        expect(handler).toHaveBeenCalledTimes(1)
+        expect(handler).toHaveBeenCalledWith(['item1', 'item2', 'item3'])
+        expect(result1.ok).toBe(true)
+        expect(result1).toEqual(result2)
+        expect(result2).toEqual(result3)
       })
     })
 

@@ -1,13 +1,17 @@
 // src/orchestration/orchestration-engine.ts
 // Updated orchestration engine with clean functional API
 
-import {timeline} from '../context/state'
+import {io, timeline} from '../context/state'
 import {sensor} from '../components/sensor'
 import {metricsState} from '../context/metrics-state'
+import {orchestrationState} from '../context/orchestration-state'
 import {call as cyreCall} from '../app'
+import {subscribe, removeHandler} from '../components/cyre-on'
 import {TimeKeeper} from '../components/cyre-timekeeper'
+import {computeNextOccurrence} from '../components/cyre-calendar'
 import type {
   OrchestrationConfig,
+  OrchestrationTrigger,
   WorkflowStep,
   ExecutionContext,
   StepResult,
@@ -19,7 +23,7 @@ import type {
 /*
 
       C.Y.R.E - O.R.C.H.E.S.T.R.A.T.I.O.N - E.N.G.I.N.E - V2
-      
+
       Clean functional API with TimeKeeper alignment:
       - orchestration.activate(id, boolean) - Enable/disable triggers
       - orchestration.call(id, payload) - Direct execution like cyre.call
@@ -28,9 +32,13 @@ import type {
 
 */
 
-// Runtime storage for orchestration state
-const orchestrationRuntimes = new Map<string, OrchestrationRuntime>()
-const triggerSubscriptions = new Map<string, () => void>()
+// Runtime storage for orchestration state now lives in
+// context/orchestration-state.ts, same pattern as io/subscribers/timeline in
+// context/state.ts, so orchestration runtime is visible to the rest of the
+// app (metrics export, introspection, reset) instead of living in a
+// module-private store only this file can see.
+const {runtimes: orchestrationRuntimes, triggerSubscriptions} =
+  orchestrationState
 
 // Orchestration metadata for timeline entries
 interface OrchestrationMetadata {
@@ -82,7 +90,16 @@ const keep = (config: OrchestrationConfig): {ok: boolean; message: string} => {
       return {ok: false, message: 'Orchestration ID is required'}
     }
 
-    if (orchestrationRuntimes.has(config.id)) {
+    // Registration is gated by metricsState the same way cyre.action()/
+    // cyre.on() are - without this, cyre.lock() had no effect on
+    // orchestration.keep() at all, silently defeating the "no more
+    // registrations past this point" guarantee lock() is supposed to give.
+    const registerCheck = metricsState.canRegister()
+    if (!registerCheck.allowed) {
+      return {ok: false, message: registerCheck.messages.join(', ')}
+    }
+
+    if (orchestrationRuntimes.get(config.id) !== undefined) {
       return {ok: false, message: 'Orchestration already exists'}
     }
 
@@ -103,6 +120,19 @@ const keep = (config: OrchestrationConfig): {ok: boolean; message: string} => {
     }
 
     orchestrationRuntimes.set(config.id, runtime)
+
+    // Channel triggers subscribe here, once, at registration time - like
+    // any other cyre.on() call, gated by the same canRegister() check this
+    // whole keep() call already went through above. This is deliberately
+    // NOT done at activate()-time inside registerTriggers(): orchestrations
+    // are typically activated after cyre.lock() (see this project's demo
+    // convention), so subscribing on every activate() would fail against a
+    // locked system the moment someone tried to re-enable a channel-
+    // triggered orchestration. Instead the subscription stays live for the
+    // orchestration's whole lifetime (cleaned up only in forget() below),
+    // and activate()/deactivate() just flip runtime.status, which the
+    // handler checks before actually running the workflow.
+    subscribeChannelTriggers(config)
 
     sensor.info(config.id, 'info', 'orchestration-created')
 
@@ -151,15 +181,18 @@ const activate = (
         return {ok: true, message: 'Orchestration already inactive'}
       }
 
-      // Stop all triggers using TimeKeeper
-      runtime.triggerIds?.forEach(triggerId => {
-        TimeKeeper.forget(triggerId)
-        timeline.forget(triggerId)
-
-        const unsubscribe = triggerSubscriptions.get(triggerId)
-        if (unsubscribe) {
-          unsubscribe()
-          triggerSubscriptions.delete(triggerId)
+      // Stop real TimeKeeper-backed triggers ('time' and, since the fix
+      // below, 'condition' polling). 'channel' triggers are deliberately
+      // skipped here - they were subscribed once in keep() and stay
+      // subscribed for the orchestration's whole lifetime; deactivating
+      // just means runtime.status flips to 'inactive' above, which the
+      // channel handler checks before running the workflow. Actually
+      // tearing the subscription down happens only in forget() below.
+      runtime.config.triggers?.forEach((trigger, index) => {
+        if (trigger.type === 'time' || trigger.type === 'condition') {
+          const triggerId = `${orchestrationId}-trigger-${index}`
+          TimeKeeper.forget(triggerId)
+          timeline.forget(triggerId)
         }
       })
 
@@ -181,6 +214,51 @@ const activate = (
     )
     return {ok: false, message: String(error)}
   }
+}
+
+/**
+ * Pause an orchestration's TimeKeeper-backed triggers ('time'/'condition')
+ * in place, without tearing down the runtime or its channel-trigger
+ * subscriptions - mirrors schedule.pause() in cyre-schedule.ts. Unlike
+ * activate(id, false), this doesn't forget the timers or flip
+ * runtime.status to 'inactive'; it just marks each trigger timer paused so
+ * resume() below can recalculate correctly. 'channel' triggers aren't
+ * TimeKeeper-backed at all (they're live cyre.on() subscriptions), so
+ * there's nothing to pause for them here - same scope as cyre.pause()
+ * never blocking direct cyre.call()s on regular channels either.
+ */
+const pause = (orchestrationId: string): boolean => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) return false
+
+  runtime.config.triggers?.forEach((trigger, index) => {
+    if (trigger.type === 'time' || trigger.type === 'condition') {
+      TimeKeeper.pause(`${orchestrationId}-trigger-${index}`)
+    }
+  })
+
+  return true
+}
+
+/**
+ * Resume an orchestration paused via pause() above. Goes through
+ * TimeKeeper.resume(), which is recompute-aware (see
+ * Timer['recompute'] in types/timer.ts and QuartzEngine.scheduleNext() in
+ * cyre-timekeeper.ts) - a cron-based 'time' trigger paused for hours
+ * recalculates its next occurrence from the actual resume time rather than
+ * reusing a stale pre-pause schedule.
+ */
+const resume = (orchestrationId: string): boolean => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) return false
+
+  runtime.config.triggers?.forEach((trigger, index) => {
+    if (trigger.type === 'time' || trigger.type === 'condition') {
+      TimeKeeper.resume(`${orchestrationId}-trigger-${index}`)
+    }
+  })
+
+  return true
 }
 
 /**
@@ -237,7 +315,7 @@ const get = (orchestrationId: string): OrchestrationRuntime | undefined => {
  * List all orchestration runtimes
  */
 const list = (): OrchestrationRuntime[] => {
-  return Array.from(orchestrationRuntimes.values())
+  return orchestrationRuntimes.getAll()
 }
 
 /**
@@ -254,11 +332,194 @@ const forget = (orchestrationId: string): boolean => {
     activate(orchestrationId, false)
   }
 
+  // Channel-trigger subscriptions live for the orchestration's whole
+  // lifetime (see subscribeChannelTriggers(), called once from keep()),
+  // independent of activate()/deactivate() cycles - clean them up here,
+  // the one place this orchestration is genuinely done for good.
+  runtime.config.triggers?.forEach((trigger, index) => {
+    if (trigger.type === 'channel') {
+      const triggerId = `${orchestrationId}-trigger-${index}`
+      triggerSubscriptions.get(triggerId)?.()
+      triggerSubscriptions.forget(triggerId)
+    }
+  })
+
   // Remove runtime
-  orchestrationRuntimes.delete(orchestrationId)
+  orchestrationRuntimes.forget(orchestrationId)
 
   sensor.debug(orchestrationId, 'info', 'orchestration-forgotten')
   return true
+}
+
+/**
+ * Remove every orchestration - called from cyre's top-level reset()/
+ * shutdown() so a system reset doesn't leave stale OrchestrationRuntime /
+ * triggerSubscription entries pointing at timers TimeKeeper.reset() just
+ * destroyed out from under them. forget() already does the right thing
+ * per-orchestration (deactivate + unsubscribe channel triggers + remove
+ * runtime), so this is just "do that for everything, before the raw
+ * io/subscriber/timeline stores it depends on get wiped".
+ */
+const reset = (): void => {
+  list().forEach(runtime => forget(runtime.config.id))
+}
+
+/**
+ * Subscribe every 'channel'-type trigger's target channel(s) to a handler
+ * that runs this orchestration's workflow - called once from keep(), not
+ * from registerTriggers()/activate(). See the comment in keep() for why:
+ * subscribing on every activate() would break re-activating a channel-
+ * triggered orchestration after cyre.lock(), since subscribe() (like
+ * cyre.on()) is itself gated by metricsState.canRegister(). The
+ * subscription stays live for the orchestration's whole lifetime; the
+ * handler checks runtime.status before actually running anything, so
+ * activate(false) can still make it a no-op without unsubscribing.
+ */
+const subscribeChannelTriggers = (config: OrchestrationConfig): void => {
+  config.triggers?.forEach((trigger, index) => {
+    if (trigger.type !== 'channel' || !trigger.channels) return
+
+    const triggerId = `${config.id}-trigger-${index}`
+    const channels = Array.isArray(trigger.channels)
+      ? trigger.channels
+      : [trigger.channels]
+    const unsubscribers: Array<() => void> = []
+
+    channels.forEach(channelId => {
+      const channelHandler = async (payload: any) => {
+        // Only run the workflow while this orchestration is actually
+        // active - see the comment above for why the subscription itself
+        // isn't torn down and rebuilt on every activate()/deactivate().
+        const runtime = orchestrationRuntimes.get(config.id)
+        if (!runtime || runtime.status !== 'active') return
+
+        sensor.debug(
+          config.id,
+          `orchestration-trigger-fired: channel ${channelId}`
+        )
+        const triggerEvent: TriggerEvent = {
+          name: trigger.name,
+          type: 'channel',
+          channelId,
+          payload,
+          timestamp: Date.now()
+        }
+
+        try {
+          const result = await executeWorkflow(config, triggerEvent)
+          if (result.ok) {
+            sensor.debug(config.id, 'orchestration-executed-successfully')
+          } else {
+            sensor.error(
+              config.id,
+              `orchestration-failed: ${result.message}`
+            )
+          }
+        } catch (error) {
+          sensor.error(config.id, `orchestration-error: ${error}`)
+        }
+      }
+
+      const subResult = subscribe(channelId, channelHandler)
+      if (subResult.ok) {
+        unsubscribers.push(() => removeHandler(channelId, channelHandler))
+      } else {
+        sensor.error(
+          config.id,
+          `channel-trigger-subscription-failed: ${subResult.message}`,
+          'channel-trigger'
+        )
+      }
+    })
+
+    if (unsubscribers.length) {
+      triggerSubscriptions.set(triggerId, () =>
+        unsubscribers.forEach(unsubscribe => unsubscribe())
+      )
+    }
+  })
+}
+
+/**
+ * Runs one firing of a 'time' trigger's workflow, logging the same way the
+ * interval-based path always has.
+ */
+const fireTimeTrigger = async (
+  config: OrchestrationConfig,
+  trigger: OrchestrationTrigger
+): Promise<void> => {
+  sensor.debug(config.id, 'orchestration-trigger-fired')
+  const triggerEvent: TriggerEvent = {
+    name: trigger.name,
+    type: 'time',
+    timestamp: Date.now()
+  }
+
+  try {
+    const result = await executeWorkflow(config, triggerEvent)
+    if (result.ok) {
+      sensor.debug(config.id, 'orchestration-executed-successfully')
+    } else {
+      sensor.error(config.id, `orchestration-failed: ${result.message}`)
+    }
+  } catch (error) {
+    sensor.error(config.id, `orchestration-error: ${error}`)
+  }
+}
+
+/**
+ * Arms a calendar-based 'time' trigger (trigger.schedule - a cron
+ * expression) on TimeKeeper, using its native `recompute` hook (see
+ * Timer['recompute'] in types/timer.ts) for anything that should keep
+ * recurring. Mirrors armCalendarTrigger() in cyre-schedule.ts - both go
+ * through cyre-calendar.ts's computeNextOccurrence() so "when does this run
+ * next" is computed identically for schedule tasks and orchestrations, and
+ * both hand the recompute function itself to TimeKeeper rather than
+ * re-arming from outside it, so a repeating cron trigger stays locked to
+ * its calendar slot (never degrading into a fixed-interval repeat) and
+ * activate(true) after a deactivate() correctly recalculates rather than
+ * resuming on a stale interval - TimeKeeper owns rescheduling uniformly,
+ * this function only runs once, to make the initial arm.
+ */
+const armOrchestrationScheduleTrigger = (
+  config: OrchestrationConfig,
+  trigger: OrchestrationTrigger,
+  triggerId: string
+): void => {
+  const recurrenceRule = {cron: trigger.schedule, timezone: trigger.timezone}
+  const nextOccurrence = computeNextOccurrence(recurrenceRule, Date.now())
+
+  if (nextOccurrence === undefined) {
+    sensor.error(config.id, 'schedule-trigger-no-future-occurrence', triggerId)
+    return
+  }
+
+  const delay = Math.max(0, nextOccurrence - Date.now())
+  const shouldRearm = trigger.repeat !== false
+
+  const timerResult = TimeKeeper.keep(
+    delay,
+    () => fireTimeTrigger(config, trigger),
+    shouldRearm ? true : 1,
+    triggerId,
+    undefined,
+    shouldRearm
+      ? from => computeNextOccurrence(recurrenceRule, from)
+      : undefined
+  )
+
+  if (timerResult.ok === 'ok') {
+    sensor.debug(
+      config.id,
+      `timekeeper-scheduled: ${triggerId} (cron "${trigger.schedule}", next in ${delay}ms)`
+    )
+    timeline.add(timerResult.value)
+  } else {
+    sensor.error(
+      config.id,
+      `timekeeper-schedule-failed: ${triggerId} - ${timerResult.error}`
+    )
+  }
 }
 
 /**
@@ -273,80 +534,125 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
 
     switch (trigger.type) {
       case 'channel':
-        if (trigger.channels) {
-          const channels = Array.isArray(trigger.channels)
-            ? trigger.channels
-            : [trigger.channels]
-
-          channels.forEach(channelId => {
-            // TODO: Implement channel subscription logic
-            // This should use cyre.on() to subscribe to channel events
-            // and trigger orchestration when those channels are called
-            const unsubscribe = () => {
-              // Implementation would subscribe to channel events
-              // For now, placeholder
-            }
-            triggerSubscriptions.set(triggerId, unsubscribe)
-          })
-        }
+        // Subscribed once at keep()-time (see subscribeChannelTriggers()
+        // above), not here - this trigger type stays subscribed for the
+        // orchestration's whole lifetime, and activate()/deactivate() just
+        // flip runtime.status, which the channel handler already checks.
+        // Nothing to do here beyond the triggerId already pushed above
+        // (kept so getStatus()/the activation message still count it).
         break
 
       case 'time':
-        if (trigger.interval) {
-          // Use TimeKeeper.keep() to actually schedule execution
-          const executionCallback = async () => {
-            console.log(`🔄 Orchestration trigger fired: ${config.id}`)
-            const triggerEvent: TriggerEvent = {
-              name: trigger.name,
-              type: 'time',
-              timestamp: Date.now()
-            }
-
-            try {
-              const result = await executeWorkflow(config, triggerEvent)
-              if (result.ok) {
-                console.log(
-                  `✅ Orchestration ${config.id} executed successfully`
-                )
-              } else {
-                console.log(
-                  `❌ Orchestration ${config.id} failed: ${result.message}`
-                )
-              }
-            } catch (error) {
-              console.error(`❌ Orchestration ${config.id} error:`, error)
-            }
-          }
-
+        if (trigger.schedule) {
+          // Calendar-based (cron) trigger - a real recurrence rule, not a
+          // fixed interval. See armOrchestrationScheduleTrigger() above.
+          armOrchestrationScheduleTrigger(config, trigger, triggerId)
+        } else if (trigger.interval) {
+          // Plain fixed-interval trigger - TimeKeeper's native repeat is
+          // the correct semantics here, unchanged from before.
           const timerResult = TimeKeeper.keep(
             trigger.interval, // duration
-            executionCallback, // callback
+            () => fireTimeTrigger(config, trigger), // callback
             trigger.repeat !== false ? true : 1, // repeat (default true for time triggers)
             triggerId, // id
             trigger.delay // delay (optional)
           )
 
           if (timerResult.ok === 'ok') {
-            console.log(
-              `✅ TimeKeeper scheduled: ${triggerId} (${trigger.interval}ms interval)`
+            sensor.debug(
+              config.id,
+              `timekeeper-scheduled: ${triggerId} (${trigger.interval}ms interval)`
             )
 
             // Also add to timeline for tracking
             timeline.add(timerResult.value)
           } else {
-            console.error(
-              `❌ TimeKeeper failed to schedule: ${triggerId}`,
-              timerResult.error
+            sensor.error(
+              config.id,
+              `timekeeper-schedule-failed: ${triggerId} - ${timerResult.error}`
             )
           }
         }
         break
 
       case 'condition':
-        // TODO: Implement condition-based triggers
-        // This should periodically evaluate the condition function
-        // and trigger orchestration when condition becomes true
-        sensor.error(config.id, 'condition-trigger-not-implemented')
+        if (trigger.condition) {
+          // No dedicated poll-interval field on OrchestrationTrigger for
+          // condition triggers - reuse `interval` the same way 'time'
+          // triggers do, defaulting to 1000ms when the author didn't set
+          // one, rather than inventing a new config field for this.
+          const pollInterval = trigger.interval || 1000
+
+          const conditionCallback = async () => {
+            try {
+              const pollContext: ExecutionContext = {
+                orchestrationId: config.id,
+                trigger: {
+                  name: trigger.name,
+                  type: 'condition',
+                  timestamp: Date.now()
+                },
+                variables: {},
+                startTime: Date.now(),
+                stepHistory: []
+              }
+
+              const conditionMet = await trigger.condition!(
+                undefined,
+                pollContext
+              )
+              if (!conditionMet) return
+
+              sensor.debug(config.id, 'orchestration-trigger-fired')
+              const triggerEvent: TriggerEvent = {
+                name: trigger.name,
+                type: 'condition',
+                timestamp: Date.now()
+              }
+
+              const result = await executeWorkflow(config, triggerEvent)
+              if (result.ok) {
+                sensor.debug(config.id, 'orchestration-executed-successfully')
+              } else {
+                sensor.error(
+                  config.id,
+                  `orchestration-failed: ${result.message}`
+                )
+              }
+            } catch (error) {
+              sensor.error(
+                config.id,
+                `orchestration-condition-trigger-error: ${error}`
+              )
+            }
+          }
+
+          const timerResult = TimeKeeper.keep(
+            pollInterval,
+            conditionCallback,
+            trigger.repeat !== false ? true : 1,
+            triggerId,
+            trigger.delay
+          )
+
+          if (timerResult.ok === 'ok') {
+            sensor.debug(
+              config.id,
+              `timekeeper-polling-condition: ${triggerId} (every ${pollInterval}ms)`
+            )
+            timeline.add(timerResult.value)
+          } else {
+            sensor.error(
+              config.id,
+              `timekeeper-condition-poll-failed: ${triggerId} - ${timerResult.error}`
+            )
+          }
+        } else {
+          sensor.error(
+            config.id,
+            'condition-trigger-missing-condition-function'
+          )
+        }
         break
 
       case 'external':
@@ -364,6 +670,40 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
   })
 
   return triggerIds
+}
+
+/**
+ * Call a channel target and, if the response only reflects a TimeKeeper
+ * scheduling acknowledgment rather than real execution - see cyre-call.ts's
+ * `_hasScheduling` branch, which returns `{ok: true, payload: undefined,
+ * message: 'Scheduled execution'}` the instant a delayed/interval target is
+ * handed to TimeKeeper.keep(), regardless of whether it has actually run -
+ * wait out that target's own configured delay/interval before resolving.
+ *
+ * Without this, a 'sequential' workflow step only guaranteed CALL order,
+ * not COMPLETION order, for any target with its own scheduling: the step
+ * would resolve the moment the call was scheduled and the workflow would
+ * move on to its next step before the scheduled target had actually
+ * dispatched. Confirmed live in demo/orchestration-incident-response-demo.ts
+ * (documented as Update 8 in the analysis doc) - a `close`/resolve step ran
+ * ~1ms after a 30ms-delayed rollback step was merely scheduled, not once it
+ * had completed.
+ */
+const callTargetAndAwaitDispatch = async (
+  target: string,
+  payload: any
+): Promise<any> => {
+  const result = await cyreCall(target, payload)
+
+  if (result.ok && result.payload === undefined) {
+    const targetConfig = io.get(target)
+    const scheduledWait = targetConfig?.delay ?? targetConfig?.interval
+    if (targetConfig?._hasScheduling && scheduledWait) {
+      await new Promise(resolve => setTimeout(resolve, scheduledWait))
+    }
+  }
+
+  return result
 }
 
 /**
@@ -438,7 +778,7 @@ const executeWorkflowSteps = async (
                     ? step.payload(context)
                     : step.payload || context.trigger.payload
 
-                return cyreCall(target, payload)
+                return callTargetAndAwaitDispatch(target, payload)
               })
             )
 
@@ -487,8 +827,13 @@ const executeWorkflowSteps = async (
         case 'loop':
           if (step.steps) {
             const loopResults: any[] = []
-            // Simple loop implementation - can be enhanced with iteration logic
-            const iterations = 3 // Default iterations
+            // Iteration count is configurable via step.iterations - falls
+            // back to 3 (the old hardcoded value) when omitted, so existing
+            // configs that never set it keep behaving exactly as before.
+            const iterations =
+              typeof step.iterations === 'number' && step.iterations >= 0
+                ? step.iterations
+                : 3
             for (let i = 0; i < iterations; i++) {
               const iterationResult = await executeWorkflowSteps(
                 step.steps,
@@ -562,7 +907,7 @@ const executeOrchestrationAction = async (
           ? action.payload(context)
           : action.payload || context.trigger.payload
 
-      return cyreCall(target, payload)
+      return callTargetAndAwaitDispatch(target, payload)
     })
   )
 
@@ -579,6 +924,9 @@ export const orchestration = {
   get,
   list,
   forget, // RENAMED: Remove orchestration (replaces remove)
+  pause, // NEW: pause TimeKeeper-backed triggers in place (mirrors schedule.pause)
+  resume, // NEW: resume paused triggers - recompute-aware via TimeKeeper
+  reset, // NEW: remove every orchestration - used by cyre.reset()/shutdown()
 
   // Additional utility methods
   getStatus: (orchestrationId: string) => {
@@ -608,11 +956,11 @@ export const orchestration = {
 
   getSystemOverview: () => {
     const timeKeeperStatus = TimeKeeper.status()
-    const allRuntimes = Array.from(orchestrationRuntimes.values())
+    const allRuntimes = orchestrationRuntimes.getAll()
 
     return {
       total: {
-        orchestrations: orchestrationRuntimes.size,
+        orchestrations: orchestrationRuntimes.size(),
         running: allRuntimes.filter(r => r.status === 'active').length,
         timelineEntries: timeline.getAll().length,
         activeTriggers: timeKeeperStatus.activeFormations

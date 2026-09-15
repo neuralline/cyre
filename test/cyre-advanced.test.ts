@@ -50,7 +50,14 @@ describe('Cyre Advanced Features', () => {
       expect(result.message).toContain('Action')
     })
 
-    it('should isolate branch channels from main cyre', async () => {
+    it('should reach branch channels from main cyre via their full path', async () => {
+      // NOTE: this used to be named "should isolate branch channels from
+      // main cyre" while asserting the opposite (mainResult.ok === true) -
+      // useBranch() registers its channels as regular top-level cyre
+      // channels under a "<branchPath>/<localId>" id (see useBranch.ts),
+      // it does not sandbox them. Calling that full id from the main cyre
+      // instance is expected to work; this test now documents that
+      // correctly instead of contradicting its own name.
       const branch = useBranch(cyre, {id: 'isolated-branch'})
       const handler = vi.fn()
 
@@ -63,11 +70,13 @@ describe('Cyre Advanced Features', () => {
       expect(branchResult.ok).toBe(true)
       expect(handler).toHaveBeenCalled()
 
-      // Call from main cyre should fail (different namespace)
+      // Call from main cyre using the branch's full path also works - the
+      // channel is the SAME underlying registration, just addressed
+      // differently
       const mainResult = await cyre.call('isolated-branch/isolated-action', {
         test: 'data'
       })
-      expect(mainResult.ok).toBe(true) // Actually should work with full path
+      expect(mainResult.ok).toBe(true)
     })
 
     it('should support hierarchical branch paths', () => {
@@ -457,6 +466,14 @@ describe('Cyre Advanced Features', () => {
       vi.useRealTimers()
     })
 
+    // CYRE v4.7.0: cyre.call() on a buffered channel now returns a promise
+    // that only resolves once the buffer window actually closes (shared by
+    // every caller landed in the same window - see context/pending-state.ts).
+    // Under fake timers that means these calls can no longer be awaited
+    // inline before the clock advances - doing so hangs forever. The
+    // pattern below: capture the promise(s) without awaiting, assert the
+    // handler hasn't run, advance the clock past the window with
+    // vi.advanceTimersByTimeAsync(), THEN await.
     it('should buffer calls within window', async () => {
       const handler = vi.fn()
 
@@ -466,24 +483,24 @@ describe('Cyre Advanced Features', () => {
       })
       cyre.on('buffered-action', handler)
 
-      // Multiple calls within buffer window should return immediately
-      const result1 = await cyre.call('buffered-action', 'call1')
-      const result2 = await cyre.call('buffered-action', 'call2')
-      const result3 = await cyre.call('buffered-action', 'call3')
-
-      // Calls should be successful (buffered)
-      expect(result1.ok).toBe(true)
-      expect(result2.ok).toBe(true)
-      expect(result3.ok).toBe(true)
+      // Multiple calls within the buffer window share ONE settle promise
+      const p1 = cyre.call('buffered-action', 'call1')
+      const p2 = cyre.call('buffered-action', 'call2')
+      const p3 = cyre.call('buffered-action', 'call3')
 
       // Handler shouldn't be called yet
       expect(handler).not.toHaveBeenCalled()
 
       // Advance time to trigger buffer execution
-      vi.advanceTimersByTime(1100)
+      await vi.advanceTimersByTimeAsync(1100)
+      const [result1, result2, result3] = await Promise.all([p1, p2, p3])
 
-      // Buffer execution happens asynchronously, so handler might still not be called
-      // The test validates buffering behavior rather than exact execution timing
+      // Append strategy: the handler sees every payload collected in the window
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith(['call1', 'call2', 'call3'])
+      expect(result1.ok).toBe(true)
+      expect(result2.ok).toBe(true)
+      expect(result3.ok).toBe(true)
     })
 
     it('should handle different buffer strategies', async () => {
@@ -495,16 +512,19 @@ describe('Cyre Advanced Features', () => {
       })
       cyre.on('overwrite-buffer', handler)
 
-      const result1 = await cyre.call('overwrite-buffer', 'first')
-      const result2 = await cyre.call('overwrite-buffer', 'last')
+      const p1 = cyre.call('overwrite-buffer', 'first')
+      const p2 = cyre.call('overwrite-buffer', 'last')
 
-      // Both calls should be successful (buffered)
+      await vi.advanceTimersByTimeAsync(600)
+      const [result1, result2] = await Promise.all([p1, p2])
+
+      // Overwrite strategy: only the LAST payload survives into the window,
+      // and both callers share that single settled result
+      expect(handler).toHaveBeenCalledTimes(1)
+      expect(handler).toHaveBeenCalledWith('last')
       expect(result1.ok).toBe(true)
       expect(result2.ok).toBe(true)
-
-      vi.advanceTimersByTime(600)
-
-      // Test validates that buffering is working, execution timing varies
+      expect(result1).toEqual(result2)
     })
   })
 

@@ -87,7 +87,7 @@ export type MiddlewareFunction = (...args: any[]) => any
 
 export interface ISubscriber {
   id: string
-  handler: (payload: any) => CyreResponse
+  handlers: EventHandler[]
 }
 
 export interface IMiddleware {
@@ -267,6 +267,14 @@ export interface IO {
   _timestamp?: number //latest call to channel timestamp
   _timeOfCreation?: number //time of channel creation timestamp
   _lastExecTime?: number // last successful execution time timestamp
+  /** Synchronous throttle-slot reservation timestamp, set the instant a
+   *  throttled call passes its gate check (before any await) and rolled
+   *  back if that call's execution ultimately fails. Exists alongside
+   *  _lastExecTime specifically to close a concurrency race: a burst of
+   *  un-awaited cyre.call()s on the same channel would otherwise all read
+   *  the same stale _lastExecTime (only written after a handler resolves)
+   *  and all pass the throttle gate. See app.ts's call() throttle branch. */
+  _throttleReservedAt?: number
   _executionDuration?: number //how long last execution took
   _executionCount?: number //how many times it has been successfully executed
   _errorCount?: number //error execution count

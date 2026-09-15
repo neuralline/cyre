@@ -57,10 +57,6 @@ describe('CYRE Payload Update Behavior', () => {
         const now = Date.now()
         const elapsed = now - testStartTime
 
-        console.log(
-          `[EXEC ${elapsed}ms] Fruit: ${payload.fruit} (Call #${payload.callIndex})`
-        )
-
         executionHistory.push({
           timestamp: elapsed,
           fruit: payload.fruit,
@@ -71,48 +67,29 @@ describe('CYRE Payload Update Behavior', () => {
       })
 
       // Make sequential calls with different payloads
-      console.log(`[CALL ${getElapsedTime()}ms] Calling with apple`)
       await cyre.call(ACTION_ID, {fruit: 'apple', callIndex: 1})
 
       // Small delay to ensure log sequence clarity
       await new Promise(resolve => setTimeout(resolve, 50))
 
-      console.log(`[CALL ${getElapsedTime()}ms] Calling with orange`)
       await cyre.call(ACTION_ID, {fruit: 'orange', callIndex: 2})
 
       // Small delay for clarity
       await new Promise(resolve => setTimeout(resolve, 50))
 
-      console.log(`[CALL ${getElapsedTime()}ms] Calling with lemon`)
       await cyre.call(ACTION_ID, {fruit: 'lemon', callIndex: 3})
 
-      // Wait for all interval executions to complete
-      console.log(`\nWaiting for ${REPEAT_COUNT} interval executions...`)
+      // Wait for all interval executions to complete. A little extra
+      // margin over the bare minimum (INTERVAL * (REPEAT_COUNT - 1)) so
+      // real-timer jitter doesn't clip the last scheduled repeat.
       await new Promise(resolve =>
-        setTimeout(resolve, INTERVAL * (REPEAT_COUNT - 1))
+        setTimeout(resolve, INTERVAL * REPEAT_COUNT + 100)
       )
-
-      // Log the execution history
-      console.log('\nExecution History:')
-      executionHistory.forEach((record, index) => {
-        console.log(
-          `${index + 1}. [${record.timestamp}ms] ${record.fruit} (Call #${
-            record.callIndex
-          })`
-        )
-      })
 
       // Analysis: first 3 entries should be the initial calls,
       // remaining entries should all be the last payload (lemon)
       const initialCalls = executionHistory.slice(0, 3)
       const intervalCalls = executionHistory.slice(3)
-
-      console.log('\nTest Analysis:')
-      console.log('- Initial calls:', initialCalls.map(c => c.fruit).join(', '))
-      console.log(
-        '- Interval repeats:',
-        intervalCalls.map(c => c.fruit).join(', ')
-      )
 
       // Verification
       expect(initialCalls.map(c => c.fruit)).toEqual([
@@ -121,14 +98,13 @@ describe('CYRE Payload Update Behavior', () => {
         'lemon'
       ])
 
-      // All interval repeats should be the last payload (lemon)
-      if (intervalCalls.length > 0) {
-        expect(intervalCalls.every(c => c.fruit === 'lemon')).toBe(true)
-      }
-
-      console.log(
-        '\nTest confirms: Only the most recent payload (lemon) is used for interval repeats!'
-      )
+      // This is the actual claim the test is named for - it used to be
+      // guarded by `if (intervalCalls.length > 0)` with no unconditional
+      // check that any interval repeats happened at all. If interval
+      // repeats silently stopped firing, the test passed without
+      // asserting anything about the behavior it exists to verify.
+      expect(intervalCalls.length).toBeGreaterThan(0)
+      expect(intervalCalls.every(c => c.fruit === 'lemon')).toBe(true)
     },
     TEST_TIMEOUT
   ) // Extend timeout to allow for interval executions
@@ -167,10 +143,6 @@ describe('CYRE Payload Update Behavior', () => {
         cyre.on(actionId, (payload: any) => {
           const elapsed = Date.now() - testStartTime
 
-          console.log(
-            `[EXEC ${elapsed}ms] Action: ${actionId}, Fruit: ${payload.fruit}`
-          )
-
           executionHistory.push({
             timestamp: elapsed,
             actionId,
@@ -182,42 +154,30 @@ describe('CYRE Payload Update Behavior', () => {
       })
 
       // Call each action with its appropriate fruit
-      console.log(`[CALL ${getElapsedTime()}ms] Calling apple-action`)
       await cyre.call('apple-action', {fruit: 'apple'})
-
-      console.log(`[CALL ${getElapsedTime()}ms] Calling orange-action`)
       await cyre.call('orange-action', {fruit: 'orange'})
-
-      console.log(`[CALL ${getElapsedTime()}ms] Calling lemon-action`)
       await cyre.call('lemon-action', {fruit: 'lemon'})
 
       // Wait for all interval executions to complete
-      console.log(`\nWaiting for ${REPEAT_COUNT} executions for each action...`)
       await new Promise(resolve => setTimeout(resolve, INTERVAL * REPEAT_COUNT))
 
       // Group executions by action ID
-      const executionsByAction = actions.reduce((acc, actionId) => {
-        acc[actionId] = executionHistory.filter(
-          record => record.actionId === actionId
-        )
-        return acc
-      }, {} as Record<string, typeof executionHistory>)
+      const executionsByAction = actions.reduce(
+        (acc, actionId) => {
+          acc[actionId] = executionHistory.filter(
+            record => record.actionId === actionId
+          )
+          return acc
+        },
+        {} as Record<string, typeof executionHistory>
+      )
 
-      // Log and verify results
-      console.log('\nExecution Counts by Action:')
+      // Verify results
       for (const [actionId, records] of Object.entries(executionsByAction)) {
         // Should have immediate call + repeats = REPEAT_COUNT total
-        console.log(
-          `- ${actionId}: ${records.length} executions with "${records[0]?.fruit}"`
-        )
-
         expect(records.length).toBe(REPEAT_COUNT)
         expect(records.every(r => r.fruit === records[0]?.fruit)).toBe(true)
       }
-
-      console.log(
-        '\nTest confirms: Different action IDs maintain independent interval timers!'
-      )
     },
     TEST_TIMEOUT
   )

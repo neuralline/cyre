@@ -571,6 +571,9 @@ export async function runInteractiveDemo() {
 }
 
 // Auto-run the demo
+// (previously called a second time at the bottom of this file - that ran
+// createChatDemo()/createGamingDemo() twice, registering a second .on()
+// handler on every channel and doubling every log line. Only run it once.)
 runInteractiveDemo().catch(console.error)
 
 // Example usage shown in console
@@ -584,5 +587,3 @@ setTimeout(() => {
   console.log('4. demoCommands.getStats() // See current system status')
   console.log('5. demoCommands.testCrossBranch() // Test @everyone mentions')
 }, 5000)
-
-runInteractiveDemo()

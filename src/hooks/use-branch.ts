@@ -5,6 +5,7 @@ import type {Branch, BranchConfig} from '../types/hooks'
 import type {IO, BranchStore} from '../types/core'
 import {sensor} from '../components/sensor'
 import {cyre, CyreInstance} from '../app'
+import {io} from '../context/state'
 
 /**
  * Branch configuration - minimal like React props
@@ -425,9 +426,12 @@ export function useBranch(
           ? `${path}/${localChannelId}`
           : localChannelId
 
-        // ⚡ OPTIMIZATION: Direct channel access to cyre instead of instance chain
-        // This bypasses the instance hierarchy for maximum performance
-        return cyre.get ? cyre.get(globalChannelId) : undefined
+        // Channel CONFIG lives in the io store, not payload state - cyre.get()
+        // returns {req, prevReq, res, metadata} (the request/response record),
+        // never the IO config this hook promises. Go straight to io.get()
+        // instead of through cyre.get() (see context/state.ts's own note on
+        // this exact distinction).
+        return io.get(globalChannelId)
       } catch (error) {
         sensor.error(
           'Branch get operation failed',

@@ -4,6 +4,7 @@
 import type {IO, ActionPayload, CyreResponse, EventHandler} from '../types/core'
 import type {Branch} from '../types/hooks'
 import {cyre, CyreInstance} from '../app'
+import {io} from '../context/state'
 import {sensor} from '../components/sensor'
 
 /**
@@ -238,8 +239,12 @@ export const useCyre = (
 
     get: () => {
       try {
-        // Use direct cyre.get() with channelId for maximum performance
-        return cyre.get ? cyre.get(channelId) : undefined
+        // Channel CONFIG lives in the io store, not payload state - cyre.get()
+        // returns {req, prevReq, res, metadata} (the request/response record),
+        // never the IO config this hook promises. Go straight to io.get()
+        // instead of through cyre.get() (see context/state.ts's own note on
+        // this exact distinction).
+        return io.get(channelId)
       } catch (error) {
         sensor.error(
           `useCyre get failed: ${error}`,

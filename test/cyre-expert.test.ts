@@ -322,6 +322,76 @@ describe('Cyre Expert Level Features', () => {
       })
     })
 
+    // FIX (regression test): executeWaterfallHandlers in cyre-dispatch.ts
+    // used to silently swallow a handler's thrown error whenever
+    // errorStrategy wasn't 'fail-fast' - not logged, not counted in
+    // failedHandlers, and the response still reported ok: true and
+    // "completed through N handlers" even though a handler threw partway
+    // through. Sequential/parallel dispatch always tracked this
+    // correctly; waterfall now does too.
+    it('should track a failed handler under continue error strategy instead of swallowing it', async () => {
+      const handler1 = vi.fn((data: any) => ({...data, step1: true}))
+      const handler2 = vi.fn(() => {
+        throw new Error('step2 exploded')
+      })
+      const handler3 = vi.fn((data: any) => ({...data, step3: true}))
+
+      cyre.action({
+        id: 'waterfall-continue-test',
+        dispatch: 'waterfall',
+        errorStrategy: 'continue'
+      })
+
+      cyre.on('waterfall-continue-test', handler1)
+      cyre.on('waterfall-continue-test', handler2)
+      cyre.on('waterfall-continue-test', handler3)
+
+      const result = await cyre.call('waterfall-continue-test', {
+        initial: true
+      })
+
+      // Two of three handlers succeeded - the response now says so
+      // instead of unconditionally reporting all three as complete
+      expect(result.ok).toBe(true)
+      expect(result.message).toContain('2/3 handlers succeeded')
+      expect(result.metadata?.handlerCount).toBe(3)
+      // handler2's failure is what stopped currentPayload from ever
+      // picking up step2 - handler3 still ran on handler1's output,
+      // since only the payload from a SUCCESSFUL handler carries forward
+      expect(result.payload).toEqual({
+        initial: true,
+        step1: true,
+        step3: true
+      })
+      expect(handler3).toHaveBeenCalledWith({initial: true, step1: true})
+    })
+
+    it('should still fail fast on the first handler error under the fail-fast strategy', async () => {
+      const handler1 = vi.fn((data: any) => ({...data, step1: true}))
+      const handler2 = vi.fn(() => {
+        throw new Error('step2 exploded')
+      })
+      const handler3 = vi.fn((data: any) => ({...data, step3: true}))
+
+      cyre.action({
+        id: 'waterfall-failfast-test',
+        dispatch: 'waterfall',
+        errorStrategy: 'fail-fast'
+      })
+
+      cyre.on('waterfall-failfast-test', handler1)
+      cyre.on('waterfall-failfast-test', handler2)
+      cyre.on('waterfall-failfast-test', handler3)
+
+      const result = await cyre.call('waterfall-failfast-test', {
+        initial: true
+      })
+
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('handler 2')
+      expect(handler3).not.toHaveBeenCalled()
+    })
+
     it('should handle race execution mode', async () => {
       const handler1 = vi.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 200))

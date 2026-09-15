@@ -1,367 +1,162 @@
 // server/cyre-client.ts
-// Aggressive HTTP client to benchmark CYRE server performance
-
-import http from 'http'
-import {performance} from 'perf_hooks'
+// Client for server/cyre-server.ts - zero-dependency, uses Node's built-in
+// fetch (Node >=20, matching this project's own baseline), no axios/etc.
 
 /*
 
-      C.Y.R.E - B.E.N.C.H.M.A.R.K - C.L.I.E.N.T
-      
-      High-performance HTTP client for benchmarking:
-      - Concurrent request batches
-      - Real-time metrics tracking
-      - Latency percentiles
-      - Memory efficiency
-      - Comparison with industry standards
+      P.U.R.E - C.Y.R.E - H.T.T.P - C.L.I.E.N.T
+
+      Exercises every route on server/cyre-server.ts and, for the two
+      protected routes, fires rapid back-to-back requests to show what
+      throttle and debounce actually do to the HTTP response - not just
+      what the docs/comments say they do.
+
+      Run the server first: `node server/cyre-server.js` (or via tsx/ts-node)
+      Then: `node server/cyre-client.js`
 
 */
 
-interface BenchmarkResult {
-  totalRequests: number
-  successfulRequests: number
-  failedRequests: number
-  duration: number
-  requestsPerSecond: number
-  avgLatency: number
-  p50Latency: number
-  p95Latency: number
-  p99Latency: number
-  minLatency: number
-  maxLatency: number
-  errorRate: number
-  throughputMB: number
+const BASE_URL = 'http://localhost:3000'
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const get = async (path: string) => {
+  const start = performance.now()
+  const res = await fetch(`${BASE_URL}${path}`)
+  const elapsed = performance.now() - start
+  const body = await res.json().catch(() => undefined)
+  return {status: res.status, elapsedMs: elapsed, body}
 }
 
-interface RequestResult {
-  latency: number
-  success: boolean
-  statusCode: number
-  responseSize: number
-  error?: string
+// =============================================================================
+// 1) BASIC ROUTES  →  one request each, just confirming the server responds
+//    with real handler output on unprotected routes.
+// =============================================================================
+console.log('=== 1) basic routes ===')
+
+for (const path of ['/', '/benchmark', '/health']) {
+  const {status, body} = await get(path)
+  console.log(`  GET ${path} -> ${status} ${JSON.stringify(body)}`)
 }
 
-class CyreBenchmarkClient {
-  private host: string
-  private port: number
-  private keepAliveAgent: http.Agent
+// =============================================================================
+// 2) THROTTLED ROUTE (/api/users, throttle: 200)  →  fire 10 requests with
+//    no delay between them. Expect the first to succeed and land real data;
+//    anything inside the same 200ms window should come back rejected.
+// =============================================================================
+console.log('\n=== 2) throttled route: 10 rapid requests to /api/users ===')
 
-  constructor(host: string = 'localhost', port: number = 3000) {
-    this.host = host
-    this.port = port
-    this.keepAliveAgent = new http.Agent({
-      keepAlive: true,
-      maxSockets: 1000,
-      maxFreeSockets: 100,
-      timeout: 5000,
-      freeSocketTimeout: 30000
-    })
-  }
-
-  private makeRequest(path: string): Promise<RequestResult> {
-    return new Promise(resolve => {
-      const startTime = performance.now()
-
-      const options = {
-        hostname: this.host,
-        port: this.port,
-        path: path,
-        method: 'GET',
-        agent: this.keepAliveAgent,
-        headers: {
-          'User-Agent': 'CYRE-Benchmark-Client/1.0',
-          Connection: 'keep-alive'
-        }
-      }
-
-      const req = http.request(options, res => {
-        let data = ''
-        let responseSize = 0
-
-        res.on('data', chunk => {
-          data += chunk
-          responseSize += chunk.length
-        })
-
-        res.on('end', () => {
-          const latency = performance.now() - startTime
-          resolve({
-            latency,
-            success: res.statusCode === 200,
-            statusCode: res.statusCode || 0,
-            responseSize,
-            error: res.statusCode !== 200 ? `HTTP ${res.statusCode}` : undefined
-          })
-        })
-      })
-
-      req.on('error', error => {
-        const latency = performance.now() - startTime
-        resolve({
-          latency,
-          success: false,
-          statusCode: 0,
-          responseSize: 0,
-          error: error.message
-        })
-      })
-
-      req.on('timeout', () => {
-        req.destroy()
-        const latency = performance.now() - startTime
-        resolve({
-          latency,
-          success: false,
-          statusCode: 0,
-          responseSize: 0,
-          error: 'Request timeout'
-        })
-      })
-
-      req.end()
-    })
-  }
-
-  private async runConcurrentRequests(
-    path: string,
-    concurrent: number,
-    totalRequests: number
-  ): Promise<RequestResult[]> {
-    const results: RequestResult[] = []
-    const batchSize = concurrent
-    let requestsRemaining = totalRequests
-
-    while (requestsRemaining > 0) {
-      const currentBatch = Math.min(batchSize, requestsRemaining)
-      const promises = Array.from({length: currentBatch}, () =>
-        this.makeRequest(path)
-      )
-
-      const batchResults = await Promise.all(promises)
-      results.push(...batchResults)
-      requestsRemaining -= currentBatch
-
-      // Small delay to prevent overwhelming (can be removed for max speed)
-      if (requestsRemaining > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1))
-      }
-    }
-
-    return results
-  }
-
-  private calculateMetrics(
-    results: RequestResult[],
-    duration: number
-  ): BenchmarkResult {
-    const successfulResults = results.filter(r => r.success)
-    const latencies = successfulResults
-      .map(r => r.latency)
-      .sort((a, b) => a - b)
-    const totalBytes = results.reduce((sum, r) => sum + r.responseSize, 0)
-
-    return {
-      totalRequests: results.length,
-      successfulRequests: successfulResults.length,
-      failedRequests: results.length - successfulResults.length,
-      duration,
-      requestsPerSecond: results.length / duration,
-      avgLatency:
-        latencies.reduce((sum, lat) => sum + lat, 0) / latencies.length || 0,
-      p50Latency: latencies[Math.floor(latencies.length * 0.5)] || 0,
-      p95Latency: latencies[Math.floor(latencies.length * 0.95)] || 0,
-      p99Latency: latencies[Math.floor(latencies.length * 0.99)] || 0,
-      minLatency: latencies[0] || 0,
-      maxLatency: latencies[latencies.length - 1] || 0,
-      errorRate:
-        ((results.length - successfulResults.length) / results.length) * 100,
-      throughputMB: totalBytes / duration / (1024 * 1024)
-    }
-  }
-
-  async benchmark(
-    path: string,
-    concurrent: number,
-    totalRequests: number
-  ): Promise<BenchmarkResult> {
-    console.log(
-      `\n🚀 Starting benchmark: ${concurrent} concurrent, ${totalRequests} total requests`
-    )
-    console.log(`🎯 Target: http://${this.host}:${this.port}${path}`)
-
-    const startTime = performance.now()
-    const results = await this.runConcurrentRequests(
-      path,
-      concurrent,
-      totalRequests
-    )
-    const duration = (performance.now() - startTime) / 1000
-
-    return this.calculateMetrics(results, duration)
-  }
-
-  private printResults(name: string, result: BenchmarkResult) {
-    console.log(`\n📊 ${name}`)
-    console.log('─'.repeat(50))
-    console.log(
-      `🔢 Total Requests:     ${result.totalRequests.toLocaleString()}`
-    )
-    console.log(
-      `✅ Successful:         ${result.successfulRequests.toLocaleString()}`
-    )
-    console.log(
-      `❌ Failed:             ${result.failedRequests.toLocaleString()}`
-    )
-    console.log(`⏱️  Duration:           ${result.duration.toFixed(2)}s`)
-    console.log(`🚀 Requests/sec:       ${result.requestsPerSecond.toFixed(0)}`)
-    console.log(`⚡ Avg Latency:        ${result.avgLatency.toFixed(2)}ms`)
-    console.log(`📈 P50 Latency:        ${result.p50Latency.toFixed(2)}ms`)
-    console.log(`📈 P95 Latency:        ${result.p95Latency.toFixed(2)}ms`)
-    console.log(`📈 P99 Latency:        ${result.p99Latency.toFixed(2)}ms`)
-    console.log(
-      `🏎️  Min/Max Latency:    ${result.minLatency.toFixed(
-        2
-      )}ms / ${result.maxLatency.toFixed(2)}ms`
-    )
-    console.log(`💥 Error Rate:         ${result.errorRate.toFixed(2)}%`)
-    console.log(`📊 Throughput:         ${result.throughputMB.toFixed(2)} MB/s`)
-  }
-
-  async runFullBenchmarkSuite() {
-    console.log('🎯 CYRE HTTP SERVER BENCHMARK SUITE')
-    console.log('='.repeat(60))
-
-    // Wait for server to be ready
-    console.log('⏳ Waiting for server to be ready...')
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    const benchmarks = [
-      {name: 'Warmup Test', concurrent: 1, total: 100, path: '/benchmark'},
-      {name: 'Light Load', concurrent: 10, total: 1000, path: '/benchmark'},
-      {name: 'Medium Load', concurrent: 50, total: 5000, path: '/benchmark'},
-      {name: 'Heavy Load', concurrent: 100, total: 10000, path: '/benchmark'},
-      {name: 'Extreme Load', concurrent: 200, total: 20000, path: '/benchmark'},
-      {
-        name: 'API Endpoint Test',
-        concurrent: 50,
-        total: 2000,
-        path: '/api/users'
-      },
-      {name: 'Health Check Test', concurrent: 25, total: 1000, path: '/health'}
-    ]
-
-    const results: {name: string; result: BenchmarkResult}[] = []
-
-    for (const benchmark of benchmarks) {
-      try {
-        const result = await this.benchmark(
-          benchmark.path,
-          benchmark.concurrent,
-          benchmark.total
-        )
-        this.printResults(benchmark.name, result)
-        results.push({name: benchmark.name, result})
-
-        // Brief pause between tests
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      } catch (error) {
-        console.error(`❌ ${benchmark.name} failed:`, error)
-      }
-    }
-
-    // Summary
-    console.log('\n🏆 BENCHMARK SUMMARY')
-    console.log('='.repeat(60))
-
-    const bestPerformance = results.reduce((best, current) =>
-      current.result.requestsPerSecond > best.result.requestsPerSecond
-        ? current
-        : best
-    )
-
-    const avgPerformance =
-      results.reduce((sum, r) => sum + r.result.requestsPerSecond, 0) /
-      results.length
-    const avgLatency =
-      results.reduce((sum, r) => sum + r.result.avgLatency, 0) / results.length
-    const totalRequests = results.reduce(
-      (sum, r) => sum + r.result.totalRequests,
-      0
-    )
-    const totalErrors = results.reduce(
-      (sum, r) => sum + r.result.failedRequests,
-      0
-    )
-
-    console.log(
-      `🥇 Best Performance:    ${bestPerformance.result.requestsPerSecond.toFixed(
-        0
-      )} req/s (${bestPerformance.name})`
-    )
-    console.log(`📊 Average Performance: ${avgPerformance.toFixed(0)} req/s`)
-    console.log(`⚡ Average Latency:     ${avgLatency.toFixed(2)}ms`)
-    console.log(`🔢 Total Requests:      ${totalRequests.toLocaleString()}`)
-    console.log(`❌ Total Errors:        ${totalErrors.toLocaleString()}`)
-    console.log(
-      `✅ Overall Success:     ${(
-        ((totalRequests - totalErrors) / totalRequests) *
-        100
-      ).toFixed(2)}%`
-    )
-
-    // Industry comparison
-    console.log('\n🏭 INDUSTRY COMPARISON')
-    console.log('─'.repeat(30))
-    console.log(
-      `🆚 Fastify (~47,000 req/s):     ${
-        avgPerformance > 47000 ? '✅ CYRE WINS' : '❌ Fastify wins'
-      }`
-    )
-    console.log(
-      `🆚 Express (~15,000 req/s):     ${
-        avgPerformance > 15000 ? '✅ CYRE WINS' : '❌ Express wins'
-      }`
-    )
-    console.log(
-      `🆚 Raw Node (~75,000 req/s):    ${
-        avgPerformance > 75000 ? '✅ CYRE WINS' : '⚠️  Close to raw Node'
-      }`
-    )
-
-    const performanceMultiplier = avgPerformance / 47000 // vs Fastify
-    console.log(
-      `📈 CYRE is ${performanceMultiplier.toFixed(1)}x faster than Fastify`
-    )
-
-    console.log('\n🎉 BENCHMARK COMPLETE!')
-  }
-
-  destroy() {
-    this.keepAliveAgent.destroy()
-  }
+const throttleResults = []
+for (let i = 0; i < 10; i++) {
+  throttleResults.push(await get('/api/users'))
 }
 
-// Main execution
-async function main() {
-  const client = new CyreBenchmarkClient()
-
-  try {
-    await client.runFullBenchmarkSuite()
-  } catch (error) {
-    console.error('❌ Benchmark failed:', error)
-  } finally {
-    client.destroy()
-    process.exit(0)
-  }
-}
-
-// Handle shutdown
-process.on('SIGINT', () => {
-  console.log('\n🛑 Benchmark interrupted')
-  process.exit(0)
+throttleResults.forEach((r, i) => {
+  console.log(
+    `  request ${i + 1}: ${r.status} - ${JSON.stringify(r.body).slice(0, 90)}`
+  )
 })
 
-// Run if called directly
-main()
+const throttleSuccesses = throttleResults.filter(r => r.status === 200).length
+const throttleRejections = throttleResults.filter(r => r.status !== 200).length
 
-export {CyreBenchmarkClient}
+console.log(
+  throttleSuccesses >= 1 && throttleRejections >= 1
+    ? `✅ throttle behaved as a real request-level guard: ${throttleSuccesses} succeeded with real ` +
+        `data, ${throttleRejections} were rejected mid-window. Note the rejections come back as a ` +
+        'generic 500 ("Internal server error") rather than a proper 429 Too Many Requests - the ' +
+        "server's current error handling treats every !result.ok the same way, throttle included. " +
+        'Worth a dedicated status-code mapping if this server is going further than a demo.'
+    : `ℹ️  ${throttleSuccesses} succeeded, ${throttleRejections} rejected - if every request succeeded, ` +
+        'these 10 requests likely completed slower than 200ms apart (network/event-loop jitter) and ' +
+        'never actually collided with the throttle window; rerun with a tighter loop if so.'
+)
+
+// =============================================================================
+// 3a) DEBOUNCE, SEQUENTIAL  →  fire 5 requests one at a time, each awaited
+//    before the next starts. Since cyre.call() on a debounced channel now
+//    genuinely blocks for the window (the fix), sequential awaits can no
+//    longer land inside the SAME window - each one opens and settles its
+//    own solo window. This only proves the single-caller case works
+//    (real data, no more empty responses) - it does NOT exercise sharing.
+// =============================================================================
+console.log(
+  '\n=== 3a) debounce, sequential: 5 requests, each awaited before the next ==='
+)
+
+const sequentialBurst = []
+for (let i = 0; i < 5; i++) {
+  sequentialBurst.push(await get('/api/posts'))
+}
+sequentialBurst.forEach((r, i) => {
+  console.log(
+    `  request ${i + 1}: ${r.status} (${r.elapsedMs.toFixed(1)}ms) - ${JSON.stringify(r.body)}`
+  )
+})
+
+const gotRealPostData = (r: {body: any}) => Array.isArray(r.body?.posts)
+const allSequentialReal = sequentialBurst.every(gotRealPostData)
+
+console.log(
+  allSequentialReal
+    ? '✅ every sequential call got real post data back (the core bug - empty/ack-only responses - is fixed)'
+    : '❌ at least one sequential call still came back without real post data - the fix did not fully land'
+)
+
+// =============================================================================
+// 3b) DEBOUNCE, CONCURRENT  →  fire 5 requests with NO await between them
+//    (Promise.all), so they genuinely land in the SAME debounce window on
+//    the server. This is the real test of promise-sharing: all 5 should
+//    resolve at roughly the same time, with the SAME timestamp in the
+//    body - proof one real execution served all 5 callers, rather than
+//    the handler running 5 separate times.
+// =============================================================================
+console.log(
+  '\n=== 3b) debounce, concurrent: 5 requests fired together (Promise.all) ==='
+)
+
+const concurrentBurst = await Promise.all(
+  Array.from({length: 5}, () => get('/api/posts'))
+)
+concurrentBurst.forEach((r, i) => {
+  console.log(
+    `  request ${i + 1}: ${r.status} (${r.elapsedMs.toFixed(1)}ms) - ${JSON.stringify(r.body)}`
+  )
+})
+
+await wait(400) // well past the 150ms debounce window, so this is a fresh window
+const settledCall = await get('/api/posts')
+console.log(
+  `  post-window request: ${settledCall.status} - ${JSON.stringify(settledCall.body)}`
+)
+
+const allConcurrentReal = concurrentBurst.every(gotRealPostData)
+const timestamps = concurrentBurst
+  .map(r => r.body?.timestamp)
+  .filter((t): t is number => typeof t === 'number')
+const distinctTimestamps = new Set(timestamps)
+
+if (
+  allConcurrentReal &&
+  timestamps.length === 5 &&
+  distinctTimestamps.size === 1
+) {
+  console.log(
+    '✅ all 5 concurrent requests share ONE real execution: identical `timestamp` across every ' +
+      'response, confirming the shared pending-promise (context/pending-state.ts) resolved every ' +
+      'caller in the window with the same result rather than the handler running once per request.'
+  )
+} else if (allConcurrentReal && distinctTimestamps.size > 1) {
+  console.log(
+    `ℹ️  all 5 got real data, but with ${distinctTimestamps.size} distinct timestamp(s) instead of 1 - ` +
+      'these requests may not have actually landed concurrently (check for client-side/network delay ' +
+      "between the 5 fetch() calls firing), or promise-sharing isn't working as designed - worth a look " +
+      "at whether pendingState.get()/create() in app.ts's debounce branch is being reached correctly."
+  )
+} else {
+  console.log(
+    '❌ at least one concurrent request did not get real post data back - the fix is incomplete.'
+  )
+}
+
+console.log('\n=== done ===')

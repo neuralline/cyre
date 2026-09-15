@@ -15,6 +15,8 @@
 
 */
 
+import {sensorState} from '../context/sensor-state'
+
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -34,6 +36,18 @@ export interface SensorEvent {
   log?: boolean // If true, log to terminal
   logLevel?: LogLevel // Log level
 }
+
+// Minimum level that actually reaches the terminal. Cyre runs 24/7 on a
+// server, so by default only ERROR/CRITICAL are noisy enough to print -
+// DEBUG/INFO/WARN/SUCCESS/SYS still exist for callers/tests that want them,
+// they're just filtered here unless someone raises the threshold.
+let minLogLevel: LogLevel = LogLevel.ERROR
+
+export const setLogLevel = (level: LogLevel): void => {
+  minLogLevel = level
+}
+
+export const getLogLevel = (): LogLevel => minLogLevel
 
 // Event types for categorization
 export type MetricEvent =
@@ -174,8 +188,17 @@ export const sensor = {
    * Core sensor method - logs data to console by default
    */
   log: (event: SensorEvent): void => {
-    // Log by default (like cyre-log), unless explicitly disabled
-    const shouldLog = event.log !== false
+    // Log by default (like cyre-log), unless explicitly disabled or below
+    // the configured verbosity threshold (ERROR-only by default)
+    const level = event.logLevel ?? LogLevel.INFO
+
+    // Every event reaches subscribers (see hooks/use-log.ts) regardless of
+    // the console print threshold below - a listener can watch DEBUG
+    // events even when minLogLevel is ERROR-only. The console gate and the
+    // subscriber fan-out are deliberately independent.
+    sensorState.emit({...event, logLevel: level})
+
+    const shouldLog = event.log !== false && level >= minLogLevel
 
     if (shouldLog) {
       const context = {
@@ -270,5 +293,11 @@ export const sensor = {
       log: true,
       logLevel: LogLevel.SYS
     })
-  }
+  },
+
+  // Runtime verbosity control - defaults to ERROR-only (see minLogLevel
+  // above). Callers that want DEBUG/INFO chatter back (local dev, tests)
+  // can call sensor.setLogLevel(LogLevel.DEBUG).
+  setLogLevel,
+  getLogLevel
 }

@@ -1,5 +1,14 @@
 // test/flag-updates.test.ts
 // Test that flags are properly updated when system state changes
+//
+// NOTE ON SCOPE: this file covers metricsState's SYSTEM-LEVEL flags
+// (initialized / locked / operational / shutdown) - i.e. what
+// cyre.init()/lock()/unlock()/shutdown()/reset() do to whether the system
+// as a whole will accept calls or registrations. It does NOT cover the
+// compiled PER-ACTION flags (_hasFastPath/_hasProtections/_hasProcessing/
+// _hasScheduling from schema/compile-pipeline.ts) despite the similar
+// name - those have their own dedicated coverage in
+// claude/cyre-compile-flags.test.ts.
 
 import {describe, it, expect, beforeEach, afterEach} from 'vitest'
 import {cyre} from '../src/app'
