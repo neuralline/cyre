@@ -581,7 +581,10 @@ CYRE includes an adaptive "breathing" system that automatically adjusts its inte
 // System-wide metrics
 const metrics = cyre.getMetrics()
 // metrics.system.stress / .breathing / .health
-// metrics.stores.channels, etc.
+// metrics.stores.channels - registered channels
+// metrics.stores.subscribedChannels - channels with cyre.on() handlers
+// metrics.stores.handlers - total handler count (multiple .on() on one channel = 1 subscribed channel)
+// metrics.stores.orphanedHandlers - subscribed channel ids with no matching io entry yet
 
 // Channel-specific metrics
 const channelMetrics = cyre.getMetrics('api-call')
@@ -602,31 +605,47 @@ const isHibernating = cyre.status() // true while the system is hibernating
 const metrics = cyre.getMetrics() // includes system.health / .breathing / .stress
 ```
 
-### useMetrics - watch metrics instead of polling
+### useMetrics - live, push-based metrics
 
-`cyre.getMetrics()` is a one-off snapshot. `useMetrics` schedules the
-polling as a real Cyre channel (interval + repeat) so it inherits the same
-breathing/stress regulation as everything else, instead of a bare
-`setInterval` that keeps ticking at full speed while the system is under
-load.
+`cyre.getMetrics()` is a one-off snapshot. `useMetrics` subscribes instead of
+polling: it is told when the breathing tick produces a sample, when a handler
+runs slow, when one throws, and when the system enters or leaves recuperation.
+It creates no channel and no timer, never touches `cyre.call()`, and does no
+sampling work at all while nothing is subscribed - the fast lane pays nothing
+for it.
 
 ```typescript
-import {useMetrics} from 'cyre'
+import {useMetrics, findUnused, hottest, slowest, errorProne} from 'cyre'
 
-const vitals = useMetrics(cyre, {interval: 500})
-const stop = vitals.watch(metrics => {
-  renderStressGauge(metrics.system.stress)
-})
+const vitals = useMetrics(cyre, {slowMs: 50})
 
-// One-off read any time, no polling required
-vitals.get()
+// Push events
+vitals.on('tick', ({sample, channels}) => chart.push(sample))
+vitals.on('slow-task', e => console.warn(e.channelId, e.durationMs))
+vitals.on('channel-error', e => alert(e.channelId, e.message))
+vitals.on('recuperation', e => setBanner(e.recuperating))
 
-// Scoped to a branch's own channel
-const hero = useBranch(cyre, {id: 'hero'})
-useMetrics(hero, {channelId: 'next-slide'}).watch(console.log)
+// Snapshot on every tick (or `{interval}` ms minimum between deliveries)
+const stop = vitals.watch(metrics => renderStressGauge(metrics.system.stress))
 
-stop() // or vitals.stop()
+// Chart data: flat rows, oldest first, ~5 min ring buffer (recorded while subscribed)
+vitals.series() // [{t, stress, cpu, memory, eventLoop, callsPerSecond, breathingRate, recuperating}]
+
+// Per-channel rows + pure analyzers
+const rows = vitals.channels() // {id, count, rate, lastMs, maxMs, errors, idleMs, neverExecuted, ...}
+findUnused(rows, {idleMs: 5 * 60_000}) // dead or stale channels
+hottest(rows, 5) // busiest right now (or by: 'count')
+slowest(rows, 5) // worst durations
+errorProne(rows) // error ratio above a threshold
+
+// One-off read, scoped to a branch's own channel
+useMetrics(useBranch(cyre, {id: 'hero'}), {channelId: 'next-slide'}).get()
+
+stop() // or vitals.stop() to remove every subscription
 ```
+
+Per-channel `maxMs` is sampled at tick time; exact slow executions arrive via
+the `slow-task` event.
 
 ### useLog - subscribe to the log/error stream
 
@@ -693,7 +712,7 @@ import {useCyre, useGroup, useBranch, useCollective, useMetrics, useLog, log} fr
 - `useGroup(hooks, config)`: coordinates multiple `useCyre` hooks together (`.call()`/`.on()` fan out to all of them).
 - `useBranch(instance, {id})`: isolated channel namespace - see [Branches](#branches-usebranch) above.
 - `useCollective(id, config)`: multi-participant coordination primitive - see [Multi-participant coordination](#multi-participant-coordination-with-usecollective) above.
-- `useMetrics(instance, config)`: watch `cyre.getMetrics()` on an interval instead of polling it yourself - see [useMetrics](#usemetrics---watch-metrics-instead-of-polling) above.
+- `useMetrics(instance, config)`: live push-based metrics - events, chart series and per-channel rows instead of polling `cyre.getMetrics()` - see [useMetrics](#usemetrics---live-push-based-metrics) above.
 - `useLog(config)`: subscribe to `sensor`'s log/error stream - see [useLog](#uselog---subscribe-to-the-logerror-stream) above.
 - `log` (alias `sensor`): the library's own structured logger/telemetry surface.
 

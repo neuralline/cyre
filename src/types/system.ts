@@ -197,10 +197,26 @@ export interface SystemMetricsResult {
     lastUpdate: number
   }
   stores: {
+    /** Registered channel configs in the io store (one per channel id) */
     channels: number
+    /** Channel ids with at least one cyre.on() handler */
+    subscribedChannels: number
+    /** Total cyre.on() handler functions across all channels */
+    handlers: number
+    /** Subscribed channel ids with no matching io entry yet */
+    orphanedHandlers: number
+    /** @deprecated Use subscribedChannels - same value, kept for compatibility */
     subscribers: number
     timeline: number
     activeFormations: number
+    scheduledTasks: number
+    orchestrations: number
+  }
+  flags?: {
+    canCall: boolean
+    canAction: boolean
+    isOperational: boolean
+    lastComputed: number
   }
   available: boolean
   error?: string

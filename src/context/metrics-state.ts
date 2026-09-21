@@ -20,6 +20,7 @@ import {scheduleState} from './schedule-state'
 import {orchestrationState} from './orchestration-state'
 import {createStore} from './create-store'
 import {systemMonitor} from './system-monitor'
+import {metricsStream} from './metrics-stream'
 
 /*
 
@@ -327,6 +328,26 @@ const initializeQuantumStore = (): void => {
   if (!current) {
     metricsStore.set('quantum', defaultMetrics)
   }
+}
+
+/**
+ * Subscription store breakdown for getMetrics().stores.
+ * subscribers is keyed by channel id; multiple cyre.on() calls on the
+ * same channel append handlers to one entry rather than inflating the
+ * subscribed-channel count.
+ */
+const getSubscriptionStoreStats = () => {
+  const subscriberEntries = subscribers.getAll()
+  const subscribedChannels = subscriberEntries.length
+  const handlers = subscriberEntries.reduce(
+    (sum, entry) => sum + entry.handlers.length,
+    0
+  )
+  const orphanedHandlers = subscriberEntries.filter(
+    entry => !io.get(entry.id)
+  ).length
+
+  return {subscribedChannels, handlers, orphanedHandlers}
 }
 
 /**
@@ -686,6 +707,8 @@ export const metricsState = {
         }
       }
 
+      const subscriptionStats = getSubscriptionStoreStats()
+
       // Return system-wide metrics
       return {
         system: {
@@ -709,7 +732,9 @@ export const metricsState = {
         },
         stores: {
           channels: io.getAll().length,
-          subscribers: subscribers.getAll().length,
+          ...subscriptionStats,
+          // Alias kept for callers that already read stores.subscribers
+          subscribers: subscriptionStats.subscribedChannels,
           timeline: timeline.getAll().length,
           activeFormations: state.activeFormations,
           // scheduleState/orchestrationState are domain-level registries
@@ -914,7 +939,22 @@ export const updateBreathingFromMetrics = async (): Promise<void> => {
     // Breathing has authority over system/stress/recuperation flags.
     // updateBreathingState() reads performance.callsPerSecond fresh off
     // the store, so the performance write above has to land first.
-    metricsState.updateBreathingState(metrics)
+    const updated = metricsState.updateBreathingState(metrics)
+
+    // Push side of useMetrics: no-op unless something is subscribed, so an
+    // app that never watches metrics pays one integer comparison per tick.
+    if (metricsStream.active()) {
+      metricsStream.tick({
+        t: now,
+        stress: updated.stress.combined,
+        cpu: metrics.cpu || 0,
+        memory: metrics.memory || 0,
+        eventLoop: metrics.eventLoop || 0,
+        callsPerSecond,
+        breathingRate: updated.breathing.currentRate,
+        recuperating: updated.breathing.isRecuperating
+      })
+    }
   } catch (error) {
     // Don't log error every second - just use console.error
     sensor.error(`Breathing update failed: ${error}`)

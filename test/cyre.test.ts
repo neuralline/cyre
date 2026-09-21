@@ -440,6 +440,29 @@ describe('Cyre Core Functionality', () => {
       expect(metrics).toHaveProperty('available', false)
       expect(metrics).toHaveProperty('error')
     })
+
+    it('should report accurate channel and subscription store counts', () => {
+      const handlerA = vi.fn()
+      const handlerB = vi.fn()
+      const handlerC = vi.fn()
+
+      cyre.action({id: 'channel-a'})
+      cyre.action({id: 'channel-b'})
+      cyre.on('channel-a', handlerA)
+      cyre.on('channel-a', handlerB)
+      cyre.on('channel-b', handlerC)
+      cyre.on('orphan-channel', vi.fn())
+
+      const metrics = cyre.getMetrics()
+
+      expect(metrics.stores.channels).toBe(2)
+      expect(metrics.stores.subscribedChannels).toBe(3)
+      expect(metrics.stores.handlers).toBe(4)
+      expect(metrics.stores.orphanedHandlers).toBe(1)
+      expect(metrics.stores.subscribers).toBe(
+        metrics.stores.subscribedChannels
+      )
+    })
   })
 
   describe('Advanced Features', () => {
