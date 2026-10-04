@@ -23,6 +23,12 @@ export interface ChannelPayload {
   // always returned undefined ("we don't store history - could be added
   // later"); this is that one slot.
   prevReq?: ActionPayload
+  // Additional previous request payloads beyond prevReq, newest first,
+  // only populated when a channel's `history` config is above 1 (see
+  // setReq's historyLimit param). prevReq alone covers the default
+  // history: 1 case, so this stays undefined for every channel that
+  // hasn't opted into a longer history.
+  history?: ActionPayload[]
   res?: CyreResponse
   metadata: {
     lastRequestTime?: number
@@ -47,18 +53,65 @@ export const payloadState = {
   setReq: (
     channelId: string,
     payload: ActionPayload,
-    correlationId?: string
+    correlationId?: string,
+    // Matches a channel's resolved `_history` (compile-pipeline.ts,
+    // default 1). historyLimit <= 1 keeps today's behaviour exactly -
+    // prevReq alone, no `history` array - so this is a strict addition,
+    // not a shape change, for every channel that doesn't opt in.
+    historyLimit = 1
   ): void => {
     const currentTime = Date.now()
     const existing = payloadStore.get(channelId)
+
+    // historyLimit: 0 (action.history: 0) genuinely turns previous-payload
+    // tracking off, not just the extra `history` array below it - so
+    // prevReq itself is gated on it too, rather than being kept
+    // unconditionally the way it always was pre-history/keepPayload.
+    const prevReq = historyLimit >= 1 ? existing?.req : undefined
+
+    let history: ActionPayload[] | undefined
+    if (historyLimit > 1 && existing?.req !== undefined) {
+      const prior = existing.history ?? []
+      history = [existing.req, ...prior].slice(0, historyLimit)
+    }
 
     const updated: ChannelPayload = {
       req: payload,
       // Whatever req held before this call becomes the new "previous" -
       // shifted here, once, right before it's overwritten, rather than
       // tracked as a growing history the caller has to prune.
-      prevReq: existing?.req,
+      prevReq,
+      history,
       res: existing?.res, // Keep existing response
+      metadata: {
+        lastRequestTime: currentTime,
+        lastResponseTime: existing?.metadata.lastResponseTime,
+        requestCount: (existing?.metadata.requestCount || 0) + 1,
+        responseCount: existing?.metadata.responseCount || 0,
+        correlationId,
+        status: 'pending'
+      }
+    }
+
+    payloadStore.set(channelId, updated)
+  },
+
+  /**
+   * Metadata-only request bump for keepPayload: false channels - counts
+   * the call and marks status pending without keeping a reference to the
+   * payload itself. The whole point of keepPayload: false is that a large
+   * one-off payload never gets copied into payload-state, so unlike
+   * setReq() above this takes no payload argument at all.
+   */
+  touchReq: (channelId: string, correlationId?: string): void => {
+    const currentTime = Date.now()
+    const existing = payloadStore.get(channelId)
+
+    const updated: ChannelPayload = {
+      req: undefined,
+      prevReq: undefined,
+      history: undefined,
+      res: existing?.res,
       metadata: {
         lastRequestTime: currentTime,
         lastResponseTime: existing?.metadata.lastResponseTime,
@@ -92,7 +145,44 @@ export const payloadState = {
     const updated: ChannelPayload = {
       req: existing.req,
       prevReq: existing.prevReq,
+      history: existing.history,
       res: response,
+      metadata: {
+        ...existing.metadata,
+        lastResponseTime: currentTime,
+        responseCount: existing.metadata.responseCount + 1,
+        correlationId,
+        status: response.ok ? 'completed' : 'failed'
+      }
+    }
+
+    payloadStore.set(channelId, updated)
+  },
+
+  /**
+   * Metadata-only response bump for keepPayload: false channels - keeps
+   * the response's ok/message/error/metadata (small, and genuinely useful
+   * for cyre.get()) but drops response.payload itself, which is the part
+   * that can be as large as the request that produced it.
+   */
+  touchRes: (
+    channelId: string,
+    response: CyreResponse,
+    correlationId?: string
+  ): void => {
+    const currentTime = Date.now()
+    const existing = payloadStore.get(channelId)
+
+    if (!existing) {
+      sensor.warn(`Setting response for channel ${channelId} without request`)
+      return
+    }
+
+    const updated: ChannelPayload = {
+      req: undefined,
+      prevReq: undefined,
+      history: undefined,
+      res: {...response, payload: undefined},
       metadata: {
         ...existing.metadata,
         lastResponseTime: currentTime,
@@ -142,6 +232,63 @@ export const payloadState = {
    */
   getPrevious: (channelId: string): ActionPayload | undefined => {
     return payloadStore.get(channelId)?.prevReq
+  },
+
+  /**
+   * Get previous request payloads beyond just the last one, newest first,
+   * for a channel registered with `history` above the default 1. Falls
+   * back to a single-item array built from prevReq for every channel that
+   * hasn't opted in, so callers don't need to branch on which field a
+   * given channel happens to populate. Empty array for a channel with no
+   * previous request yet, or with keepPayload: false.
+   */
+  getHistory: (channelId: string): ActionPayload[] => {
+    const entry = payloadStore.get(channelId)
+    if (!entry) return []
+    if (entry.history) return entry.history
+    return entry.prevReq !== undefined ? [entry.prevReq] : []
+  },
+
+  /**
+   * Clear a channel's stored payload state and put it back to the clean
+   * slate a freshly-registered channel starts from, without touching the
+   * channel's IO config, its subscribers, or any in-flight debounce/
+   * buffer window (those live in context/buffer-state.ts and context/
+   * pending-state.ts - separate stores, untouched here). This is the
+   * "clear this channel's payload, keep the channel" operation forget()
+   * doesn't have on its own - forget() only ever removes payload state as
+   * a side effect of removing the whole channel (see context/state.ts's
+   * io.forget()).
+   *
+   * Drops req/res/prevReq/history and every counter. With no
+   * `defaultPayload`, the channel goes back to genuinely never-called -
+   * no entry at all, same as a fresh channel with no configured
+   * `payload` (cyre.get() returns undefined, matching registration's own
+   * behaviour of only ever writing an entry when a default is given).
+   * Pass `defaultPayload` to reseed req the way registration does for a
+   * channel that was given a `payload` in its config - the caller
+   * (app.ts's resetPayload()) is what decides whether that default
+   * applies, since a keepPayload: false channel should stay unseeded
+   * even though its action config still carries a `payload` value.
+   */
+  reset: (channelId: string, defaultPayload?: ActionPayload): void => {
+    if (defaultPayload === undefined) {
+      payloadStore.forget(channelId)
+      return
+    }
+
+    payloadStore.set(channelId, {
+      req: defaultPayload,
+      prevReq: undefined,
+      history: undefined,
+      res: undefined,
+      metadata: {
+        lastRequestTime: Date.now(),
+        requestCount: 1,
+        responseCount: 0,
+        status: 'idle'
+      }
+    })
   },
 
   /**

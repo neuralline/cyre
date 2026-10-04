@@ -122,6 +122,10 @@ export interface CyreInstance {
   on: (id: string, handler: EventHandler) => SubscriptionResponse
   call: (id: string, payload?: ActionPayload) => Promise<CyreResponse>
   forget: (id: string) => boolean
+  /** Clear a channel's stored payload back to a clean slate (reseeded
+   *  with its configured default, if any) without removing the channel
+   *  itself - see resetPayload()'s own comment above its implementation. */
+  resetPayload: (id: string) => boolean
   clear: () => void
   reset: () => void
 
@@ -143,6 +147,10 @@ export interface CyreInstance {
   get: (id: string) => ChannelPayload | undefined
   hasChanged: (id: string, payload: ActionPayload) => boolean
   getPrevious: (id: string) => ActionPayload | undefined
+  /** Previous request payloads beyond just the last one, newest first -
+   *  only populated for a channel registered with `history` above the
+   *  default 1 (or empty when keepPayload is false). */
+  getHistory: (id: string) => ActionPayload[]
 
   // NEW: Dual payload system access
   //payloadState
@@ -370,6 +378,13 @@ export const call = async (
     // the pre-existing (and separately tested) behavior that only a
     // successful execution establishes a throttle window.
     if (action.throttle && action.throttle > 0) {
+      // Every call routed through the throttle gate, allowed or rejected -
+      // was previously invisible to getMetrics()/useMetrics(), which only
+      // ever saw _executionCount (post-gate) and had no way to tell "this
+      // channel is quiet" from "this channel is getting hammered and
+      // throttle is absorbing it".
+      io.touch(action.id, {_throttleCount: (action._throttleCount || 0) + 1})
+
       const currentTime = Date.now()
       const lastExecTime = action._lastExecTime || 0
       const reservedAt = action._throttleReservedAt || 0
@@ -411,6 +426,11 @@ export const call = async (
     // "scheduled" ack that threw the real result away. See
     // src/context/pending-state.ts for the settle mechanism.
     if (action.debounce && action.debounce > 0) {
+      // Same visibility gap as throttle above - one bump per call landing
+      // in the debounce window, not just the one call that ends up
+      // settling it.
+      io.touch(action.id, {_debounceCount: (action._debounceCount || 0) + 1})
+
       const debounceId = `debounce-${action.id}`
 
       // Store in buffer state (temporary) - ultra-fast set
@@ -496,6 +516,9 @@ export const call = async (
     // the reopen logic below) their payload actually carries into the
     // NEXT window - see src/context/pending-state.ts for the full note.
     if (action.buffer && action.buffer.window > 0) {
+      // Same shape as _throttleCount/_debounceCount above.
+      io.touch(action.id, {_bufferCount: (action._bufferCount || 0) + 1})
+
       const bufferId = `buffer-${action.id}`
       const bufferConfig = action.buffer
 
@@ -637,6 +660,40 @@ const forget = (id: string): boolean => {
     return false
   }
 }
+
+/**
+ * Clear a channel's stored payload (req/res/prevReq/history) back to a
+ * clean slate WITHOUT removing the channel itself - forget()'s payload
+ * cleanup is a side effect of removing the whole channel; this is the
+ * narrower "just the payload" op, for a channel you want to keep
+ * registered (subscribers, protections, path, everything) but stop
+ * remembering old data for - e.g. after processing a large one-off
+ * document, or to deliberately drop a stale getPrevious()/getHistory()
+ * value.
+ *
+ * Reseeds req with the channel's configured default `payload`, same as a
+ * freshly-registered channel - unless the channel is keepPayload: false,
+ * in which case it stays unseeded (storing a default when the channel is
+ * configured never to store payloads would defeat the point of that
+ * flag). Does not touch in-flight debounce/buffer windows - see
+ * payload-state.ts's reset() for that boundary.
+ */
+const resetPayload = (id: string): boolean => {
+  if (!id || typeof id !== 'string') {
+    return false
+  }
+
+  const action = io.get(id)
+  if (!action) {
+    sensor.info(`No channel found to reset payload for id: ${id}`, 'payload-reset')
+    return false
+  }
+
+  const defaultPayload = action._keepPayload === false ? undefined : action.payload
+  payloadState.reset(id, defaultPayload)
+  return true
+}
+
 const shutdown = (): void => {
   try {
     sensor.sys('system', 'Initiating system shutdown')
@@ -749,6 +806,7 @@ export const cyre: CyreInstance = Object.freeze({
   on: subscribe,
   call,
   forget,
+  resetPayload,
   clear,
   reset,
   // ALIGNED ORCHESTRATION INTEGRATION
@@ -771,6 +829,7 @@ export const cyre: CyreInstance = Object.freeze({
   hasChanged: (id: string, payload: ActionPayload) =>
     payloadState.hasChanged(id, payload),
   getPrevious: (id: string) => payloadState.getPrevious(id),
+  getHistory: (id: string) => payloadState.getHistory(id),
 
   // Control methods with metrics
   pause: (id?: string) => {

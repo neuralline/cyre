@@ -119,7 +119,15 @@ import {useCyre} from './hooks/use-cyre'
 import {useCollective} from './hooks/use-collective'
 import {useBranch} from './hooks/use-branch'
 import {useLog} from './hooks/use-log'
-import {useMetrics} from './hooks/use-metrics'
+import {
+  useMetrics,
+  findUnused,
+  findNeverExecuted,
+  hottest,
+  slowest,
+  errorProne,
+  mostGated
+} from './hooks/use-metrics'
 import {sensor, LogLevel} from './components/sensor'
 
 // Main exports with branch system
@@ -130,16 +138,40 @@ export {
   useBranch,
   useCollective,
   useLog, //subscribe to sensor's log/error stream - the previously-TODO'd "system channels: ... on error" listed above
-  useMetrics, //watch cyre.getMetrics() - the previously-commented-out "metrics for external live stat monitors" listed above
+  useMetrics, //live, push-based metrics (events, chart series, per-channel rows) - the previously-commented-out "metrics for external live stat monitors" listed above
+  findUnused, //pure analyzers over useMetrics().channels() rows
+  findNeverExecuted,
+  hottest,
+  slowest,
+  errorProne,
+  mostGated, //channels most absorbed by throttle/debounce/buffer - see libs/metrics-analysis.ts
   //orchestration, //advanced task setup// not sure to expose this
   sensor, //utility logger function
   sensor as log, //utility logger function
   LogLevel //so a useLog({level}) filter can be written without a magic number
 }
 
+// Types for the useCyre + useBranch trilogy - so consumers never need to
+// deep-import from 'cyre/src/...' (which doesn't even resolve from a real
+// npm install - only './index.ts' is published) just to name a hook's
+// config or return type in their own code.
+export type {UseCyreConfig, CyreHook} from './hooks/use-cyre'
+export type {UseBranchConfig} from './hooks/use-branch'
+export type {Branch, BranchConfig} from './types/hooks'
+
 // Types for the two hooks above
 export type {UseLogConfig, LogHook} from './hooks/use-log'
 export type {UseMetricsConfig, MetricsHook, MetricsSnapshot} from './hooks/use-metrics'
+export type {
+  MetricsSample,
+  ChannelMetricsRow,
+  MetricsEventMap,
+  MetricsEventName,
+  SlowTaskEvent,
+  ChannelErrorEvent,
+  RecuperationEvent,
+  TickEvent
+} from './context/metrics-stream'
 export type {SensorEvent, MetricEvent} from './components/sensor'
 export type {SensorLogEvent} from './context/sensor-state'
 export type {

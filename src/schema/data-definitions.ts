@@ -357,6 +357,51 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     return {ok: true, data: value, operator: 'detectChanges'}
   },
 
+  // Boolean validation - no operator: unlike detectChanges this never
+  // enters the per-call pipeline, it's resolved once at compile time into
+  // _keepPayload and consulted directly by cyre-dispatch.ts/cyre-actions.ts
+  keepPayload: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (!isBoolean(value)) {
+      return {
+        ok: false,
+        error: `keepPayload must be true or false, but received ${describeValue(
+          value
+        )}`,
+        suggestions: [
+          'Use true (default) to keep req/res in payload-state for cyre.get()',
+          'Use false to pass the payload straight through without storing it',
+          'Good for large one-off payloads a channel does not need to look up later'
+        ]
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
+  // Numeric validation - also no operator, resolved into _history at
+  // compile time the same way as keepPayload above
+  history: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (!isNumber(value) || value < 0 || !Number.isInteger(value)) {
+      return {
+        ok: false,
+        error: `history must be a non-negative integer, but received ${describeValue(
+          value
+        )}`,
+        suggestions: [
+          'Use history: 1 (default) to keep just the previous payload',
+          'Use history: 0 to disable getPrevious()/getHistory() for this channel',
+          'Higher values keep that many previous payloads in memory per channel'
+        ]
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
   // Required validation
   required: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
@@ -592,6 +637,11 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   type: (value: any): DataDefResult => ({ok: true, data: value}),
   priority: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasFastPath: (value: any): DataDefResult => ({ok: true, data: value}),
+  _keepPayload: (value: any): DataDefResult => ({ok: true, data: value}),
+  _history: (value: any): DataDefResult => ({ok: true, data: value}),
+  _throttleCount: (value: any): DataDefResult => ({ok: true, data: value}),
+  _debounceCount: (value: any): DataDefResult => ({ok: true, data: value}),
+  _bufferCount: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasProtections: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasProcessing: (value: any): DataDefResult => ({ok: true, data: value}),
   _hasScheduling: (value: any): DataDefResult => ({ok: true, data: value}),

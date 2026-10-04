@@ -2,6 +2,7 @@
 // Updated dispatch with proper payload flow and fixed waterfall execution
 
 import {io} from '../context/state'
+import {metricsStream} from '../context/metrics-stream'
 import {
   ActionPayload,
   CyreResponse,
@@ -111,7 +112,16 @@ export const useDispatch = async (
 
     // STEP 1: Save request payload just before dispatch (execution is certain)
     const requestPayload = payload !== undefined ? payload : action.payload
-    payloadState.setReq(action.id, requestPayload, 'call')
+    // keepPayload: false (compile-pipeline.ts's _keepPayload, default true)
+    // skips holding a reference to the payload itself - touchReq() still
+    // bumps requestCount/status so cyre.get() keeps reporting activity,
+    // it just doesn't copy a (possibly huge, one-off) payload into
+    // payload-state for a channel that has no use for it later.
+    if (action._keepPayload === false) {
+      payloadState.touchReq(action.id, 'call')
+    } else {
+      payloadState.setReq(action.id, requestPayload, 'call', action._history)
+    }
 
     // STEP 2: Execute handlers based on strategy - FIXED ROUTING
     const executionOperator = action._executionOperator || 'single'
@@ -175,7 +185,11 @@ export const useDispatch = async (
     }
 
     // STEP 3: Save response payload after execution complete
-    payloadState.setRes(action.id, response, correlationId)
+    if (action._keepPayload === false) {
+      payloadState.touchRes(action.id, response, correlationId)
+    } else {
+      payloadState.setRes(action.id, response, correlationId)
+    }
 
     return await followIntraLink(response, 0)
   } catch (dispatchError) {
@@ -201,7 +215,11 @@ export const useDispatch = async (
     }
 
     // Save error response to payload state
-    payloadState.setRes(action.id, errorResponse, correlationId)
+    if (action._keepPayload === false) {
+      payloadState.touchRes(action.id, errorResponse, correlationId)
+    } else {
+      payloadState.setRes(action.id, errorResponse, correlationId)
+    }
     return errorResponse
   }
 }
@@ -222,10 +240,11 @@ const executeSingleHandler = async (
 
     // Update action metrics
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
+    metricsStream.noteExecution(action.id, executionTime)
 
     return {
       ok: true,
@@ -244,7 +263,7 @@ const executeSingleHandler = async (
 
     // Update action with error info
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _errorCount: (action._errorCount || 0) + 1,
       errors: [
         ...(action.errors || []),
@@ -252,6 +271,7 @@ const executeSingleHandler = async (
       ]
     })
 
+    metricsStream.noteError(action.id, errorMessage, executionTime)
     sensor.error(action.id, errorMessage, 'single-handler-execution')
 
     return {
@@ -360,10 +380,11 @@ const executeWaterfallHandlers = async (
 
     // Update action metrics
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
+    metricsStream.noteExecution(action.id, executionTime)
 
     const isSuccess = successfulHandlers > 0 || errorStrategy === 'continue'
 
@@ -479,10 +500,11 @@ const executeParallelHandlers = async (
     }
 
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
+    metricsStream.noteExecution(action.id, executionTime)
 
     const isSuccess = successful.length > 0 || errorStrategy === 'continue'
 
@@ -604,10 +626,11 @@ const executeSequentialHandlers = async (
 
     // Update action metrics
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
+    metricsStream.noteExecution(action.id, executionTime)
 
     const isSuccess = successfulHandlers > 0 || errorStrategy === 'continue'
 
@@ -688,10 +711,11 @@ const executeRaceHandlers = async (
 
     // Update action metrics
     io.touch(action.id, {
-      _executionTime: executionTime,
+      _executionDuration: executionTime,
       _lastExecTime: Date.now(),
       _executionCount: (action._executionCount || 0) + 1
     })
+    metricsStream.noteExecution(action.id, executionTime)
 
     return {
       ok: true,

@@ -2,12 +2,16 @@
 
 > Neural Line - Reactive Event Manager
 > C.Y.R.E ~/`SAYER`/
-> Version 4.6.4
+> Version 4.6.7
 
 **A zero-dependency, channel-based reactive event manager for Node and the browser. Register a channel with `cyre.action()`, subscribe with `cyre.on()`, trigger it with `cyre.call()`. Built-in protections (throttle, debounce, buffer, schema, change detection), a hand-rolled scheduler ("TimeKeeper") with drift compensation and calendar/cron support, multi-handler dispatch strategies, and a workflow orchestration engine - all with no external dependencies, designed to run 24/7.**
 
 [![npm version](https://img.shields.io/npm/v/cyre.svg)](https://www.npmjs.com/package/cyre)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/neuralline/cyre/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/neuralline/cyre/blob/master/LICENSE)
+![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)
+![runtime](https://img.shields.io/badge/runtime-Node%20%E2%89%A520%20%7C%20Bun%20%7C%20browser-blue.svg)
+
+**Contents:** [Quick Start](#quick-start) · [Why CYRE?](#why-cyre) · [How to use Cyre in your app](#how-to-use-cyre-in-your-app) · [Commission, lock, and runtime](#commission-lock-and-runtime) · [Core Features](#core-features) · [Functional Cyre](#functional-cyre-with-hooks) · [Branches](#branches-usebranch) · [Protections](#throttle-protection) · [Monitoring](#monitoring--debugging) · [Demos & Examples](#demos--examples) · [API Reference](#api-reference) · [Roadmap](#roadmap)
 
 ## Quick Start
 
@@ -32,8 +36,39 @@ cyre.on('user-login', payload => {
 })
 
 // 3. send to channel
-await cyre.call('user-login', {userId: 123, email: 'user@example.com'})
+const result = await cyre.call('user-login', {
+  userId: 123,
+  email: 'user@example.com'
+})
+// result.ok      -> true
+// result.payload -> {success: true, timestamp: ...}  (what the handler returned)
+// result.message -> human-readable outcome ("throttled", "No changes detected", ...)
 ```
+
+That's the whole model: **`action` declares a channel, `on` listens to it, `call` sends to it.** Everything else - protections, scheduling, dispatch strategies, orchestration - is configuration on that one channel, not a new API to learn.
+
+### What every call returns
+
+`cyre.call()` never throws for "expected" outcomes. It always resolves with the same `CyreResponse` shape, so a blocked, throttled, invalid or failed call is just data you can branch on:
+
+```typescript
+interface CyreResponse<T = any> {
+  ok: boolean // did the handler actually run and succeed?
+  payload: T // the handler's return value (or null)
+  message: string // why - e.g. 'Throttled - retry available in 420ms'
+  error?: boolean | string
+  metadata?: {executionTime?: number; intraLink?: {...}; validationErrors?: string[]; ...}
+}
+
+const res = await cyre.call('api-call', query)
+if (!res.ok) console.warn(res.message) // no try/catch needed for protection rejections
+```
+
+### Requirements
+
+- Node **>= 20**, Bun **>= 1.0**, or any modern browser (ESM build via `exports.browser`)
+- TypeScript types ship with the package - no `@types/cyre` needed
+- **Zero runtime dependencies**
 
 ## Why CYRE?
 
@@ -44,10 +79,165 @@ await cyre.call('user-login', {userId: 123, email: 'user@example.com'})
 - **Multiple dispatch strategies** - a channel with more than one handler can run them `parallel`, `sequential`, `race`, or `waterfall`, each with configurable error handling and result collection.
 - **Workflow orchestration** - `cyre.orchestration` chains multiple channels into `action`/`condition`/`parallel`/`sequential`/`loop` steps, driven by time, condition-poll, or channel-subscription triggers.
 - **Runs 24/7** - designed to sit in a long-running Node process or browser tab without leaking timers or state; `cyre.shutdown()`/`cyre.reset()` tear everything down cleanly for the cases where you do want to stop it.
+- **A crashing handler can't crash your process** - a handler that throws (even with no `try`/`catch` of its own) is contained at the dispatch layer and comes back as `{ok: false, message}`. The resilience benchmark fires 500 unguarded throws in a row and the process stays alive and responsive throughout.
+- **Every channel is also state** - `cyre.get(id)` returns the channel's last request, previous request, last response and counters, so a channel doubles as a small observable store with no extra library.
+- **Decoupled by design** - components never import each other; they talk through channel ids. Swap, add or remove a subscriber and nothing else in the app has to change (see [How to use Cyre in your app](#how-to-use-cyre-in-your-app)).
+- **Isolated namespaces** - `useBranch` gives each feature/component/device its own channel namespace (`site-a/floor-1/temperature`) without id collisions, while still allowing cross-branch calls by absolute path.
+- **Observable without polling** - `useMetrics` pushes live samples, slow-task and error events, chart series and per-channel rows; `useLog` lets code react to Cyre's own log/error stream. Neither costs anything while nobody is subscribed.
+- **Fully typed hooks** - `useCyre<TPayload, TResponse>` types both what `.call()` sends and what `.on()` must return, per channel.
+
+### How it compares
+
+| Need                               | `EventEmitter` / pub-sub   | RxJS                   | **CYRE**                                   |
+| ---------------------------------- | -------------------------- | ---------------------- | ------------------------------------------ |
+| Throttle / debounce / buffer       | hand-rolled timers         | operators per stream   | one config field per channel               |
+| Payload validation                 | manual                     | manual                 | built-in `schema` talent                   |
+| Result of an emit                  | none (fire-and-forget)     | stream value           | awaited `CyreResponse` with `ok`/`message` |
+| Handler throws                     | can crash / unhandled      | errors the stream      | contained, reported as `ok: false`         |
+| Timers, intervals, cron, timezones | `setInterval` + a cron lib | `interval()`/`timer()` | TimeKeeper + `cyre.schedule`               |
+| Multi-step workflows               | glue code                  | `pipe`/`switchMap`     | `cyre.orchestration`                       |
+| Load shedding under stress         | none                       | none                   | breathing system + `priority`              |
+| Dependencies                       | 0                          | 1                      | **0**                                      |
+
+Cyre is a good fit for UI event wiring, IoT/telemetry ingestion, rate-limited API gateways, background jobs and schedulers, and any long-running service where "one noisy thing must not take the rest down" matters. If all you need is a single synchronous callback list, a plain `EventEmitter` is smaller.
 
 ### Benchmarking
 
-CYRE ships its own throughput benchmark (`demo/speed-test-demo.ts` in the repo, run via `npm run benchmark` / `bun run benchmark`) covering the fast path, the full compiled pipeline, each dispatch strategy, and throttle/debounce/buffer overhead. Numbers vary meaningfully by JS runtime - a real run comparing Node and Bun on the same machine saw the fast path range from roughly 270k to 700k operations/second depending on runtime and call pattern (sequential vs. concurrent), with `parallel` dispatch consistently the slowest of the four multi-handler strategies on both runtimes. Run the benchmark yourself against your target runtime and hardware rather than relying on a single published number - a microbenchmark on someone else's machine won't reflect your production environment.
+CYRE ships two separate benchmarks, each answering a different question:
+
+- **`npm run benchmark`** ([`demo/benchmark.ts`](demo/benchmark.ts)) - resilience under bad usage, not raw speed: an unprotected baseline, `throttle`/`detectChanges` rejecting a tight-loop burst, defensive handlers surviving malformed payloads, and - most importantly - a handler that throws with **no** user-side `try`/`catch` still being contained by Cyre's dispatch layer rather than crashing the process. Every figure comes from a real, awaited `cyre.call()` round trip timed with `performance.now()`.
+- **`npm run benchmark:speed`** ([`demo/speed-test-demo.ts`](demo/speed-test-demo.ts)) - raw throughput: the fast path, the full compiled pipeline, each dispatch strategy, and throttle/debounce/buffer overhead.
+
+Numbers vary meaningfully by JS runtime - a real run comparing Node and Bun on the same machine saw the fast path range from roughly **270k to 700k operations/second** depending on runtime and call pattern (sequential vs. concurrent), with `parallel` dispatch consistently the slowest of the four multi-handler strategies on both runtimes. Run both yourself against your target runtime and hardware rather than relying on a single published number.
+
+## How to use Cyre in your app
+
+### The mental model
+
+**Nothing in your app holds a reference to anything else in your app.** Every piece of logic and every piece of UI talks to Cyre channels, and only to channels. If component A needs component B to do something, A doesn't import B - A calls a channel, and B (or C, or nobody yet) subscribes to it. The moment two sibling files import each other's functions, you've built a coupling Cyre can't see, route around or protect.
+
+### Factory handlers and outpost handlers
+
+Cyre apps split handlers into two roles:
+
+|                      | **Factory handler**                                                  | **Outpost handler**                                                   |
+| -------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Job                  | Business logic: parse, validate, compute, decide what happens next   | Delivery: update the DOM, re-render, show a toast, write to storage   |
+| Channel relationship | **1-to-1** - one factory owns a channel's logic                      | **1-to-many** - any number of outposts can listen to the same channel |
+| Lives in             | `src/handlers/` (or equivalent) — **outside the UI re-render layer** | Inside the component it updates                                       |
+| Setup at boot        | **`cyre.action([...])` batch registration** + `cyre.on()`            | **`useCyre`** with a fixed existing id, or `cyre.on()` in the panel   |
+| Framework            | **Framework-agnostic** — same handlers for React, Next.js, Electron, vanilla TS | Tied to your UI shell; still talks only through channels              |
+| Returns              | A result, often an IntraLink `{id, payload}` to the next channel     | Nothing anyone relies on - it's a leaf                                |
+| Testable with        | Plain input → plain expected output, no mocks                        | Your UI test harness                                                  |
+
+```typescript
+// src/handlers/scene-handlers.ts - FACTORY: no DOM/UI code in this file
+cyre.action({id: 'scene/select'})
+cyre.action({id: 'scene/selected'})
+
+cyre.on('scene/select', ({heading, ordinal}) => {
+  const key = `${ordinal}:${heading}` // pure derivation
+  // IntraLink: returning {id, payload} triggers the next channel for you
+  return {id: 'scene/selected', payload: {key, heading}}
+})
+
+// src/components/NotesPanel.ts - OUTPOST #1
+cyre.on('scene/selected', payload => renderNotes(payload))
+
+// src/components/StatusBar.ts - OUTPOST #2, same channel, knows nothing about #1
+cyre.on('scene/selected', payload => setStatus(payload.heading))
+
+// anywhere in the UI
+cyre.call('scene/select', {heading: 'INT. KITCHEN - NIGHT', ordinal: 4})
+```
+
+Add a third outpost later (autosave, analytics, telemetry) and nothing else changes.
+
+**Factory handlers are not tied to a UI framework.** The same `src/handlers/` modules work whether your shell is React, Next.js, Electron, or plain TypeScript — only the outpost layer changes. A factory can be large and cover a whole subject domain; route by payload when that suits your project:
+
+```typescript
+// src/handlers/project-handlers.ts — one factory, many operations (shape is yours)
+cyre.action({id: 'project/handler'})
+cyre.on('project/handler', async ({op, data}) => {
+  switch (op) {
+    case 'load':  return loadProject(data)
+    case 'save':  return saveProject(data)
+    case 'reset': return resetProject(data)
+    case 'sync':  return syncProject(data)
+    case 'get':   return getProject(data)
+  }
+})
+
+await cyre.call('project/handler', {op: 'load', data: snapshot})
+```
+
+Prefer **batch registration** for factories at boot — declare many channels in one pass:
+
+```typescript
+cyre.action([
+  {id: 'project/load', description: 'Load project bundle'},
+  {id: 'project/save', priority: {level: 'critical'}},
+  {id: 'entities/state', detectChanges: true}
+])
+```
+
+**Outposts** are where `useCyre` shines: a typed, functional wrapper around an **already commissioned** channel id (see [Functional Cyre](#functional-cyre-with-hooks)).
+
+### Events vs standing state
+
+Not every channel is a one-off event. Pick the shape before you register:
+
+| Kind | Examples | Pattern |
+| ---- | -------- | ------- |
+| **Fire-and-forget event** | `file/saved`, `scene/selected` | Broadcast once; outposts react |
+| **Standing state** | `entities/state`, `cursor/position-changed` | Owner broadcasts on every change; new outposts subscribe **and/or** read `cyre.get(id).res?.payload` for the current value without a round trip |
+
+Reach into another module's `let` or import a getter from a panel file only when no channel owns that state yet — once something broadcasts it, read through Cyre.
+
+### A five-step recipe for a new feature
+
+1. **Name the channels first.** Use `domain/verb` for commands (`scene/select`) and `domain/event` for the resulting broadcast (`scene/selected`). Decide which are one-off events and which are standing state (`sidebar/visibility`, `cursor/position-changed`).
+2. **Write the factory with zero UI code.** Register it with `cyre.action()` + `cyre.on()`, feed it fake payloads, and confirm its output before any component exists.
+3. **Write each outpost inside its component.** Keep it short enough to read at a glance - if it starts computing, move that logic one hop upstream into a factory.
+4. **Put protections on the channel, not in the component.** `debounce`, `throttle`, `detectChanges` and `schema` replace scattered `setTimeout`/`clearTimeout` pairs and ad-hoc validation.
+5. **Register every channel before anything calls it, then `cyre.lock()`.** Locking freezes further `action()`/`on()`/`orchestration.keep()` registration so nothing can quietly rewire the network at runtime.
+
+### Commission, lock, and runtime
+
+Registration order is the **control plane**, not an accident of startup. You declare the authorized communication surface first, wire handlers second, mount UI third, then freeze:
+
+```
+1. cyre.init()
+2. cyre.action([...]) / branch.action([...])   ← commission channels (allowlist)
+3. cyre.on(...)                                 ← factory + outpost handlers
+4. mount UI (useCyre with fixed ids, cyre.on in panels)
+5. cyre.lock()                                  ← prevention: no new registration
+6. cyre.call('full/path/id', payload)           ← runtime traffic only
+```
+
+| Phase | `cyre.action()` / `cyre.on()` | `cyre.call()` |
+| ----- | ----------------------------- | ------------- |
+| Before `lock()` | Allowed — commission everything here | Allowed on commissioned ids |
+| After `lock()` | **Blocked** — logs error, returns `ok: false` | **Allowed** — already-commissioned channels keep working |
+
+**`cyre.lock()` is a prevention mechanism.** After lock, nothing can add channels, duplicate handlers, or rewire the graph at runtime. Panels and buttons should **`cyre.call('panels/editor/go-prev-scene')`** (full global id on root cyre) — not commission new channels from UI code.
+
+Cyre is **strict on registration**: invalid config, rejected combinations (e.g. throttle + debounce), or registration while locked are logged and return `ok: false` — not silently ignored.
+
+### Gotchas worth knowing up front
+
+- **Registration order is intentional.** Only channels declared with `cyre.action()` at setup are callable. That limits unauthorized communication — not a footgun, the design.
+- **`cyre.call()` needs the channel registered with `cyre.action()` first; `cyre.on()` alone does not register it.** Calling an unknown id returns `ok: false` and logs "Channel does not exist".
+- **Calling a channel with no subscriber is logged as an error** — a deliberate signal that nobody owns that channel yet. The request still lands in channel state (`cyre.get(id).req`); a later `.on()` receives **future** calls. For the current value, read `cyre.get(id).res?.payload` or have the owner re-broadcast.
+- **A handler throw does not crash your process.** Cyre contains it at the dispatch layer, logs the error, and returns `{ok: false, message}`. One failing handler does not interrupt the rest of the operation (see multi-handler `errorStrategy`). **CRITICAL system faults** can still trigger shutdown via `cyre.shutdown()`.
+- **`cyre.forget(id)` removes the channel and _every_ handler on it.** To clean up just your own subscription, use the `unsubscribe()` returned by `cyre.on()`.
+- **Two stateful handlers on one channel both run.** With 2+ handlers the default dispatch is `parallel`, so two outposts that each toggle the same element will cancel each other out. One stateful owner per channel, or pick a `dispatch` strategy deliberately.
+- **`useCyre` without a fixed `id` inside a re-rendering path mints a new channel each run.** Always pass an existing commissioned id for outposts, create the hook once at module scope, or use plain `cyre.call()` after lock. See [How `useCyre` resolves channel ids](#how-usecyre-resolves-channel-ids).
+- **`throttle` and `debounce` can't be combined on one channel** - `cyre.action()` rejects it at registration.
+- **Pipeline order is the order you write the fields in** - see [Pipeline Talent Order](#pipeline-talent-order-schema-condition-selector-transform-detectchanges).
+- **Replace polling loops with `cyre.orchestration` or `cyre.schedule`** rather than `setInterval` plus manual gating.
+
+For a full, runnable version of this architecture - a factory function that commissions isolated outposts with `useBranch`, typed `useCyre` channels reporting up to a shared main-instance channel, broadcasts down, unsubscribe, teardown and `lock()` - see [`demo/outpost-factory-demo.ts`](demo/outpost-factory-demo.ts).
 
 ## Core Features
 
@@ -141,14 +331,14 @@ A trigger can also run a custom function or trigger a full orchestration (`orche
 
 ### IntraLink Chain Reactions
 
-A handler can trigger the next step in a chain just by returning `{id, payload}` - no explicit `cyre.call()` needed from inside the handler.
+A handler can trigger the next step in a chain just by returning `{id, payload}` - no explicit `cyre.call()` needed from inside the handler. IntraLink is a **channel chaining method** — it works the same in small and large apps. Its main advantage is **testability**: the factory handler's return value is a plain object you assert in a unit test without mocking the next hop.
 
 ```typescript
 // Automatic chain reactions
 cyre.on('validate-data', payload => {
   const isValid = validate(payload)
 
-  // Return IntraLink to trigger next action
+  // Return IntraLink to trigger next action — test this return value directly
   return {
     id: isValid ? 'process-data' : 'handle-error',
     payload: {...payload, isValid}
@@ -163,11 +353,54 @@ cyre.on('process-data', payload => {
 
 IntraLink only chains to a channel `id` that's actually registered - a handler returning `{id: 'not-a-real-channel'}` is treated as an ordinary return value, not a chain signal. Chains are also depth-limited (10 hops) to catch an accidental cycle rather than looping forever; the response's `metadata.intraLink`/`metadata.chainResult` fields let you inspect what a chain actually did.
 
-## React Integration
+## Functional Cyre with hooks
+
+Cyre hooks (`useCyre`, `useBranch`) are **not React-specific** — plain functions for any JS environment. Use them to give channels a typed, functional API.
+
+| Layer | Tool | When |
+| ----- | ---- | ---- |
+| **Factory** (business logic) | `cyre.action([...])` batch + `cyre.on()` in `src/handlers/` | Boot-time commission; framework-agnostic |
+| **Outpost** (UI delivery) | `useCyre(instance, { id: 'existing-id' })` | Typed `.call()` / `.on()` against a channel already commissioned |
+
+### How `useCyre` resolves channel ids
+
+Channel identity in Cyre is the id string — **same global id, same store entry**. What you pass in `useCyre(instance, config)` decides whether you extend an existing channel or create a new one:
+
+| Config | What happens |
+| ------ | ------------ |
+| **`id` matches an already-commissioned channel** | The hook **extends** that channel — a functional, typed way to access `.call()` / `.on()` / `.get()` / `.forget()`. It does **not** create a duplicate. **Best for outposts.** |
+| **`id` is a brand-new id (not yet registered)** | First `.call()` or `.on()` **creates** that channel (same as `cyre.action({ id })`). Use deliberately at commission time. |
+| **No `id` in config** | Cyre mints `hook-xxxxxxxx` for you. **Dangerous inside a re-rendering path** (e.g. a component body that runs every render): each run can **register a new channel**. Prefer a fixed id, a module-level singleton, or plain `cyre.call('full/path/id')` after `cyre.lock()`. |
+
+[`demo/outpost-factory-demo.ts`](demo/outpost-factory-demo.ts) walks through attaching `useCyre` to an existing main-instance id, branch-isolated outposts, teardown, and `lock()`.
 
 ### useCyre Hook
 
-`useCyre` isn't React-specific - it's a plain factory function that wraps `cyre.action`/`cyre.on`/`cyre.call`/`cyre.get`/`cyre.forget` for one channel, on either the root `cyre` instance or a branch. It's commonly used from inside a React component, as below, but works the same way in any JS environment.
+`useCyre` wraps `cyre.action`/`cyre.on`/`cyre.call`/`cyre.get`/`cyre.forget` for one channel on the root `cyre` instance or a branch.
+
+**Preferred outpost pattern** — commission at boot, bind once at module scope:
+
+```typescript
+import {cyre, useCyre} from 'cyre'
+
+// Commissioned earlier in initializeHandlers():
+// cyre.action({ id: 'user-profile', debounce: 300, detectChanges: true })
+
+const userChannel = useCyre<{userId: string}, {handled: boolean}>(cyre, {
+  id: 'user-profile' // extends existing channel — typed functional access
+})
+
+userChannel.on(userData => {
+  renderProfile(userData)
+  return {handled: true}
+})
+
+// anywhere after lock:
+await userChannel.call({userId: '123'})
+// or: await cyre.call('user-profile', { userId: '123' })
+```
+
+**Avoid** calling `useCyre(cyre)` with no `id` inside a function that re-runs on every render — that pattern mints new channels. The React example below uses a **fixed id**; in production, prefer creating the hook once outside the render path.
 
 ```typescript
 import {useCyre} from 'cyre'
@@ -200,6 +433,30 @@ function UserProfile() {
   )
 }
 ```
+
+### Typed channels with `useCyre<TPayload, TResponse>`
+
+Both type parameters are optional (they default to `any`, so untyped code keeps compiling). Pass them to make a channel type-safe end to end:
+
+```typescript
+import {cyre, useCyre} from 'cyre'
+
+const profile = useCyre<{userId: string}, {name: string; email: string}>(cyre, {
+  id: 'user-profile',
+  throttle: 500
+})
+
+profile.on(({userId}) => ({name: 'Jane', email: 'jane@example.com'})) // must return {name, email}
+
+const res = await profile.call({userId: '123'}) // payload must be {userId: string}
+res.payload?.email // typed as string
+```
+
+When the hook's `id` matches an existing channel, `useCyre` gives you **typed functional access** to that same store entry — channel identity is the id string, nothing more. If you pass extra config fields on first use, they merge/update the existing registration; keep config identical to (or a superset of) the original commission when attaching to a channel owned elsewhere.
+
+`hook.on()` returns `{ok, message, unsubscribe}`; `unsubscribe()` removes only that handler and keeps `hook.getStats().subscribed` accurate. `hook.forget()` removes the whole channel.
+
+The hook types (`UseCyreConfig`, `CyreHook`, `UseBranchConfig`, `Branch`, `BranchConfig`, `UseLogConfig`, `LogHook`, `UseMetricsConfig`, `MetricsHook`, ...) are exported from the package root, so you never need to deep-import from `cyre/src/...`.
 
 ---
 
@@ -327,6 +584,44 @@ cyre.getPrevious('user-update') // same as state.prevReq above
 ```
 
 There's no `cyre.set()` - a channel's payload only changes through `cyre.call()` (or its `payload` at registration time).
+
+### Controlling payload storage: `keepPayload`, `history`, `resetPayload()`
+
+By default every channel keeps a copy of its most recent request/response in `payload-state` so `cyre.get()`/`getPrevious()` can read it back - fine for most payloads, but wasteful if a channel only ever passes through a large one-off document or buffer that nothing downstream needs to re-read.
+
+```typescript
+// Pass a large payload straight to the handler without storing a copy of it
+cyre.action({id: 'ingest-document', keepPayload: false})
+cyre.on('ingest-document', doc => processDocument(doc)) // still gets the real payload, by reference
+
+await cyre.call('ingest-document', hugeDocument)
+cyre.get('ingest-document').req // undefined - nothing was stored
+```
+
+`keepPayload: false` cannot be combined with `detectChanges` - `detectChanges` compares the incoming payload against the stored previous one, and there's nothing to compare against once storage is off. `cyre.action()` rejects that combination at registration time.
+
+```typescript
+// Keep more than the default single previous-payload slot
+cyre.action({id: 'sensor-reading', history: 5})
+cyre.on('sensor-reading', reading => reading)
+
+for (const r of readings) await cyre.call('sensor-reading', r)
+
+cyre.getHistory('sensor-reading') // last 5 request payloads, newest first
+cyre.getPrevious('sensor-reading') // still just the single most recent previous payload
+```
+
+`history: 0` disables previous-payload tracking entirely; `history` is ignored (with a registration warning) on a `keepPayload: false` channel, since there's nothing being stored to keep a history of.
+
+```typescript
+// Clear a channel's stored payload/counters without removing the channel itself
+cyre.resetPayload('sensor-reading')
+// req/res/prevReq/history are cleared and req is reseeded with the channel's
+// configured default `payload`, if it has one - unlike cyre.forget(), the
+// channel, its handlers, and its schedule are all left intact
+```
+
+Unlike `cyre.forget(id)` - which removes the whole channel, its handlers, and its timers - `resetPayload()` only clears what `cyre.get()`/`getPrevious()`/`getHistory()` read. It doesn't cancel an in-flight debounce/buffer window; that window will still overwrite the reset once it settles.
 
 ### Orchestration: chaining multiple channels into a workflow
 
@@ -475,8 +770,8 @@ cyre.action({
 
 ### Handler Techniques: Factory vs Outpost
 
-- **Factory Handlers**: Main business logic handlers, ideally kept outside your application codebase to avoid reloads and app errors. Organize all factory handlers in a single location/directory, and prefer a 1-to-1 relationship between channel and handler. These are responsible for core processing, validation, and transformation of data.
-- **Outpost Handlers**: Instead of polling or awaiting, outpost `.on` handlers reactively receive payloads/signals and interpret them as local environment changes (e.g., updating UI, state, or triggering side effects). Outpost handlers are located inside your app, support a 1-to-many relationship, and are best suited for delivery, UI updates, and actions—not for core business logic.
+- **Factory Handlers**: Main business logic — parse, validate, compute, persist. Live in **`src/handlers/`** (outside the UI re-render layer), are **framework-agnostic** (React, Next.js, Electron, and vanilla TS can share the same handlers), and are registered at boot with **`cyre.action([...])` batch setup** + `cyre.on()`. One factory module can own a whole domain (`project/load`, `project/save`, …) or a single consolidated handler routed by payload (`{ op: 'load' | 'save', data }`). Not every channel needs its own file — adjust to what your project suits.
+- **Outpost Handlers**: Delivery only — update DOM, re-render panels, show toasts. Live inside the component they update, support **1-to-many** on broadcast channels, and are best wired with **`useCyre(instance, { id: 'existing-id' })`** for typed functional access, or plain `cyre.on()` for simple listeners. Outposts are leaves; they don't own business logic.
 
 ```typescript
 // Factory handler (pure)
@@ -503,10 +798,29 @@ subscription.unsubscribe?.()
 
 ## Branches (`useBranch`)
 
-Branches give a part of your app its own isolated channel namespace without hand-prefixing every id yourself. `useBranch(instance, {id})` hangs a new branch off an instance's path; channels registered on that branch get a globally-unique id (`parentPath/branchId/localId`) automatically, but you keep addressing them by their short local id from inside the branch.
+Branches give a part of your app its own **isolated channel namespace** — a container. `useBranch(instance, {id})` hangs a new branch off an instance's path; channels registered on that branch get a globally-unique id (`parentPath/branchId/localId`) automatically, but you keep addressing them by their short local id from inside the branch.
+
+**Branch isolation.** A branch does not call sibling branches directly. Cross-area work goes through **root `cyre.call('full/global/id')`**, not by importing another branch instance.
+
+**Duplicated branch setups.** The same branch pattern can be instantiated many times — a carousel, widget, or panel imported in multiple places, even in a loop. Each instance gets the same local ids (`next`, `prev`) without collision; reach the right one by **branch prefix** on `cyre.call()`:
 
 ```typescript
 import {cyre, useBranch} from 'cyre'
+
+function createCarousel(id: string) {
+  const branch = useBranch(cyre, {id})
+  branch.action({id: 'next'})
+  branch.action({id: 'prev'})
+  branch.on('next', () => ({ moved: 'forward' }))
+  branch.on('prev', () => ({ moved: 'back' }))
+  return branch
+}
+
+// Same local ids, isolated global paths — safe in a loop
+const carousels = ['hero', 'gallery', 'footer'].map(slug => createCarousel(slug))
+
+await cyre.call('hero/next')
+await cyre.call('gallery/prev')
 
 const factory = useBranch(cyre, {id: 'factory-a'})
 const floor1 = useBranch(factory, {id: 'floor-1'})
@@ -522,10 +836,6 @@ await floor1.call('factory-a/floor-2/alarm', 'reason')
 ```
 
 **Known limitation:** `branch.getStats()`'s synchronously-returned object always reports `channelCount`, `subscriberCount`, `timerCount`, and `childCount` as `0` - the real counts are computed in a background async call whose result is never stored anywhere retrievable. Don't rely on `getStats()` for live counts today; check a channel's existence by calling it and inspecting `result.ok`/`result.message` instead. Also note that `branch.get(localId)` (like the top-level `cyre.get(id)` it wraps) returns that channel's `{req, res, prevReq, metadata}` state record, not its config - it is not a way to check whether a channel exists.
-
-## Streams (`createStream`) - on hold, not part of the public API
-
-RxJS-style streams are **not currently usable** - `createStream` is not exported from `cyre`'s package entry point at all (`src/index.ts` only exports `cyre`, `useCyre`, `useGroup`, `useBranch`, `useCollective`, and `sensor`/`log`). `import {createStream} from 'cyre'` fails outright; it isn't a case of one missing operator. Only the `Stream<T>` _type_ definitions exist in the source (`src/types/stream.ts` - `map`/`filter`/`debounce`/`throttle`/`merge`/`zip`/`switchMap`/etc. are all specified there), with no corresponding implementation file and no `buffer()` operator even in the type. The library's own internal TODO list marks `cyre/stream` explicitly `[on hold] experimental/testing stage`, alongside `cyre/ssr`, `state-machine`, and `cyre/server` - none of which are shipped either.
 
 If you need reactive-stream-style composition today, reach for `dispatch: 'waterfall'` handler chains (see [Advanced Dispatching](#advanced-dispatching)) or an external library like RxJS alongside Cyre's own channels, or use the channel-level `buffer` config documented above via `cyre.action()` for batching specifically.
 
@@ -581,7 +891,10 @@ CYRE includes an adaptive "breathing" system that automatically adjusts its inte
 // System-wide metrics
 const metrics = cyre.getMetrics()
 // metrics.system.stress / .breathing / .health
-// metrics.stores.channels, etc.
+// metrics.stores.channels - registered channels
+// metrics.stores.subscribedChannels - channels with cyre.on() handlers
+// metrics.stores.handlers - total handler count (multiple .on() on one channel = 1 subscribed channel)
+// metrics.stores.orphanedHandlers - subscribed channel ids with no matching io entry yet
 
 // Channel-specific metrics
 const channelMetrics = cyre.getMetrics('api-call')
@@ -602,31 +915,50 @@ const isHibernating = cyre.status() // true while the system is hibernating
 const metrics = cyre.getMetrics() // includes system.health / .breathing / .stress
 ```
 
-### useMetrics - watch metrics instead of polling
+### useMetrics - live, push-based metrics
 
-`cyre.getMetrics()` is a one-off snapshot. `useMetrics` schedules the
-polling as a real Cyre channel (interval + repeat) so it inherits the same
-breathing/stress regulation as everything else, instead of a bare
-`setInterval` that keeps ticking at full speed while the system is under
-load.
+`cyre.getMetrics()` is a one-off snapshot. `useMetrics` subscribes instead of
+polling: it is told when the breathing tick produces a sample, when a handler
+runs slow, when one throws, and when the system enters or leaves recuperation.
+It creates no channel and no timer, never touches `cyre.call()`, and does no
+sampling work at all while nothing is subscribed - the fast lane pays nothing
+for it.
 
 ```typescript
-import {useMetrics} from 'cyre'
+import {useMetrics, findUnused, hottest, slowest, errorProne, mostGated} from 'cyre'
 
-const vitals = useMetrics(cyre, {interval: 500})
-const stop = vitals.watch(metrics => {
-  renderStressGauge(metrics.system.stress)
-})
+const vitals = useMetrics(cyre, {slowMs: 50})
 
-// One-off read any time, no polling required
-vitals.get()
+// Push events
+vitals.on('tick', ({sample, channels}) => chart.push(sample))
+vitals.on('slow-task', e => console.warn(e.channelId, e.durationMs))
+vitals.on('channel-error', e => alert(e.channelId, e.message))
+vitals.on('recuperation', e => setBanner(e.recuperating))
 
-// Scoped to a branch's own channel
-const hero = useBranch(cyre, {id: 'hero'})
-useMetrics(hero, {channelId: 'next-slide'}).watch(console.log)
+// Snapshot on every tick (or `{interval}` ms minimum between deliveries)
+const stop = vitals.watch(metrics => renderStressGauge(metrics.system.stress))
 
-stop() // or vitals.stop()
+// Chart data: flat rows, oldest first, ~5 min ring buffer (recorded while subscribed)
+vitals.series() // [{t, stress, cpu, memory, eventLoop, callsPerSecond, breathingRate, recuperating}]
+
+// Per-channel rows + pure analyzers - rows also carry throttleCount/debounceCount/bufferCount,
+// traffic that never reaches executionCount since a throttled/debounced/buffered call
+// doesn't always dispatch
+const rows = vitals.channels() // {id, count, rate, lastMs, maxMs, errors, idleMs, neverExecuted, throttleCount, debounceCount, bufferCount, ...}
+findUnused(rows, {idleMs: 5 * 60_000}) // dead or stale channels
+hottest(rows, 5) // busiest right now (or by: 'count')
+slowest(rows, 5) // worst durations
+errorProne(rows) // error ratio above a threshold
+mostGated(rows, 5) // most throttled+debounced+buffered combined - traffic invisible to the others
+
+// One-off read, scoped to a branch's own channel
+useMetrics(useBranch(cyre, {id: 'hero'}), {channelId: 'next-slide'}).get()
+
+stop() // or vitals.stop() to remove every subscription
 ```
+
+Per-channel `maxMs` is sampled at tick time; exact slow executions arrive via
+the `slow-task` event.
 
 ### useLog - subscribe to the log/error stream
 
@@ -648,6 +980,100 @@ const stop = errors.on(event => showToast(event.message))
 useLog({level: LogLevel.DEBUG, actionId: 'checkout'}).on(console.log)
 ```
 
+## Demos & Examples
+
+The [`demo/`](demo) folder is a set of runnable, self-explaining scripts. Each file starts with a comment block describing what it exercises and why, and prints what actually happened so behavior is confirmed live rather than assumed.
+
+**Running a demo** (from a clone of this repo):
+
+```bash
+pnpm install
+pnpm tsx demo/validation-pipeline-demo.ts   # or: bun demo/validation-pipeline-demo.ts
+```
+
+Most demos import straight from `../src`, so they run against your working copy with no build step. A few (`buffer-window-demo.ts`, `cyre-claims-audit.ts`, `orbital-command.ts`) import from the package name `cyre` the way a real consumer would - run `pnpm build` first so they pick up current `dist/`. [`cyre-hooks-reliability.ts`](demo/cyre-hooks-reliability.ts) uses the same `cyre` import but is not listed in the tables below.
+
+### Start here
+
+| Demo                                                          | What it shows                                                                                                                                                               |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`heartbeat.ts`](demo/heartbeat.ts)                           | The smallest possible Cyre program: one repeating channel and a handler.                                                                                                    |
+| [`simple-cyre-test.ts`](demo/simple-cyre-test.ts)             | `.on` handlers and batch registration in ~100 lines.                                                                                                                        |
+| [`realtime-features-demo.ts`](demo/realtime-features-demo.ts) | Real-world picks for `debounce` (search-as-you-type), `buffer` and `delay` - each used where it actually fits.                                                              |
+| [`outpost-factory-demo.ts`](demo/outpost-factory-demo.ts)     | **Start here for real apps:** factory/outpost split, batch commission, `useBranch` isolation + duplication, typed `useCyre` on existing ids, broadcast, unsubscribe, teardown, `cyre.lock()`. |
+
+### Protections & the processing pipeline
+
+| Demo                                                                        | What it shows                                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`validation-pipeline-demo.ts`](demo/validation-pipeline-demo.ts)           | `schema`, `required`, `condition`, `selector`, `transform`, `detectChanges` - and why their field order matters. Signup, telemetry, payment-webhook and search-box scenarios. |
+| [`schema-composition-demo.ts`](demo/schema-composition-demo.ts)             | The schema builder itself: composing, extending and reusing schemas.                                                                                                          |
+| [`detectchanges-1000-calls-demo.ts`](demo/detectchanges-1000-calls-demo.ts) | What `detectChanges` costs and saves across 1,000 calls.                                                                                                                      |
+| [`buffer-window-demo.ts`](demo/buffer-window-demo.ts)                       | Every `buffer` strategy, printing exactly what the handler received.                                                                                                          |
+| [`buffer-vs-debounce.ts`](demo/buffer-vs-debounce.ts)                       | Buffer vs debounce side by side, including what gets saved to `req`/`res`.                                                                                                    |
+
+### Dispatch, chaining & channel state
+
+| Demo                                                                    | What it shows                                                                     |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [`hook-and-chaining-demo.ts`](demo/hook-and-chaining-demo.ts)           | IntraLink chaining, `useCyre`/`useGroup`, and the register-then-`lock()` pattern. |
+| [`cyre-on-handlers-test.ts`](demo/cyre-on-handlers-test.ts)             | Exhaustive multi-handler, subscription and error-scenario coverage.               |
+| [`cyre-get-demo.ts`](demo/cyre-get-demo.ts)                             | `cyre.get(id)` returning the full `{req, res, prevReq, metadata}` record.         |
+| [`cyre-channels-as-state-demo.ts`](demo/cyre-channels-as-state-demo.ts) | Using channels as a state-management primitive with no external store.            |
+
+### Timing, scheduling & orchestration
+
+| Demo                                                                                      | What it shows                                                                                                                                  |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`timekeeper-limits-demo.ts`](demo/timekeeper-limits-demo.ts)                             | TimeKeeper under stress: sub-second precision, very long intervals, concurrent timers, finite/infinite repeat, pause/resume, error resilience. |
+| [`calendar-scheduling-demo.ts`](demo/calendar-scheduling-demo.ts)                         | `cyre.schedule`: 5-field cron, IANA timezones and DST, one-off dates, weekday-restricted daily triggers.                                       |
+| [`orchestration-scheduling-demo.ts`](demo/orchestration-scheduling-demo.ts)               | `cyre.orchestration` feature by feature: triggers, each step type, condition-abort.                                                            |
+| [`orchestration-incident-response-demo.ts`](demo/orchestration-incident-response-demo.ts) | The same pieces composed into one incident-response workflow.                                                                                  |
+| [`orchestration-demo.ts`](demo/orchestration-demo.ts)                                     | An e-commerce order pipeline with error handling and monitoring.                                                                               |
+| [`system-integration-demo.ts`](demo/system-integration-demo.ts)                           | How schedule and orchestration share TimeKeeper's timeline with core channels (`pause`/`resume` across subsystems).                            |
+
+### Branches, paths & hooks
+
+| Demo                                                                                                              | What it shows                                                                               |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`branches-demo.ts`](demo/branches-demo.ts)                                                                       | `useBranch` isolation, automatic path prefixing, cross-branch calls, `destroy()`.           |
+| [`use-branch-demo.ts`](demo/use-branch-demo.ts) / [`multi-depth-branch-demo.ts`](demo/multi-depth-branch-demo.ts) | Branches nested several levels deep, ids and paths at each level.                           |
+| [`path-system-demo.ts`](demo/path-system-demo.ts)                                                                 | The hierarchical path engine: pattern matching and bulk operations.                         |
+| [`id-path-collision-demo.ts`](demo/id-path-collision-demo.ts)                                                     | Why you should use `path`/branches instead of typing `/` into an `id`.                      |
+| [`collective-intelligence-demo.ts`](demo/collective-intelligence-demo.ts)                                         | `useCollective`: join/leave, shared state, proposals, voting, consensus, work distribution. |
+| [`demo-hook.ts`](demo/demo-hook.ts)                                                                               | `useCyre` usage patterns as a consumer would write them.                                    |
+
+### Resilience & performance
+
+| Demo                                                                | What it shows                                                                                             |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [`benchmark.ts`](demo/benchmark.ts)                                 | `npm run benchmark` - protections under bad usage and dispatch-level crash containment.                   |
+| [`speed-test-demo.ts`](demo/speed-test-demo.ts)                     | `npm run benchmark:speed` - calls/sec for the fast path, pipeline, dispatch strategies and guards.        |
+| [`breathing-stress-demo.ts`](demo/breathing-stress-demo.ts)         | The breathing system across idle → critical load, including recuperation and `priority: critical` bypass. |
+| [`channel-fairness-demo.ts`](demo/channel-fairness-demo.ts)         | What happens to healthy channels when one channel is the sole source of overload.                         |
+| [`cyre-init-userconfig-demo.ts`](demo/cyre-init-userconfig-demo.ts) | Tuning breathing rates, stress thresholds and limits with `cyre.init(userConfig)`.                        |
+| [`cyre-claims-audit.ts`](demo/cyre-claims-audit.ts)                 | Checks this README's claims live and prints CONFIRMED / BROKEN / PARTIAL for each.                        |
+
+### Full scenarios
+
+| Demo                                                              | What it shows                                                                                                                            |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [`smart-building-ops-demo.ts`](demo/smart-building-ops-demo.ts)   | "Aurora Tower": a 40-floor smart building run as one operations story across most of Cyre's surface.                                     |
+| [`iot-full-features-demo.ts`](demo/iot-full-features-demo.ts)     | A smart greenhouse: branches per site, pipeline data hygiene, actuator protection, scheduling.                                           |
+| [`orbital-command.ts`](demo/orbital-command.ts)                   | Satellite ground control: waterfall and race dispatch, buffered telemetry, throttle, debounce, `useGroup` broadcast, live introspection. |
+| [`neural-network-channels.ts`](demo/neural-network-channels.ts)   | A small XOR-trained neural network modelled with channels - Cyre as a computation substrate.                                             |
+| [`mathematician-functional.ts`](demo/mathematician-functional.ts) | Channel lifecycle throughput: create → process → destroy at volume.                                                                      |
+
+### Further documentation
+
+- [`docs/CYRE-USAGE-GUIDE.md`](docs/CYRE-USAGE-GUIDE.md) - complete usage guide
+- [`docs/cyre-api-reference.md`](docs/cyre-api-reference.md) - method-by-method API reference
+- [`docs/channel-architecture.md`](docs/channel-architecture.md) - why channels instead of event types
+- [`docs/CYRE-LOGIC.md`](docs/CYRE-LOGIC.md) - execution logic and behavior rules
+- [`docs/hotpath-performance-analysis.md`](docs/hotpath-performance-analysis.md) - how the fast path is kept cheap
+- [`docs/cyre-dynamic-live-features.md`](docs/cyre-dynamic-live-features.md) - live/dynamic features
+- [`CHANGELOG.md`](CHANGELOG.md) - release notes
+
 ## API Reference
 
 ### Core Methods
@@ -659,6 +1085,7 @@ cyre.on(id: string, handler: Function)   // Subscribe handler(s) to a channel - 
 cyre.call(id: string, payload?: any)     // Trigger a channel/action
 cyre.forget(id: string)                  // Remove a channel and every handler on it
 cyre.get(id: string)                     // Returns {req, res, prevReq, metadata} - the channel's state record, not its config
+cyre.resetPayload(id: string)            // Clear a channel's stored payload/counters without removing the channel - see Controlling payload storage above
 
 // System & State Control
 cyre.init(userConfig?: CyreConfig)       // Initialize the system - optionally tunes breathing/timing, see Tuning breathing behavior above
@@ -675,6 +1102,7 @@ cyre.getMetrics(channelId?: string)      // Get system or channel-specific metri
 cyre.status()                            // Returns whether the system is hibernating
 cyre.hasChanged(id, payload)             // Shallow-compares payload against the channel's last request
 cyre.getPrevious(id)                     // The request payload before the most recent one
+cyre.getHistory(id)                      // Up to `history` previous request payloads, newest first (falls back to [prevReq] or [])
 
 // Scheduling & Orchestration
 cyre.schedule                            // Calendar/cron + fixed-interval task scheduling - see Calendar & Cron Scheduling above
@@ -686,16 +1114,25 @@ cyre.path()                              // Always '' on the root instance - roo
 ### Hooks & Composable Utilities
 
 ```typescript
-import {useCyre, useGroup, useBranch, useCollective, useMetrics, useLog, log} from 'cyre'
+import {
+  useCyre,
+  useGroup,
+  useBranch,
+  useCollective,
+  useMetrics,
+  useLog,
+  log
+} from 'cyre'
 ```
 
-- `useCyre(instance, config)`: wraps one channel's `action`/`on`/`call`/`get`/`forget` for the root instance or a branch.
+- `useCyre(instance, config)`: typed functional wrapper for one channel on root or a branch — **best for outposts** with a fixed existing id (see [How `useCyre` resolves channel ids](#how-usecyre-resolves-channel-ids)).
 - `useGroup(hooks, config)`: coordinates multiple `useCyre` hooks together (`.call()`/`.on()` fan out to all of them).
-- `useBranch(instance, {id})`: isolated channel namespace - see [Branches](#branches-usebranch) above.
+- `useBranch(instance, {id})`: isolated channel namespace — containers that can be duplicated per instance; see [Branches](#branches-usebranch).
 - `useCollective(id, config)`: multi-participant coordination primitive - see [Multi-participant coordination](#multi-participant-coordination-with-usecollective) above.
-- `useMetrics(instance, config)`: watch `cyre.getMetrics()` on an interval instead of polling it yourself - see [useMetrics](#usemetrics---watch-metrics-instead-of-polling) above.
+- `useMetrics(instance, config)`: live push-based metrics - events, chart series and per-channel rows instead of polling `cyre.getMetrics()` - see [useMetrics](#usemetrics---live-push-based-metrics) above.
 - `useLog(config)`: subscribe to `sensor`'s log/error stream - see [useLog](#uselog---subscribe-to-the-logerror-stream) above.
-- `log` (alias `sensor`): the library's own structured logger/telemetry surface.
+- `findUnused`, `findNeverExecuted`, `hottest`, `slowest`, `errorProne`, `mostGated`: pure analyzers over `useMetrics().channels()` rows.
+- `log` (alias `sensor`) and `LogLevel`: the library's own structured logger/telemetry surface.
 
 None of these are React-specific despite sometimes being used from inside React components in these docs - they're plain functions that work in any JS environment.
 
@@ -721,6 +1158,8 @@ interface IO {
   detectChanges?: boolean
   block?: boolean
   buffer?: { window: number, strategy?: 'overwrite' | 'append' | 'ignore', maxSize?: number }
+  keepPayload?: boolean // Default true. false: pass payload through without storing it (see Controlling payload storage above)
+  history?: number // Previous-request payloads to retain (default 1, 0 disables prevReq tracking). Ignored when keepPayload is false
 
   // Scheduling
   interval?: number
@@ -800,9 +1239,13 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ```bash
 git clone https://github.com/neuralline/cyre.git
 cd cyre
-npm install
-npm test
-npm run benchmark  # Run performance tests
+pnpm install              # or npm install
+pnpm test                 # vitest suite (test/)
+pnpm typecheck            # tsc --noEmit
+pnpm run benchmark        # resilience benchmark - protections, defensive handlers, crash containment
+pnpm run benchmark:speed  # raw throughput - fast path, dispatch strategies, protection overhead
+pnpm build                # dist/ (types + ESM)
+npx tsx demo/heartbeat.ts # run any demo straight from source
 ```
 
 ## License
@@ -811,9 +1254,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Roadmap
 
-- [ ] **Streams (`createStream`)** - on hold; type definitions exist but there's no implementation and it isn't exported from the package today
-- [ ] **Path-based cross-branch discovery as public API** - the internal path index/wildcard matching exists but isn't exposed outside `useBranch`
-- [ ] **Queue option** - Call queuing until subscribers ready
 - [ ] **State persistence** - Automatic save/restore functionality
 
 ## 📞 Support
