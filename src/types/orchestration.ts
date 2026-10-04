@@ -14,6 +14,18 @@ export interface OrchestrationConfig {
   timeout?: number
   priority?: 'low' | 'medium' | 'high' | 'critical'
   enabled?: boolean
+  // What happens when a trigger (or a manual call()) fires while a run of
+  // this orchestration is still in flight:
+  //  - 'drop' (default): the new run is skipped and resolves
+  //    {ok: false, dropped: true} - overlapping runs never pile up, which is
+  //    what a 24/7 server wants from a 1s time trigger whose workflow can
+  //    take 3s.
+  //  - 'queue': runs execute one at a time in arrival order, up to
+  //    `queueLimit` waiting runs (default 100); beyond that new runs are
+  //    rejected rather than growing memory without bound.
+  //  - 'parallel': the old behavior - every firing runs immediately.
+  concurrency?: 'drop' | 'queue' | 'parallel'
+  queueLimit?: number
 }
 
 export interface OrchestrationTrigger {
@@ -51,13 +63,40 @@ export interface WorkflowStep {
     | ((context: ExecutionContext) => string | string[])
   payload?: any | ((context: ExecutionContext) => any)
   condition?: string | ConditionFunction
+  // For every step type except 'delay': max time in ms one attempt may take
+  // before it fails with a timeout error (counts as a failure for
+  // retries/onError). For 'delay' steps this is the delay duration itself,
+  // unchanged from before.
   timeout?: number
+  // Extra attempts after a failed one. A step "fails" when it throws, times
+  // out, a condition comes back false with onError 'abort' or a fallback
+  // array, or an 'action' step's channel call returns {ok: false}.
   retries?: number
+  // Wait in ms between retry attempts. Defaults to 0.
+  retryDelay?: number
+  // Name of a context.variables key to store this step's value under once
+  // it succeeds - later steps read it via ctx.variables[name] in payload/
+  // targets/condition functions, or by passing the name as a string
+  // `condition`. For 'action' steps the value is the handler's payload (an
+  // array of payloads for multi-target steps); for every other step type
+  // it's the step result itself.
+  output?: string
   steps?: WorkflowStep[]
   // Only consulted for `type: 'loop'` - how many times to run `steps`.
   // Defaults to 3 (the previously hardcoded value) when omitted, so
   // existing configs that never set this keep their old behavior.
   iterations?: number
+  // What to do once a step has failed and its retries are used up:
+  //  - 'continue' (default): record the failure and move on.
+  //  - 'retry': same as 'continue', but guarantees at least one retry when
+  //    `retries` isn't set.
+  //  - 'abort': stop the whole workflow; the run resolves {ok: false}.
+  //  - WorkflowStep[]: run these fallback steps in the same context, each
+  //    with its own onError rules. The workflow then carries on (and
+  //    `output`, if set, receives the fallback's result) - unless a
+  //    fallback step aborts, which aborts the whole workflow. A condition
+  //    step that comes back false also runs its fallback, so this doubles
+  //    as an "else" branch.
   onError?: 'continue' | 'retry' | 'abort' | WorkflowStep[]
   enabled?: boolean
 }
@@ -90,6 +129,23 @@ export interface TriggerEvent {
   payload?: any
   timestamp: number
   metadata?: Record<string, any>
+}
+
+// One run waiting its turn under `concurrency: 'queue'` - `resolve` settles
+// the promise whoever fired the run (a trigger handler or call()) is awaiting.
+export interface QueuedOrchestrationRun {
+  trigger: TriggerEvent
+  resolve: (result: OrchestrationRunResult) => void
+}
+
+// What a single orchestration run resolves to - returned from
+// orchestration.call() and settled for queued runs.
+export interface OrchestrationRunResult {
+  ok: boolean
+  result?: any
+  variables?: Record<string, any>
+  message: string
+  dropped?: boolean
 }
 
 export interface StepResult {

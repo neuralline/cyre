@@ -68,6 +68,12 @@ export interface ChannelMetricsRow {
   createdAt: number
   neverExecuted: boolean
   blocked: boolean
+  /** Lifetime calls absorbed by throttle, allowed and rejected alike */
+  throttleCount: number
+  /** Lifetime calls that landed in a debounce window */
+  debounceCount: number
+  /** Lifetime calls that landed in a buffer window */
+  bufferCount: number
 }
 
 export interface SlowTaskEvent {
@@ -187,7 +193,10 @@ const buildChannelRows = (now: number, elapsedSec: number): ChannelMetricsRow[] 
       idleMs: Math.max(0, now - (lastExec || createdAt)),
       createdAt,
       neverExecuted: count === 0,
-      blocked: channel._isBlocked || false
+      blocked: channel._isBlocked || false,
+      throttleCount: channel._throttleCount || 0,
+      debounceCount: channel._debounceCount || 0,
+      bufferCount: channel._bufferCount || 0
     })
   }
 

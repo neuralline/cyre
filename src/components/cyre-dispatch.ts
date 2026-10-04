@@ -112,7 +112,16 @@ export const useDispatch = async (
 
     // STEP 1: Save request payload just before dispatch (execution is certain)
     const requestPayload = payload !== undefined ? payload : action.payload
-    payloadState.setReq(action.id, requestPayload, 'call')
+    // keepPayload: false (compile-pipeline.ts's _keepPayload, default true)
+    // skips holding a reference to the payload itself - touchReq() still
+    // bumps requestCount/status so cyre.get() keeps reporting activity,
+    // it just doesn't copy a (possibly huge, one-off) payload into
+    // payload-state for a channel that has no use for it later.
+    if (action._keepPayload === false) {
+      payloadState.touchReq(action.id, 'call')
+    } else {
+      payloadState.setReq(action.id, requestPayload, 'call', action._history)
+    }
 
     // STEP 2: Execute handlers based on strategy - FIXED ROUTING
     const executionOperator = action._executionOperator || 'single'
@@ -176,7 +185,11 @@ export const useDispatch = async (
     }
 
     // STEP 3: Save response payload after execution complete
-    payloadState.setRes(action.id, response, correlationId)
+    if (action._keepPayload === false) {
+      payloadState.touchRes(action.id, response, correlationId)
+    } else {
+      payloadState.setRes(action.id, response, correlationId)
+    }
 
     return await followIntraLink(response, 0)
   } catch (dispatchError) {
@@ -202,7 +215,11 @@ export const useDispatch = async (
     }
 
     // Save error response to payload state
-    payloadState.setRes(action.id, errorResponse, correlationId)
+    if (action._keepPayload === false) {
+      payloadState.touchRes(action.id, errorResponse, correlationId)
+    } else {
+      payloadState.setRes(action.id, errorResponse, correlationId)
+    }
     return errorResponse
   }
 }

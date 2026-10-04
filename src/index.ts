@@ -125,7 +125,8 @@ import {
   findNeverExecuted,
   hottest,
   slowest,
-  errorProne
+  errorProne,
+  mostGated
 } from './hooks/use-metrics'
 import {sensor, LogLevel} from './components/sensor'
 
@@ -143,11 +144,20 @@ export {
   hottest,
   slowest,
   errorProne,
+  mostGated, //channels most absorbed by throttle/debounce/buffer - see libs/metrics-analysis.ts
   //orchestration, //advanced task setup// not sure to expose this
   sensor, //utility logger function
   sensor as log, //utility logger function
   LogLevel //so a useLog({level}) filter can be written without a magic number
 }
+
+// Types for the useCyre + useBranch trilogy - so consumers never need to
+// deep-import from 'cyre/src/...' (which doesn't even resolve from a real
+// npm install - only './index.ts' is published) just to name a hook's
+// config or return type in their own code.
+export type {UseCyreConfig, CyreHook} from './hooks/use-cyre'
+export type {UseBranchConfig} from './hooks/use-branch'
+export type {Branch, BranchConfig} from './types/hooks'
 
 // Types for the two hooks above
 export type {UseLogConfig, LogHook} from './hooks/use-log'

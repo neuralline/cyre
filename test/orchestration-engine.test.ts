@@ -12,6 +12,13 @@
 // happens in beforeAll, before cyre.lock() - activate()/deactivate()/call()/
 // forget() are unaffected by lock() and are what the individual tests use.
 //
+// The "step policy / concurrency" block at the end covers the engine upgrade
+// that added: awaited async step conditions, {ok: false} channel responses
+// failing their step, `??` payload fallback, step timeout/retries/
+// retryDelay/fallback steps, `output` into context.variables, the
+// per-orchestration `concurrency` gate ('drop' | 'queue' | 'parallel'), and
+// metrics recorded for every run, not just manual call()s.
+//
 // cyre.shutdown() is never called here - it calls process.exit(0), which
 // would kill the vitest worker. Teardown instead deactivates + forgets every
 // orchestration this file registered.
@@ -23,6 +30,9 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 describe('cyre.orchestration', () => {
   let heartbeatCount = 0
   let opsCount = 0
+  let flakyCalls = 0
+  let capturedPayloads: any[] = []
+  let fallbackCount = 0
 
   beforeAll(async () => {
     await cyre.init()
@@ -154,6 +164,180 @@ describe('cyre.orchestration', () => {
       workflow: [{name: 'noop', type: 'action', targets: 'log/event'}]
     })
 
+    // --- step policy / concurrency (engine upgrade) -------------------------
+
+    cyre.action({id: 'capture/payload'})
+    cyre.on('capture/payload', (payload: any) => {
+      capturedPayloads.push(payload)
+      return payload
+    })
+
+    // fails its first two calls of every round, then succeeds
+    cyre.action({id: 'flaky/service'})
+    cyre.on('flaky/service', () => {
+      flakyCalls++
+      if (flakyCalls % 3 !== 0) throw new Error('flaky failure')
+      return {recovered: true}
+    })
+
+    cyre.action({id: 'user/lookup'})
+    cyre.on('user/lookup', (payload: any) => ({
+      id: payload?.userId,
+      tier: 'gold'
+    }))
+
+    cyre.action({id: 'fallback/handler'})
+    cyre.on('fallback/handler', () => {
+      fallbackCount++
+      return {fallback: true}
+    })
+
+    cyre.action({id: 'slow/target', delay: 120})
+    cyre.on('slow/target', () => ({ok: true}))
+
+    // async condition resolving false must actually be treated as false
+    cyre.orchestration.keep({
+      id: 'async-condition-test',
+      triggers: [],
+      workflow: [
+        {
+          name: 'async-false',
+          type: 'condition',
+          condition: async () => false,
+          onError: 'abort'
+        },
+        {name: 'never-runs', type: 'action', targets: 'log/event'}
+      ]
+    })
+
+    // a {ok: false} channel response fails the step -> abort applies
+    cyre.orchestration.keep({
+      id: 'failed-call-test',
+      triggers: [],
+      workflow: [
+        {
+          name: 'missing',
+          type: 'action',
+          targets: 'does/not-exist',
+          onError: 'abort'
+        },
+        {name: 'never-runs', type: 'action', targets: 'log/event'}
+      ]
+    })
+
+    // a deliberate falsy step payload is passed through, not replaced
+    cyre.orchestration.keep({
+      id: 'falsy-payload-test',
+      triggers: [],
+      workflow: [
+        {name: 'zero', type: 'action', targets: 'capture/payload', payload: 0}
+      ]
+    })
+
+    // retries recover a flaky step; output stores the handler payload
+    cyre.orchestration.keep({
+      id: 'retry-test',
+      triggers: [],
+      workflow: [
+        {
+          name: 'flaky',
+          type: 'action',
+          targets: 'flaky/service',
+          retries: 2,
+          retryDelay: 10,
+          output: 'flakyResult',
+          onError: 'abort'
+        }
+      ]
+    })
+
+    // step timeout fails the step (slow/target waits out a 120ms delay)
+    cyre.orchestration.keep({
+      id: 'timeout-test',
+      triggers: [],
+      workflow: [
+        {
+          name: 'too-slow',
+          type: 'action',
+          targets: 'slow/target',
+          timeout: 30,
+          onError: 'abort'
+        }
+      ]
+    })
+
+    // data flow: output -> ctx.variables -> payload fn + string condition,
+    // and a false condition with fallback steps acts as an else branch
+    cyre.orchestration.keep({
+      id: 'data-flow-test',
+      triggers: [],
+      workflow: [
+        {
+          name: 'lookup',
+          type: 'action',
+          targets: 'user/lookup',
+          output: 'user'
+        },
+        {name: 'has-user', type: 'condition', condition: 'user'},
+        {
+          name: 'forward-tier',
+          type: 'action',
+          targets: 'capture/payload',
+          payload: (ctx: any) => ({tier: ctx.variables.user.tier})
+        },
+        {
+          name: 'is-platinum',
+          type: 'condition',
+          condition: (ctx: any) => ctx.variables.user.tier === 'platinum',
+          output: 'branch',
+          onError: [
+            {
+              name: 'not-platinum',
+              type: 'action',
+              targets: 'fallback/handler',
+              output: 'fallbackPayload'
+            }
+          ]
+        }
+      ]
+    })
+
+    // concurrency modes - each run holds the slot for ~60ms
+    const slowWorkflow = [
+      {name: 'hold', type: 'delay' as const, timeout: 60},
+      {name: 'log', type: 'action' as const, targets: 'log/event'}
+    ]
+    cyre.orchestration.keep({
+      id: 'concurrency-drop-test',
+      triggers: [],
+      workflow: slowWorkflow
+    })
+    cyre.orchestration.keep({
+      id: 'concurrency-queue-test',
+      triggers: [],
+      concurrency: 'queue',
+      workflow: slowWorkflow
+    })
+    cyre.orchestration.keep({
+      id: 'concurrency-queue-limit-test',
+      triggers: [],
+      concurrency: 'queue',
+      queueLimit: 1,
+      workflow: slowWorkflow
+    })
+    cyre.orchestration.keep({
+      id: 'concurrency-parallel-test',
+      triggers: [],
+      concurrency: 'parallel',
+      workflow: slowWorkflow
+    })
+    cyre.orchestration.keep({
+      id: 'queue-forget-test',
+      triggers: [],
+      concurrency: 'queue',
+      workflow: slowWorkflow
+    })
+
     cyre.lock()
   })
 
@@ -166,7 +350,18 @@ describe('cyre.orchestration', () => {
       'actions-list-test',
       'channel-trigger-test',
       'condition-trigger-test',
-      'forget-me'
+      'forget-me',
+      'async-condition-test',
+      'failed-call-test',
+      'falsy-payload-test',
+      'retry-test',
+      'timeout-test',
+      'data-flow-test',
+      'concurrency-drop-test',
+      'concurrency-queue-test',
+      'concurrency-queue-limit-test',
+      'concurrency-parallel-test',
+      'queue-forget-test'
     ].forEach(id => {
       cyre.orchestration.activate(id, false)
       cyre.orchestration.forget(id)
@@ -306,5 +501,137 @@ describe('cyre.orchestration', () => {
 
     // forgetting again reports false rather than throwing
     expect(cyre.orchestration.forget('forget-me')).toBe(false)
+  })
+
+  describe('step policy / concurrency', () => {
+    it('awaits async step conditions - an async false really is false', async () => {
+      const before = heartbeatCount
+      const result = await cyre.orchestration.call('async-condition-test')
+      expect(result.ok).toBe(false)
+      expect(heartbeatCount).toBe(before)
+    })
+
+    it('a {ok: false} channel response fails the step, so onError: abort stops the workflow', async () => {
+      const before = heartbeatCount
+      const result = await cyre.orchestration.call('failed-call-test')
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('does/not-exist')
+      expect(heartbeatCount).toBe(before)
+    })
+
+    it('passes a deliberate falsy step payload through instead of the trigger payload', async () => {
+      capturedPayloads = []
+      await cyre.orchestration.call('falsy-payload-test', {from: 'trigger'})
+      expect(capturedPayloads).toEqual([0])
+    })
+
+    it('retries a failing step and stores the recovered payload via output', async () => {
+      flakyCalls = 0
+      const result = await cyre.orchestration.call('retry-test')
+      expect(result.ok).toBe(true)
+      expect(flakyCalls).toBe(3) // 1 attempt + 2 retries
+      expect(result.variables?.flakyResult).toEqual({recovered: true})
+    })
+
+    it('fails a step that exceeds its timeout', async () => {
+      const start = Date.now()
+      const result = await cyre.orchestration.call('timeout-test')
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('timed out after 30ms')
+      expect(Date.now() - start).toBeLessThan(110)
+    })
+
+    it('passes data between steps via output/variables and runs fallback steps as an else branch', async () => {
+      capturedPayloads = []
+      const fallbackBefore = fallbackCount
+      const result = await cyre.orchestration.call('data-flow-test', {
+        userId: 'u-1'
+      })
+      expect(result.ok).toBe(true)
+      expect(result.variables?.user).toEqual({id: 'u-1', tier: 'gold'})
+      expect(capturedPayloads).toEqual([{tier: 'gold'}])
+      // tier isn't platinum -> condition false -> fallback ran
+      expect(fallbackCount).toBe(fallbackBefore + 1)
+      expect(result.variables?.fallbackPayload).toEqual({fallback: true})
+      // the condition's own output gets the fallback result instead
+      expect(Array.isArray(result.variables?.branch)).toBe(true)
+    })
+
+    it("concurrency 'drop' (default) skips a run while one is in flight", async () => {
+      const metricsBefore = cyre.orchestration.get('concurrency-drop-test')!
+        .metrics.totalExecutions
+      const [first, second] = await Promise.all([
+        cyre.orchestration.call('concurrency-drop-test'),
+        cyre.orchestration.call('concurrency-drop-test')
+      ])
+      expect(first.ok).toBe(true)
+      expect(second.ok).toBe(false)
+      expect(second.dropped).toBe(true)
+      // the dropped run never executed, so it isn't counted
+      expect(
+        cyre.orchestration.get('concurrency-drop-test')!.metrics.totalExecutions
+      ).toBe(metricsBefore + 1)
+    })
+
+    it("concurrency 'queue' runs every call, one at a time", async () => {
+      const start = Date.now()
+      const pending = [1, 2, 3].map(() =>
+        cyre.orchestration.call('concurrency-queue-test')
+      )
+      expect(cyre.orchestration.getStatus('concurrency-queue-test')?.queued).toBe(
+        2
+      )
+      const results = await Promise.all(pending)
+      expect(results.every(result => result.ok)).toBe(true)
+      expect(Date.now() - start).toBeGreaterThanOrEqual(170) // 3 x ~60ms, serialized
+      expect(cyre.orchestration.getStatus('concurrency-queue-test')?.queued).toBe(
+        0
+      )
+    })
+
+    it("concurrency 'queue' rejects runs beyond queueLimit", async () => {
+      const results = await Promise.all([
+        cyre.orchestration.call('concurrency-queue-limit-test'), // runs
+        cyre.orchestration.call('concurrency-queue-limit-test'), // queued
+        cyre.orchestration.call('concurrency-queue-limit-test') // over limit
+      ])
+      expect(results.map(result => result.ok)).toEqual([true, true, false])
+      expect(results[2].message).toContain('queue full')
+    })
+
+    it("concurrency 'parallel' keeps the old overlapping behavior", async () => {
+      const start = Date.now()
+      const results = await Promise.all([
+        cyre.orchestration.call('concurrency-parallel-test'),
+        cyre.orchestration.call('concurrency-parallel-test')
+      ])
+      expect(results.every(result => result.ok)).toBe(true)
+      expect(Date.now() - start).toBeLessThan(115) // overlapped, not 2 x 60ms
+    })
+
+    it('records metrics for trigger-started runs, not only manual call()', async () => {
+      const before = cyre.orchestration.get('channel-trigger-test')!.metrics
+        .totalExecutions
+      cyre.orchestration.activate('channel-trigger-test', true)
+      await cyre.call('notify/ops', {})
+      await wait(50)
+      cyre.orchestration.activate('channel-trigger-test', false)
+
+      const metrics = cyre.orchestration.get('channel-trigger-test')!.metrics
+      expect(metrics.totalExecutions).toBe(before + 1)
+      expect(metrics.successfulExecutions).toBeGreaterThan(0)
+      expect(metrics.longestExecution).toBeDefined()
+    })
+
+    it('forget() settles runs still waiting in the queue', async () => {
+      const running = cyre.orchestration.call('queue-forget-test')
+      const queued = cyre.orchestration.call('queue-forget-test')
+      cyre.orchestration.forget('queue-forget-test')
+
+      const queuedResult = await queued
+      expect(queuedResult.ok).toBe(false)
+      expect(queuedResult.dropped).toBe(true)
+      await running
+    })
   })
 })

@@ -703,6 +703,11 @@ export const metricsState = {
           hasProtections: channel._hasProtections || false,
           hasProcessing: channel._hasProcessing || false,
           hasScheduling: channel._hasScheduling || false,
+          // Calls absorbed by each protection - previously invisible,
+          // see app.ts's call() throttle/debounce/buffer branches
+          throttleCount: channel._throttleCount || 0,
+          debounceCount: channel._debounceCount || 0,
+          bufferCount: channel._bufferCount || 0,
           available: true
         }
       }
@@ -828,7 +833,10 @@ export const metricsState = {
           protections: {
             throttle: channel.throttle,
             debounce: channel.debounce,
-            detectChanges: channel.detectChanges
+            detectChanges: channel.detectChanges,
+            throttleCount: channel._throttleCount || 0,
+            debounceCount: channel._debounceCount || 0,
+            bufferCount: channel._bufferCount || 0
           }
         }))
 

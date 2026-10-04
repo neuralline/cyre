@@ -112,12 +112,24 @@ export const compileAction = (
 
   const hasFastPath = !hasProtections && !hasProcessing && !hasScheduling
 
+  // keepPayload/history resolved once here, not read as action.keepPayload
+  // on every dispatch - default true (unset or anything but literal
+  // false), matching every other boolean talent's "absent means off/
+  // default" convention (see detectChanges's own compile-time note).
+  // history is meaningless once keepPayload is off - nothing is kept to
+  // have a history of - so it resolves to 0 in that case regardless of
+  // what the caller passed.
+  const keepPayload = compiledAction.keepPayload !== false
+  const historyLimit = keepPayload ? compiledAction.history ?? 1 : 0
+
   // Efficient final assembly
   Object.assign(compiledAction, {
     _hasFastPath: hasFastPath,
     _hasProtections: hasProtections,
     _hasProcessing: hasProcessing,
     _hasScheduling: hasScheduling,
+    _keepPayload: keepPayload,
+    _history: historyLimit,
     _pipeline: compiledPipeline // Now contains function references, not strings
   })
 
@@ -245,6 +257,28 @@ const validateCrossRules = (
   if (action.transform && !action.detectChanges) {
     warnings.push(
       'transform without detectChanges may cause unnecessary executions'
+    )
+  }
+
+  if (action.keepPayload === false && action.detectChanges) {
+    errors.push(
+      'keepPayload: false cannot be combined with detectChanges - detectChanges compares the incoming payload against the previous one stored in payload-state, and keepPayload: false turns that storage off. Drop detectChanges, or leave keepPayload on for this channel.'
+    )
+  }
+
+  if (
+    action.keepPayload === false &&
+    action.history !== undefined &&
+    action.history > 0
+  ) {
+    warnings.push(
+      'history is ignored when keepPayload is false - there is nothing stored to keep a history of'
+    )
+  }
+
+  if (action.history !== undefined && action.history > 20) {
+    warnings.push(
+      `history: ${action.history} keeps that many previous payloads in memory for this channel - confirm that is intended, especially for large payloads`
     )
   }
 

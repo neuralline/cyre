@@ -1,5 +1,5 @@
-// demo/buffer-vs-debounce.test.ts
-// Comprehensive test for buffer vs debounce behavior and req/res saving
+// demo/buffer-vs-debounce.ts
+// Buffer vs debounce side by side, including what gets saved to req/res
 
 import {cyre} from '../src/index'
 

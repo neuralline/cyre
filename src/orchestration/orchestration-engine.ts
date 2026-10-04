@@ -17,7 +17,8 @@ import type {
   StepResult,
   OrchestrationRuntime,
   TriggerEvent,
-  OrchestrationAction
+  OrchestrationAction,
+  OrchestrationRunResult
 } from '../types/orchestration'
 
 /*
@@ -29,6 +30,11 @@ import type {
       - orchestration.call(id, payload) - Direct execution like cyre.call
       - orchestration.forget(id) - Remove orchestration
       - Perfect alignment with functional programming principles
+      - Every run (manual or triggered) goes through runOrchestration():
+        one concurrency gate ('drop' | 'queue' | 'parallel') and one place
+        that records metrics
+      - Steps support timeout, retries/retryDelay, fallback steps via
+        onError: WorkflowStep[], and `output` into context.variables
 
 */
 
@@ -37,8 +43,12 @@ import type {
 // context/state.ts, so orchestration runtime is visible to the rest of the
 // app (metrics export, introspection, reset) instead of living in a
 // module-private store only this file can see.
-const {runtimes: orchestrationRuntimes, triggerSubscriptions} =
-  orchestrationState
+const {
+  runtimes: orchestrationRuntimes,
+  triggerSubscriptions,
+  inFlight,
+  runQueues
+} = orchestrationState
 
 // Orchestration metadata for timeline entries
 interface OrchestrationMetadata {
@@ -268,7 +278,7 @@ const resume = (orchestrationId: string): boolean => {
 const call = async (
   orchestrationId: string,
   payload?: any
-): Promise<{ok: boolean; result?: any; message: string}> => {
+): Promise<OrchestrationRunResult> => {
   const runtime = orchestrationRuntimes.get(orchestrationId)
   if (!runtime) {
     return {ok: false, message: 'Orchestration not found'}
@@ -282,22 +292,8 @@ const call = async (
   }
 
   try {
-    const result = await executeWorkflow(runtime.config, triggerEvent)
-
-    // Update metrics
-    runtime.executionCount++
-    runtime.lastExecution = Date.now()
-    runtime.metrics.totalExecutions++
-
-    if (result.ok) {
-      runtime.metrics.successfulExecutions++
-    } else {
-      runtime.metrics.failedExecutions++
-    }
-
-    orchestrationRuntimes.set(orchestrationId, runtime)
-
-    return result
+    // Same gate + metrics path as every trigger type - see runOrchestration().
+    return await runOrchestration(runtime.config, triggerEvent)
   } catch (error) {
     sensor.error(orchestrationId, String(error), 'orchestration-call')
     return {ok: false, message: String(error)}
@@ -344,6 +340,18 @@ const forget = (orchestrationId: string): boolean => {
     }
   })
 
+  // Anyone awaiting a queued run (a trigger handler or call()) gets a
+  // definite answer instead of a promise that never settles.
+  runQueues.get(orchestrationId)?.forEach(run =>
+    run.resolve({
+      ok: false,
+      dropped: true,
+      message: 'Orchestration forgotten before queued run started'
+    })
+  )
+  runQueues.forget(orchestrationId)
+  inFlight.forget(orchestrationId)
+
   // Remove runtime
   orchestrationRuntimes.forget(orchestrationId)
 
@@ -362,6 +370,137 @@ const forget = (orchestrationId: string): boolean => {
  */
 const reset = (): void => {
   list().forEach(runtime => forget(runtime.config.id))
+}
+
+/**
+ * Single entry point for every run - manual call() and all trigger types -
+ * so the `concurrency` gate and metrics recording happen in exactly one
+ * place. Before this, only call() updated runtime.metrics, so anything run
+ * by a channel/time/condition trigger was invisible to getStatus(), and
+ * nothing stopped a 1s time trigger with a 3s workflow from stacking runs.
+ *
+ * In-flight counts and waiting runs live in orchestrationState (inFlight /
+ * runQueues), not in this module, per the context/state convention.
+ */
+const runOrchestration = async (
+  config: OrchestrationConfig,
+  trigger: TriggerEvent
+): Promise<OrchestrationRunResult> => {
+  const id = config.id
+  const mode = config.concurrency ?? 'drop'
+
+  if (mode !== 'parallel' && (inFlight.get(id) ?? 0) > 0) {
+    if (mode === 'queue') {
+      const queue = runQueues.get(id) ?? []
+      const limit = config.queueLimit ?? 100
+      if (queue.length >= limit) {
+        sensor.warn(`orchestration-queue-full: limit ${limit}`, id)
+        return {
+          ok: false,
+          dropped: true,
+          message: `Run queue full (${limit}) - run dropped`
+        }
+      }
+      return new Promise<OrchestrationRunResult>(resolve => {
+        queue.push({trigger, resolve})
+        runQueues.set(id, queue)
+      })
+    }
+
+    return {
+      ok: false,
+      dropped: true,
+      message: 'Previous run still in flight - run dropped (concurrency: drop)'
+    }
+  }
+
+  inFlight.set(id, (inFlight.get(id) ?? 0) + 1)
+  const startTime = Date.now()
+
+  let result: OrchestrationRunResult
+  try {
+    result = await executeWorkflow(config, trigger)
+  } catch (error) {
+    result = {ok: false, message: String(error)}
+  }
+
+  const remaining = (inFlight.get(id) ?? 1) - 1
+  if (remaining > 0) inFlight.set(id, remaining)
+  else inFlight.forget(id)
+
+  recordRunMetrics(id, result, Date.now() - startTime)
+  drainRunQueue(config)
+
+  return result
+}
+
+/**
+ * Start the next waiting run under `concurrency: 'queue'`. Called
+ * synchronously right after the in-flight count drops, so the next queued
+ * run claims the slot before any newly-arriving trigger can - arrival order
+ * is preserved.
+ */
+const drainRunQueue = (config: OrchestrationConfig): void => {
+  const queue = runQueues.get(config.id)
+  if (!queue?.length) return
+
+  const next = queue.shift()!
+  if (!queue.length) runQueues.forget(config.id)
+
+  runOrchestration(config, next.trigger).then(next.resolve)
+}
+
+/**
+ * Update runtime.metrics for one finished run. Dropped/rejected runs never
+ * reach here - they didn't execute, so they don't count as executions.
+ */
+const recordRunMetrics = (
+  orchestrationId: string,
+  result: OrchestrationRunResult,
+  duration: number
+): void => {
+  const runtime = orchestrationRuntimes.get(orchestrationId)
+  if (!runtime) return // forgotten mid-run
+
+  const metrics = runtime.metrics
+  runtime.executionCount++
+  runtime.lastExecution = Date.now()
+  metrics.totalExecutions++
+  if (result.ok) metrics.successfulExecutions++
+  else metrics.failedExecutions++
+
+  metrics.lastExecutionTime = duration
+  // Running mean - no history array to grow on a 24/7 server.
+  metrics.averageExecutionTime +=
+    (duration - metrics.averageExecutionTime) / metrics.totalExecutions
+  metrics.longestExecution = Math.max(
+    metrics.longestExecution ?? duration,
+    duration
+  )
+  metrics.shortestExecution = Math.min(
+    metrics.shortestExecution ?? duration,
+    duration
+  )
+}
+
+/**
+ * Shared logging for runs started by a trigger. A run dropped by the
+ * concurrency gate is expected behavior, not a failure - debug, not error.
+ */
+const reportTriggeredRun = (
+  orchestrationId: string,
+  result: OrchestrationRunResult
+): void => {
+  if (result.ok) {
+    sensor.debug(orchestrationId, 'orchestration-executed-successfully')
+  } else if (result.dropped) {
+    sensor.debug(
+      orchestrationId,
+      `orchestration-run-dropped: ${result.message}`
+    )
+  } else {
+    sensor.error(orchestrationId, `orchestration-failed: ${result.message}`)
+  }
 }
 
 /**
@@ -406,15 +545,10 @@ const subscribeChannelTriggers = (config: OrchestrationConfig): void => {
         }
 
         try {
-          const result = await executeWorkflow(config, triggerEvent)
-          if (result.ok) {
-            sensor.debug(config.id, 'orchestration-executed-successfully')
-          } else {
-            sensor.error(
-              config.id,
-              `orchestration-failed: ${result.message}`
-            )
-          }
+          reportTriggeredRun(
+            config.id,
+            await runOrchestration(config, triggerEvent)
+          )
         } catch (error) {
           sensor.error(config.id, `orchestration-error: ${error}`)
         }
@@ -456,12 +590,7 @@ const fireTimeTrigger = async (
   }
 
   try {
-    const result = await executeWorkflow(config, triggerEvent)
-    if (result.ok) {
-      sensor.debug(config.id, 'orchestration-executed-successfully')
-    } else {
-      sensor.error(config.id, `orchestration-failed: ${result.message}`)
-    }
+    reportTriggeredRun(config.id, await runOrchestration(config, triggerEvent))
   } catch (error) {
     sensor.error(config.id, `orchestration-error: ${error}`)
   }
@@ -610,15 +739,10 @@ const registerTriggers = (config: OrchestrationConfig): string[] => {
                 timestamp: Date.now()
               }
 
-              const result = await executeWorkflow(config, triggerEvent)
-              if (result.ok) {
-                sensor.debug(config.id, 'orchestration-executed-successfully')
-              } else {
-                sensor.error(
-                  config.id,
-                  `orchestration-failed: ${result.message}`
-                )
-              }
+              reportTriggeredRun(
+                config.id,
+                await runOrchestration(config, triggerEvent)
+              )
             } catch (error) {
               sensor.error(
                 config.id,
@@ -707,12 +831,13 @@ const callTargetAndAwaitDispatch = async (
 }
 
 /**
- * Execute workflow based on trigger event
+ * Execute workflow based on trigger event. Never throws - every outcome,
+ * including an aborted workflow, resolves to an OrchestrationRunResult.
  */
 const executeWorkflow = async (
   config: OrchestrationConfig,
   trigger: TriggerEvent
-): Promise<{ok: boolean; result?: any; message: string}> => {
+): Promise<OrchestrationRunResult> => {
   const context: ExecutionContext = {
     orchestrationId: config.id,
     trigger,
@@ -725,7 +850,12 @@ const executeWorkflow = async (
     // Execute workflow steps if defined
     if (config.workflow) {
       const result = await executeWorkflowSteps(config.workflow, context)
-      return {ok: true, result, message: 'Workflow completed'}
+      return {
+        ok: true,
+        result,
+        variables: context.variables,
+        message: 'Workflow completed'
+      }
     }
 
     // Execute actions if defined
@@ -735,18 +865,231 @@ const executeWorkflow = async (
           executeOrchestrationAction(action, context)
         )
       )
+
+      // Same rule as 'action' workflow steps: a channel call that came back
+      // {ok: false} is a failure, not a success with a sad payload.
+      const failures = results
+        .flat()
+        .filter(response => response?.ok === false)
+      if (failures.length) {
+        return {
+          ok: false,
+          result: results,
+          message: `Actions failed: ${failures
+            .map(response => response.message)
+            .join('; ')}`
+        }
+      }
+
       return {ok: true, result: results, message: 'Actions completed'}
     }
 
     return {ok: false, message: 'No workflow or actions defined'}
   } catch (error) {
     sensor.error(config.id, String(error), 'workflow-execution')
-    return {ok: false, message: String(error)}
+    return {
+      ok: false,
+      variables: context.variables,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * Resolve a step/action payload. `??`, not `||` - a deliberate 0, '' or
+ * false payload is passed through instead of being swapped for the
+ * trigger's payload.
+ */
+const resolvePayload = (payload: any, context: ExecutionContext): any =>
+  typeof payload === 'function'
+    ? payload(context)
+    : payload ?? context.trigger.payload
+
+/**
+ * Race one step attempt against its timeout. The timer is always cleared so
+ * a fast step never leaves a pending timeout behind. A timeout fails the
+ * attempt; it does not cancel channel calls the step already started.
+ */
+const withStepTimeout = <T>(
+  work: Promise<T>,
+  timeoutMs: number | undefined,
+  stepName: string
+): Promise<T> => {
+  if (!timeoutMs || timeoutMs <= 0) return work
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new Error(`Step "${stepName}" timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    )
+  })
+
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * Run a single attempt of one step. Throws on failure; returns both the
+ * step's result (what goes into stepHistory/results, unchanged from before)
+ * and its `value` (what `output` stores in context.variables - the handler
+ * payload for 'action' steps, the result itself for everything else).
+ */
+const runStepOnce = async (
+  step: WorkflowStep,
+  context: ExecutionContext
+): Promise<{result: any; value: any}> => {
+  switch (step.type) {
+    case 'action': {
+      if (!step.targets) return {result: undefined, value: undefined}
+
+      const targets =
+        typeof step.targets === 'function'
+          ? step.targets(context)
+          : step.targets
+      const targetsArray = Array.isArray(targets) ? targets : [targets]
+
+      const responses = await Promise.all(
+        targetsArray.map(target =>
+          callTargetAndAwaitDispatch(
+            target,
+            resolvePayload(step.payload, context)
+          )
+        )
+      )
+
+      // A {ok: false} channel response (missing channel, throttled call,
+      // failed pipeline, ...) fails the step, so retries/onError apply.
+      // Before, it was recorded as a successful step.
+      const failed = responses
+        .map((response, index) => ({response, target: targetsArray[index]}))
+        .filter(({response}) => response?.ok === false)
+      if (failed.length) {
+        throw new Error(
+          `Channel call failed - ${failed
+            .map(({target, response}) => `${target}: ${response.message}`)
+            .join('; ')}`
+        )
+      }
+
+      const single = responses.length === 1
+      return {
+        result: single ? responses[0] : responses,
+        value: single
+          ? responses[0]?.payload
+          : responses.map(response => response?.payload)
+      }
+    }
+
+    case 'delay': {
+      const delayTime = step.timeout || 1000
+      await sleep(delayTime)
+      const result = {delayed: delayTime}
+      return {result, value: result}
+    }
+
+    case 'condition': {
+      // Async conditions are awaited - before, a Promise was used as the
+      // condition result directly, and a Promise is always truthy.
+      const conditionMet =
+        step.condition === undefined
+          ? true
+          : typeof step.condition === 'function'
+          ? Boolean(await step.condition(context))
+          : Boolean(context.variables[step.condition])
+
+      if (!conditionMet && step.onError === 'abort') {
+        throw new Error('Condition not met - aborting workflow')
+      }
+      if (!conditionMet && Array.isArray(step.onError)) {
+        throw new Error('Condition not met - running fallback steps')
+      }
+
+      const result = {conditionMet}
+      return {result, value: conditionMet}
+    }
+
+    case 'parallel': {
+      if (!step.steps) return {result: undefined, value: undefined}
+      const parallelResults = await Promise.all(
+        step.steps.map(subStep => executeWorkflowSteps([subStep], context))
+      )
+      const result = parallelResults.flat()
+      return {result, value: result}
+    }
+
+    case 'sequential': {
+      if (!step.steps) return {result: undefined, value: undefined}
+      const result = await executeWorkflowSteps(step.steps, context)
+      return {result, value: result}
+    }
+
+    case 'loop': {
+      if (!step.steps) return {result: undefined, value: undefined}
+      const loopResults: any[] = []
+      // Iteration count is configurable via step.iterations - falls
+      // back to 3 (the old hardcoded value) when omitted, so existing
+      // configs that never set it keep behaving exactly as before.
+      const iterations =
+        typeof step.iterations === 'number' && step.iterations >= 0
+          ? step.iterations
+          : 3
+      for (let i = 0; i < iterations; i++) {
+        loopResults.push(await executeWorkflowSteps(step.steps, context))
+      }
+      return {result: loopResults, value: loopResults}
+    }
+
+    default: {
+      const result = {message: `Unknown step type: ${step.type}`}
+      return {result, value: result}
+    }
   }
 }
 
 /**
- * Execute workflow steps sequentially
+ * Run a step with its timeout and retry policy. Never throws - returns the
+ * last error instead, so the caller decides what onError means.
+ */
+const runStepWithPolicy = async (
+  step: WorkflowStep,
+  context: ExecutionContext
+): Promise<
+  | {ok: true; result: any; value: any; retryCount: number}
+  | {ok: false; error: unknown; retryCount: number}
+> => {
+  const maxRetries = Math.max(
+    0,
+    step.retries ?? (step.onError === 'retry' ? 1 : 0)
+  )
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0 && step.retryDelay) await sleep(step.retryDelay)
+
+    try {
+      const work = runStepOnce(step, context)
+      // For 'delay' steps `timeout` IS the delay, so it never races.
+      const outcome =
+        step.type === 'delay'
+          ? await work
+          : await withStepTimeout(work, step.timeout, step.name)
+      return {ok: true, ...outcome, retryCount: attempt}
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  return {ok: false, error: lastError, retryCount: maxRetries}
+}
+
+/**
+ * Execute workflow steps in order. Throws only when a step aborts (onError
+ * 'abort', or a fallback array whose own steps abort) - every other failure
+ * is recorded in stepHistory and the workflow moves on.
  */
 const executeWorkflowSteps = async (
   steps: WorkflowStep[],
@@ -758,129 +1101,51 @@ const executeWorkflowSteps = async (
     if (step.enabled === false) continue
 
     const stepStartTime = Date.now()
+    const outcome = await runStepWithPolicy(step, context)
 
-    try {
-      let stepResult: any
-
-      switch (step.type) {
-        case 'action':
-          if (step.targets) {
-            const targets =
-              typeof step.targets === 'function'
-                ? step.targets(context)
-                : step.targets
-
-            const targetsArray = Array.isArray(targets) ? targets : [targets]
-            const actionResults = await Promise.all(
-              targetsArray.map(target => {
-                const payload =
-                  typeof step.payload === 'function'
-                    ? step.payload(context)
-                    : step.payload || context.trigger.payload
-
-                return callTargetAndAwaitDispatch(target, payload)
-              })
-            )
-
-            stepResult =
-              actionResults.length === 1 ? actionResults[0] : actionResults
-          }
-          break
-
-        case 'delay':
-          const delayTime = step.timeout || 1000
-          await new Promise(resolve => setTimeout(resolve, delayTime))
-          stepResult = {delayed: delayTime}
-          break
-
-        case 'condition':
-          const conditionResult = step.condition
-            ? typeof step.condition === 'function'
-              ? step.condition(context)
-              : context.variables[step.condition]
-            : true
-
-          stepResult = {conditionMet: conditionResult}
-
-          if (!conditionResult && step.onError === 'abort') {
-            throw new Error('Condition not met - aborting workflow')
-          }
-          break
-
-        case 'parallel':
-          if (step.steps) {
-            const parallelResults = await Promise.all(
-              step.steps.map(subStep =>
-                executeWorkflowSteps([subStep], context)
-              )
-            )
-            stepResult = parallelResults.flat()
-          }
-          break
-
-        case 'sequential':
-          if (step.steps) {
-            stepResult = await executeWorkflowSteps(step.steps, context)
-          }
-          break
-
-        case 'loop':
-          if (step.steps) {
-            const loopResults: any[] = []
-            // Iteration count is configurable via step.iterations - falls
-            // back to 3 (the old hardcoded value) when omitted, so existing
-            // configs that never set it keep behaving exactly as before.
-            const iterations =
-              typeof step.iterations === 'number' && step.iterations >= 0
-                ? step.iterations
-                : 3
-            for (let i = 0; i < iterations; i++) {
-              const iterationResult = await executeWorkflowSteps(
-                step.steps,
-                context
-              )
-              loopResults.push(iterationResult)
-            }
-            stepResult = loopResults
-          }
-          break
-
-        default:
-          stepResult = {message: `Unknown step type: ${step.type}`}
-      }
-
-      const stepDuration = Date.now() - stepStartTime
-
-      const stepRecord: StepResult = {
+    if (outcome.ok) {
+      context.stepHistory.push({
         stepName: step.name,
         success: true,
-        result: stepResult,
-        duration: stepDuration,
-        timestamp: Date.now()
-      }
-
-      context.stepHistory.push(stepRecord)
-      results.push(stepResult)
-    } catch (error) {
-      const stepDuration = Date.now() - stepStartTime
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-
-      const stepRecord: StepResult = {
-        stepName: step.name,
-        success: false,
-        error: errorMessage,
-        duration: stepDuration,
-        timestamp: Date.now()
-      }
-
-      context.stepHistory.push(stepRecord)
-
-      if (step.onError === 'abort') {
-        throw error
-      }
-      // Continue with next step if onError is 'continue'
+        result: outcome.result,
+        duration: Date.now() - stepStartTime,
+        timestamp: Date.now(),
+        retryCount: outcome.retryCount
+      })
+      if (step.output) context.variables[step.output] = outcome.value
+      results.push(outcome.result)
+      continue
     }
+
+    const errorMessage =
+      outcome.error instanceof Error
+        ? outcome.error.message
+        : String(outcome.error)
+
+    context.stepHistory.push({
+      stepName: step.name,
+      success: false,
+      error: errorMessage,
+      duration: Date.now() - stepStartTime,
+      timestamp: Date.now(),
+      retryCount: outcome.retryCount
+    })
+
+    if (step.onError === 'abort') {
+      throw outcome.error instanceof Error
+        ? outcome.error
+        : new Error(errorMessage)
+    }
+
+    if (Array.isArray(step.onError)) {
+      // Fallback steps run in the same context with their own onError
+      // rules; if one of them aborts, that propagates and aborts the
+      // workflow. Otherwise the fallback stands in for the failed step.
+      const fallbackResult = await executeWorkflowSteps(step.onError, context)
+      if (step.output) context.variables[step.output] = fallbackResult
+      results.push(fallbackResult)
+    }
+    // 'continue' / 'retry' / undefined: failure recorded, move on
   }
 
   return results
@@ -901,14 +1166,9 @@ const executeOrchestrationAction = async (
   const targetsArray = Array.isArray(targets) ? targets : [targets]
 
   const results = await Promise.all(
-    targetsArray.map(target => {
-      const payload =
-        typeof action.payload === 'function'
-          ? action.payload(context)
-          : action.payload || context.trigger.payload
-
-      return callTargetAndAwaitDispatch(target, payload)
-    })
+    targetsArray.map(target =>
+      callTargetAndAwaitDispatch(target, resolvePayload(action.payload, context))
+    )
   )
 
   return results.length === 1 ? results[0] : results
@@ -947,6 +1207,8 @@ export const orchestration = {
       executionCount: runtime.executionCount,
       lastExecution: runtime.lastExecution,
       metrics: runtime.metrics,
+      inFlight: inFlight.get(orchestrationId) ?? 0,
+      queued: runQueues.get(orchestrationId)?.length ?? 0,
       timeKeeperInfo: {
         timerCount: orchestrationTimers.length,
         activeTimers: orchestrationTimers.filter(timer => timer.isActive).length

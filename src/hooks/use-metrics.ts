@@ -50,7 +50,8 @@ import {
   findNeverExecuted,
   hottest,
   slowest,
-  errorProne
+  errorProne,
+  mostGated
 } from '../libs/metrics-analysis'
 
 export interface UseMetricsConfig {
@@ -268,6 +269,6 @@ export const useMetrics = (
   }
 }
 
-export {findUnused, findNeverExecuted, hottest, slowest, errorProne}
+export {findUnused, findNeverExecuted, hottest, slowest, errorProne, mostGated}
 
 export default useMetrics

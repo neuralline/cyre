@@ -26,7 +26,13 @@ export async function processCall(
   payload: ActionPayload | undefined
 ): Promise<CyreResponse> {
   try {
-    let finalPayload = payload ?? payloadState.get(action.id)
+    // getReq(), not get() - get() returns the whole {req, res, prevReq,
+    // metadata} wrapper, which is truthy even when req itself is
+    // undefined (e.g. a keepPayload: false channel, or one that's never
+    // been called with a payload yet). That bug used to leak the wrapper
+    // object into the handler as "the payload" whenever both the call and
+    // the action itself had no payload to fall back on.
+    let finalPayload = payload ?? payloadState.getReq(action.id)
 
     // EXECUTE TALENT PIPELINE (this was missing!)
     if (action._pipeline?.length) {

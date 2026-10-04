@@ -81,3 +81,23 @@ export const errorProne = (
     .filter(row => row.errors >= minErrors && row.errorRatio >= minRatio)
     .sort((a, b) => b.errorRatio - a.errorRatio)
 }
+
+/**
+ * Channels most absorbed by protections - throttle + debounce + buffer
+ * counts combined, highest first. These calls never reach `count`
+ * (executions), so without this a heavily-throttled or -debounced channel
+ * looked identical to an idle one anywhere that only reads execution
+ * count/rate.
+ */
+export const mostGated = (
+  rows: ChannelMetricsRow[],
+  count = 5
+): Array<ChannelMetricsRow & {gatedCount: number}> =>
+  rows
+    .map(row => ({
+      ...row,
+      gatedCount: row.throttleCount + row.debounceCount + row.bufferCount
+    }))
+    .filter(row => row.gatedCount > 0)
+    .sort((a, b) => b.gatedCount - a.gatedCount)
+    .slice(0, Math.max(0, count))

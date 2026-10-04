@@ -197,6 +197,19 @@ export interface IO {
   maxWait?: number
   /** Only execute if payload has changed from previous execution */
   detectChanges?: boolean
+  /** Store req/res payload in payload-state so cyre.get()/getPrevious()/
+   *  getHistory() can see it. Default true. Set false to pass the payload
+   *  straight through to the handler without keeping a reference to it -
+   *  for large one-off payloads (documents, buffers, big arrays) a
+   *  channel's own state has no use for after dispatch. Cannot be
+   *  combined with detectChanges, which needs the stored previous
+   *  payload to compare against. */
+  keepPayload?: boolean
+  /** How many previous request payloads to retain for getPrevious()/
+   *  getHistory() (default 1, matching the single "previous payload"
+   *  slot Cyre has always kept). 0 disables it. Ignored when keepPayload
+   *  is false - there is nothing being stored to keep a history of. */
+  history?: number
   /** Enable logging for this action */
   log?: boolean
   /** Priority level for execution during system stress */
@@ -262,6 +275,11 @@ export interface IO {
   _hasScheduling?: boolean
   _processingTalents?: string[]
   _hasChangeDetection?: boolean
+  /** Resolved keepPayload default (compile-pipeline.ts: keepPayload !== false) */
+  _keepPayload?: boolean
+  /** Resolved history length (compile-pipeline.ts: 0 when _keepPayload is
+   *  false, otherwise action.history ?? 1) */
+  _history?: number
 
   // system fields
   _timestamp?: number //latest call to channel timestamp
@@ -278,6 +296,17 @@ export interface IO {
   _executionDuration?: number //how long last execution took
   _executionCount?: number //how many times it has been successfully executed
   _errorCount?: number //error execution count
+  /** Calls routed through the throttle gate, allowed and rejected alike -
+   *  incremented once per call() in app.ts's throttle branch, before the
+   *  gate check runs. */
+  _throttleCount?: number
+  /** Calls routed through the debounce window - incremented once per
+   *  call() in app.ts's debounce branch, whether or not that call is the
+   *  one that ends up settling the window. */
+  _debounceCount?: number
+  /** Calls routed through the buffer window - incremented once per
+   *  call() in app.ts's buffer branch, same shape as _debounceCount. */
+  _bufferCount?: number
 
   /** Allow indexing with string keys for additional properties */
   [key: string]: any

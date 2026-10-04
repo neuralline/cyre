@@ -389,46 +389,34 @@ async function runUseBranchDemo() {
     parent: mainBranch
   })
 
-  const setupResult = analyticsBranch.setup({
-    actions: [
-      {
-        id: 'track-event',
-        throttle: 100,
-        detectChanges: true
-      },
-      {
-        id: 'generate-report',
-        debounce: 2000,
-        priority: {level: 'medium'}
-      }
-    ],
-    subscriptions: [
-      {
-        id: 'track-event',
-        handler: event => {
-          console.log(`   📊 Tracking event: ${event?.type || 'unknown'}`)
-          return {tracked: true, eventType: event?.type}
-        }
-      },
-      {
-        id: 'generate-report',
-        handler: criteria => {
-          console.log(
-            `   📋 Generating report: ${criteria?.period || 'default'}`
-          )
-          return {
-            generated: true,
-            reportId: Date.now(),
-            period: criteria?.period
-          }
-        }
-      }
-    ]
+  const trackAction = analyticsBranch.action({
+    id: 'track-event',
+    throttle: 100,
+    detectChanges: true
+  })
+  const reportAction = analyticsBranch.action({
+    id: 'generate-report',
+    debounce: 2000,
+    priority: {level: 'medium'}
   })
 
+  analyticsBranch.on('track-event', event => {
+    console.log(`   📊 Tracking event: ${event?.type || 'unknown'}`)
+    return {tracked: true, eventType: event?.type}
+  })
+  analyticsBranch.on('generate-report', criteria => {
+    console.log(`   📋 Generating report: ${criteria?.period || 'default'}`)
+    return {
+      generated: true,
+      reportId: Date.now(),
+      period: criteria?.period
+    }
+  })
+
+  const setupOk = trackAction.ok && reportAction.ok
   console.log(
-    `✅ Branch setup: ${setupResult.ok ? 'Success' : 'Failed'} - ${
-      setupResult.message
+    `✅ Branch setup: ${setupOk ? 'Success' : 'Failed'} - ${
+      trackAction.message
     }`
   )
 
@@ -579,7 +567,7 @@ async function runUseBranchDemo() {
   console.log('   • Parent → Child communication (allowed)')
   console.log('   • Sibling communication blocking (security)')
   console.log('   • Branch statistics and management')
-  console.log('   • Bulk setup with actions and subscriptions')
+  console.log('   • Registering actions and handlers on a branch')
   console.log('   • Cascade destruction (React-like unmounting)')
   console.log('   • Error handling and edge cases')
   console.log('   • Performance with 100+ branches')

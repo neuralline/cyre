@@ -9,17 +9,14 @@ import {sensor} from '../components/sensor'
 
 /**
  * Configuration for useCyre hook
+ *
+ * This is exactly the IO channel config useCyre forwards to
+ * instance.action() - the same object you'd pass to cyre.action() directly
+ * (id, throttle, debounce, schema, etc.), including `payload` for an
+ * initial value. Named separately from IO so callers have a
+ * hook-specific type to import without pulling in IO's full surface.
  */
-export interface UseCyreConfig {
-  /** Local channel ID (will be prefixed with branch path if used with branch) */
-  channelId: string
-  /** Initial payload for the channel */
-  payload?: ActionPayload
-  /** Channel name for debugging/display */
-  name?: string
-  /** Channel configuration (throttle, debounce, etc.) */
-  config?: Partial<IO>
-}
+export type UseCyreConfig = IO
 
 /**
  * Return type for useCyre hook
@@ -91,7 +88,7 @@ export interface CyreHook<TPayload = ActionPayload, TResponse = TPayload> {
  */
 export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
   instance: CyreInstance | Branch,
-  config?: IO
+  config?: UseCyreConfig
 ): CyreHook<TPayload, TResponse> => {
   // VALIDATION: Required instance check
   if (!instance) {
@@ -141,6 +138,10 @@ export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
   // Track creation and subscription state
   let isCreated = false
   let isSubscribed = false
+  // How many handlers THIS hook currently has attached, so a partial
+  // unsubscribe() (see on() below) can tell whether isSubscribed should
+  // flip back to false or stay true because another handler remains.
+  let handlerCount = 0
 
   // Create the channel using appropriate method (follows handler-first pattern)
   const createChannel = (): boolean => {
@@ -240,6 +241,7 @@ export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
         const result = cyre.on(channelId, handler as EventHandler)
 
         if (result.ok) {
+          handlerCount++
           isSubscribed = true
           sensor.debug(
             `useCyre subscription created: ${channelId}`,
@@ -247,6 +249,25 @@ export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
             localId,
             'success'
           )
+
+          // cyre.on() already returns a real unsubscribe bound to this
+          // exact (channelId, handler) pair (see cyre-on.ts's
+          // addSingleSubscriber/removeHandler). Wrap it so THIS hook's own
+          // isSubscribed/getStats().subscribed stay accurate if the caller
+          // unsubscribes through the value on() just returned, rather than
+          // only via forget() - without this, isSubscribed would latch
+          // true forever the moment any handler was ever attached.
+          const rawUnsubscribe = result.unsubscribe
+          if (rawUnsubscribe) {
+            result.unsubscribe = () => {
+              const removed = rawUnsubscribe()
+              if (removed) {
+                handlerCount = Math.max(0, handlerCount - 1)
+                isSubscribed = handlerCount > 0
+              }
+              return removed
+            }
+          }
         }
 
         return result
@@ -293,6 +314,7 @@ export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
         if (success) {
           isCreated = false
           isSubscribed = false
+          handlerCount = 0
           sensor.debug(
             `useCyre channel forgotten: ${channelId}`,
             'use-cyre',
