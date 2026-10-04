@@ -7,6 +7,7 @@ import payloadState from '../context/payload-state'
 import {io, stores} from '../context/state'
 import {isValidPath} from '../libs/utils'
 import {compileAction} from '../schema/compile-pipeline'
+import {pathEngine} from '../schema/path-engine'
 
 /*
 
@@ -91,8 +92,19 @@ export const CyreActions = (action: IO): RegistrationResult => {
       // Store compiled action
       io.set(finalAction)
 
+      // Keep the path engine's foreign-key index in sync with this
+      // channel's current path. Always deindex first (a cheap no-op for a
+      // brand-new channel, and correct for a re-registration that changes
+      // or drops its path) so a stale entry never lingers under an old
+      // path once the channel moves. This is what pathPlugin.find/on/
+      // bulkCall search against - without it, wildcard/pattern discovery
+      // silently returns zero matches even though channels.path is set.
+      pathEngine.remove(finalAction.id)
+
       // Validate and index path if provided
       if (finalAction.path && isValidPath(finalAction.path)) {
+        pathEngine.add(finalAction.id, finalAction.path)
+
         // Check if this path corresponds to a branch and update branch metadata
         const branchEntry = stores.branch.get(finalAction.path)
         if (branchEntry) {
@@ -138,7 +150,16 @@ export const CyreActions = (action: IO): RegistrationResult => {
       const features: string[] = []
       if (finalAction._hasProtections) features.push('protections')
       if (finalAction._hasProcessing) {
-        const talentCount = finalAction._processingTalents?.length || 0
+        // FIX: this used to read finalAction._processingTalents?.length,
+        // a field compile-pipeline.ts never actually sets (it only ever
+        // populates _pipeline) - so this count was always 0 regardless of
+        // how many processing talents (schema/condition/selector/
+        // transform/detectChanges/required) the channel actually had.
+        // _pipeline is the real compiled array of processing talent
+        // functions, in the same order they run in - see
+        // claude/cyre-compile-flags.test.ts's "documents a real mismatch"
+        // test, which pinned this down before this fix.
+        const talentCount = finalAction._pipeline?.length || 0
         features.push(`${talentCount} processing talents`)
       }
       if (finalAction._hasScheduling) features.push('scheduling')

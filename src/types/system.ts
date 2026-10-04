@@ -68,6 +68,51 @@ export interface SystemFlags {
   lastComputed: number
 }
 
+// User-tunable system config, exposed via cyre.init({...}) -----------------
+//
+// These are the values that used to live only as hardcoded constants in
+// config/cyre-config.ts (TIMING/BREATHING). They're still the DEFAULTS -
+// see config/cyre-config.ts's `defaultConfig` - but the values consumers
+// actually read at runtime now come from QuantumState.config (via
+// metricsState), so cyre.init(userConfig) can override them per-deployment
+// without touching the shipped source. Only values something in the engine
+// genuinely reads are exposed here - e.g. PROTECTION.MIN_THROTTLE/
+// MIN_DEBOUNCE/MAX_DELAY were deliberately left out because nothing in the
+// current validation path (schema/data-definitions.ts, compile-pipeline.ts)
+// actually consults them; exposing overrides for constants nothing reads
+// would be misleading.
+export interface CyreConfig {
+  breathing: {
+    rates: {min: number; base: number; max: number; recovery: number}
+    stress: {low: number; medium: number; high: number; critical: number}
+    limits: {
+      maxCpu: number
+      maxMemory: number
+      maxEventLoop: number
+      maxCallRate: number
+    }
+  }
+  timing: {
+    // Upper bound on how long TimeKeeper's Quartz engine will ever sleep
+    // between polls when idle/hibernating, and the ceiling a resolved
+    // "check again" delay gets clamped to. Was TIMING.RECUPERATION /
+    // components/cyre-timekeeper.ts's QUARTZ_MAX_POLL.
+    recuperation: number
+  }
+}
+
+// Deep-partial mirror of CyreConfig for what a caller can pass to
+// cyre.init() - every level optional, merged over the current config
+// (itself seeded from CyreConfig defaults) rather than replacing it.
+export interface CyreUserConfig {
+  breathing?: {
+    rates?: Partial<CyreConfig['breathing']['rates']>
+    stress?: Partial<CyreConfig['breathing']['stress']>
+    limits?: Partial<CyreConfig['breathing']['limits']>
+  }
+  timing?: Partial<CyreConfig['timing']>
+}
+
 // Main system state interface with clear authority separation
 export interface QuantumState {
   system: SystemMetrics
@@ -75,6 +120,12 @@ export interface QuantumState {
   performance: PerformanceMetrics
   stress: SystemStress
   lastUpdate: number
+
+  // User-tunable config - defaults from config/cyre-config.ts's
+  // defaultConfig, overridable per-deployment via cyre.init(userConfig).
+  // Lives here (not a separate store) so it's covered by the same single
+  // source of truth as the rest of system state - see metricsState.init().
+  config: CyreConfig
 
   // AUTHORITY SEPARATION:
   inRecuperation: boolean // Breathing system authority (system-wide)

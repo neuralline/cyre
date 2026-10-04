@@ -43,11 +43,10 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
     "types": ["node", "vitest/globals"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "cyre": ["src/index.ts"],
-      "cyre/*": ["src/*"]
+      "@/*": ["./src/*"],
+      "cyre": ["./src/index.ts"],
+      "cyre/*": ["./src/*"]
     }
   },
   "include": ["src/**/*"],

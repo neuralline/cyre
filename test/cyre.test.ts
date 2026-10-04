@@ -135,6 +135,40 @@ describe('Cyre Core Functionality', () => {
       expect(result.ok).toBe(false)
       expect(result.message).toContain('function')
     })
+
+    // FIX (regression test): SubscriptionResponse has always had an
+    // `unsubscribe` field in its type, but addSingleSubscriber in
+    // cyre-on.ts never populated it - there was no supported way to
+    // remove a specific handler once cyre.on() registered it (aside from
+    // cyre.forget()'ing the whole channel). unsubscribe now closes over
+    // this exact (id, handler) pair via removeHandler().
+    it('should return a working unsubscribe function that removes only that handler', async () => {
+      const handler1 = vi.fn()
+      const handler2 = vi.fn()
+
+      const sub1 = cyre.on('test-channel', handler1)
+      const sub2 = cyre.on('test-channel', handler2)
+
+      expect(typeof sub1.unsubscribe).toBe('function')
+      expect(typeof sub2.unsubscribe).toBe('function')
+
+      // Both handlers fire before unsubscribing
+      await cyre.call('test-channel', 'first')
+      expect(handler1).toHaveBeenCalledTimes(1)
+      expect(handler2).toHaveBeenCalledTimes(1)
+
+      const removed = sub1.unsubscribe!()
+      expect(removed).toBe(true)
+
+      // Only handler2 should fire now - handler1 was removed, not the
+      // whole channel
+      await cyre.call('test-channel', 'second')
+      expect(handler1).toHaveBeenCalledTimes(1)
+      expect(handler2).toHaveBeenCalledTimes(2)
+
+      // Calling unsubscribe again is a no-op, not a throw
+      expect(sub1.unsubscribe!()).toBe(false)
+    })
   })
 
   describe('Action Calling', () => {
@@ -233,14 +267,25 @@ describe('Cyre Core Functionality', () => {
         vi.useRealTimers()
       })
 
+      // CYRE v4.7.0: cyre.call() on a debounced channel returns a promise
+      // that only resolves once the debounce window actually fires - it no
+      // longer returns an immediate "scheduled" ack. Awaiting it inline
+      // under fake timers, before the clock advances, hangs forever.
+      // Capture both calls' promises first (they land in the same window
+      // and share one settle promise via context/pending-state.ts), THEN
+      // advance the clock, THEN await.
       it('should debounce rapid calls', async () => {
-        const result1 = await cyre.call('debounced-action')
-        const result2 = await cyre.call('debounced-action')
+        const pending1 = cyre.call('debounced-action')
+        const pending2 = cyre.call('debounced-action')
 
+        await vi.advanceTimersByTimeAsync(500)
+        const [result1, result2] = await Promise.all([pending1, pending2])
+
+        // Both calls landed in the same debounce window, so both share the
+        // SAME real settled result - only one execution actually happened
         expect(result1.ok).toBe(true)
-        expect(result1.message).toContain('debounced')
         expect(result2.ok).toBe(true)
-        expect(result2.message).toContain('debounced')
+        expect(result1).toEqual(result2)
       })
     })
 

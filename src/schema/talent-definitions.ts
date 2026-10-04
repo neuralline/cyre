@@ -199,6 +199,19 @@ export const talentOperators = new Map<string, TalentFunction>([
   [
     'detectChanges',
     (action: IO, payload: any): TalentResult => {
+      // compile-pipeline.ts pushes 'detectChanges' onto the processing
+      // pipeline whenever the field is present at all (Object.entries
+      // sees `detectChanges: false` the same as `detectChanges: true` -
+      // only an OMITTED field skips the pipeline entry). Without this
+      // guard, `cyre.action({id, detectChanges: false})` - a perfectly
+      // reasonable way to toggle the talent off via config - silently
+      // behaved identically to `true` and blocked unchanged payloads
+      // anyway. `required` (above) already guards itself the same way
+      // via `effectiveRequired`; this mirrors that.
+      if (!action.detectChanges) {
+        return {ok: true, data: payload}
+      }
+
       try {
         // Use the built-in hasChanged method from payload-state
         const hasChanges = payloadState.hasChanged(action.id, payload)

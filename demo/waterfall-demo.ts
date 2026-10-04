@@ -1,363 +1,498 @@
-// demo/waterfall-demo.ts
-// Comprehensive demo testing Cyre's waterfall dispatch execution
+// demo/orbital-command.ts
+// Satellite ground-control simulation — a single-file, creative tour of Cyre's
+// dispatch strategies, protections, scheduling and branch system, running
+// against `cyre` as a real npm dependency (see heartbeat.ts for the minimal
+// version of this import pattern).
 
-import {cyre} from '../src/index'
+import {cyre, useBranch, useGroup, log} from 'cyre'
 
 /**
- * Demo: Data Processing Pipeline using Waterfall Execution
- * Each handler processes the result of the previous handler
+ * 🛰️  ORBITAL COMMAND
+ *
+ * Five satellites, three ground stations, one mission control desk.
+ *
+ * Cyre features on display:
+ *  - useBranch            nested "fleet/SAT-n" namespaces, no ID clashes
+ *  - interval + repeat    per-satellite telemetry heartbeats
+ *  - buffer               batched telemetry downlink (window + append)
+ *  - dispatch: waterfall  4-stage command pipeline, errorStrategy: fail-fast
+ *  - throttle             thruster-fire spam protection
+ *  - debounce             operator console keystroke collapsing
+ *  - detectChanges        sensor gate that skips unchanged readings
+ *  - dispatch: race       fastest ground station wins the signal lock
+ *  - useGroup             one call, whole-constellation safe-mode broadcast
+ *  - explicit chaining    anomaly -> escalate -> notify-operator
+ *  - cyre.getMetrics/get  live introspection dashboard
+ *  - lock/pause/resume/shutdown
+ *
+ * Note on "IntraLink": Cyre's docs describe a handler's `{id, payload}`
+ * return value auto-triggering the next channel. That auto-chaining isn't
+ * actually wired up in the current dispatch path, so the escalation chain
+ * below composes channels explicitly with `branch.call(...)` instead —
+ * which does work, and reads just as clearly.
  */
 
-interface UserData {
-  id: number
-  name: string
-  email: string
-  age?: number
-  score?: number
-  level?: string
-  processed?: boolean
+// ─────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────
+
+interface TelemetryPacket {
+  satId: string
+  batteryPct: number
+  fuelPct: number
+  tempC: number
+  altitudeKm: number
+  timestamp: number
 }
 
-async function runWaterfallDemo() {
-  console.log('🌊 CYRE WATERFALL EXECUTION DEMO\n')
+interface AnomalyReport {
+  satId: string
+  reason: 'low-fuel' | 'thermal-drift'
+  severity: 'warning' | 'critical'
+  packet: TelemetryPacket
+}
 
-  // Initialize Cyre
-  await cyre.init()
+type CommandAction = 'adjust-orbit' | 'safe-mode'
 
-  // === DEMO 1: Data Processing Pipeline ===
-  console.log('📊 Demo 1: User Data Processing Pipeline')
-  console.log('='.repeat(50))
+interface CommandRequest {
+  satId: string
+  operatorToken: string
+  action: CommandAction
+  burnSeconds?: number
+}
 
-  // Create action with waterfall dispatch
+const SATELLITE_IDS = ['SAT-1', 'SAT-2', 'SAT-3', 'SAT-4', 'SAT-5']
+const OPERATOR_TOKEN = 'GC-ALPHA-7'
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const jitter = (base: number, spread: number) =>
+  Math.round((base + (Math.random() * 2 - 1) * spread) * 10) / 10
+
+/**
+ * Cyre's internal `bufferState` (used for both `buffer` and `debounce`
+ * channels) stores queued payloads wrapped as `{payload, timestamp}`, but
+ * the `call()` code path that reads them back for dispatch hands that
+ * wrapper straight to your handler instead of unwrapping `.payload` first.
+ * Handlers on buffered/debounced channels can therefore receive
+ * `{payload, timestamp}` instead of the value you actually sent — unwrap
+ * defensively rather than trusting the documented shape.
+ */
+function unwrapBuffered<T>(value: any): T {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'payload' in value &&
+    'timestamp' in value
+  ) {
+    return value.payload as T
+  }
+  return value as T
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1. FLEET — telemetry heartbeats + buffered downlink
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildFleet() {
+  const fleet = useBranch(cyre, {id: 'fleet', name: 'Satellite Fleet'})
+  if (!fleet) throw new Error('Failed to create fleet branch')
+
+  // Shared downlink: batches telemetry packets for 2s (or up to 12 of them)
+  // before dispatching them to ground as one burst.
   cyre.action({
-    id: 'user-processing-pipeline',
+    id: 'downlink/batch-uplink',
+    buffer: {window: 2000, strategy: 'append', maxSize: 12}
+  })
+  cyre.on('downlink/batch-uplink', (raw: unknown) => {
+    const unwrapped = unwrapBuffered<TelemetryPacket | TelemetryPacket[]>(raw)
+    const packets = Array.isArray(unwrapped) ? unwrapped : [unwrapped]
+    const sats = [...new Set(packets.map(p => p.satId))]
+    log.sys(
+      `📡 Downlink burst — ${packets.length} packet(s) relayed (${sats.join(', ')})`
+    )
+    return {relayed: packets.length, satellites: sats}
+  })
+
+  const satellites = SATELLITE_IDS.map((satId, index) => {
+    const sat = useBranch(fleet, {id: satId, name: `Satellite ${satId}`})
+    if (!sat) throw new Error(`Failed to create branch for ${satId}`)
+
+    // Desynced heartbeat, same interval+repeat pattern as heartbeat.ts
+    sat.action({id: 'telemetry', interval: 700 + index * 60, repeat: true})
+
+    // SAT-1 is seeded low on fuel so the anomaly-escalation chain fires early
+    let fuelPct = index === 0 ? jitter(16, 2) : jitter(78, 8)
+    let tempC = jitter(24, 3)
+
+    sat.on('telemetry', () => {
+      fuelPct = Math.max(0, fuelPct - Math.random() * 0.6)
+      tempC = jitter(tempC, 1.2)
+
+      const packet: TelemetryPacket = {
+        satId,
+        batteryPct: jitter(88, 6),
+        fuelPct: Math.round(fuelPct * 10) / 10,
+        tempC: Math.round(tempC * 10) / 10,
+        altitudeKm: jitter(550, 4),
+        timestamp: Date.now()
+      }
+
+      cyre.call('downlink/batch-uplink', packet).catch(() => undefined)
+
+      const fuelBad = packet.fuelPct < 35
+      const tempBad = packet.tempC > 27
+      const critical = packet.fuelPct < 15 || packet.tempC > 30
+      if (critical || fuelBad || tempBad) {
+        cyre
+          .call('alerts/anomaly-detected', {
+            satId,
+            reason: fuelBad ? 'low-fuel' : 'thermal-drift',
+            severity: critical ? 'critical' : 'warning',
+            packet
+          } satisfies AnomalyReport)
+          .catch(() => undefined)
+      }
+
+      return packet
+    })
+
+    // Target for the useGroup broadcast further down
+    sat.action({id: 'safe-mode'})
+    sat.on('safe-mode', (payload: {reason: string}) => {
+      log.warn(`🛡️  ${satId} entering SAFE MODE — ${payload.reason}`)
+      return {satId, mode: 'safe', ackAt: Date.now()}
+    })
+
+    return sat
+  })
+
+  return {fleet, satellites}
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2. MISSION CONTROL — waterfall pipeline, throttle, debounce, detectChanges
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildMissionControl() {
+  const mc = useBranch(cyre, {id: 'mission-control', name: 'Mission Control'})
+  if (!mc) throw new Error('Failed to create mission-control branch')
+
+  // At most one thruster burn every 2s, no matter how many callers ask
+  mc.action({id: 'thruster-fire', throttle: 2000})
+  mc.on('thruster-fire', (cmd: CommandRequest) => {
+    log.success(
+      `🔥 Thruster fired on ${cmd.satId} for ${cmd.burnSeconds ?? 1}s`
+    )
+    return {fired: true, satId: cmd.satId, burnSeconds: cmd.burnSeconds ?? 1}
+  })
+
+  // Rapid keystrokes collapse into a single settled command
+  mc.action({id: 'operator-console', debounce: 250})
+  mc.on('operator-console', (raw: unknown) => {
+    const keystrokes = unwrapBuffered<string>(raw)
+    log.info(`⌨️  Operator command settled: "${keystrokes}"`)
+    return {command: keystrokes}
+  })
+
+  // Only dispatches when the payload actually differs from the last call
+  mc.action({id: 'sensor-check', detectChanges: true})
+  mc.on('sensor-check', (reading: {panelAngleDeg: number}) => {
+    log.debug(`🧭 Solar panel angle accepted: ${reading.panelAngleDeg}°`)
+    return reading
+  })
+
+  // 4-stage waterfall: each handler gets the previous handler's return value.
+  // fail-fast means one thrown error aborts the whole pipeline.
+  mc.action({
+    id: 'execute-command',
     dispatch: 'waterfall',
     errorStrategy: 'fail-fast',
     dispatchTimeout: 5000
   })
 
-  // Handler 1: Validate and normalize data
-  cyre.on('user-processing-pipeline', (userData: UserData) => {
-    console.log('🔍 Handler 1: Validating data...')
-    console.log('   Input:', JSON.stringify(userData, null, 2))
-
-    if (!userData.name || !userData.email) {
-      throw new Error('Missing required fields: name or email')
+  mc.on('execute-command', (cmd: CommandRequest) => {
+    if (cmd.operatorToken !== OPERATOR_TOKEN) {
+      throw new Error(`Unauthorized operator token for ${cmd.satId}`)
     }
+    log.debug(`🔐 Stage 1/4 — authenticated command for ${cmd.satId}`)
+    return {...cmd, authenticated: true}
+  })
 
-    const normalized = {
-      ...userData,
-      name: userData.name.trim().toLowerCase(),
-      email: userData.email.trim().toLowerCase(),
-      age: userData.age || 0
+  mc.on('execute-command', (cmd: CommandRequest & {authenticated: boolean}) => {
+    if (cmd.action === 'adjust-orbit' && (cmd.burnSeconds ?? 0) > 8) {
+      throw new Error(
+        `Burn ${cmd.burnSeconds}s exceeds safety envelope for ${cmd.satId}`
+      )
     }
-
-    console.log('   ✅ Validation complete')
-    console.log('   Output:', JSON.stringify(normalized, null, 2))
-    return normalized
+    log.debug(`✅ Stage 2/4 — validated ${cmd.action} for ${cmd.satId}`)
+    return {...cmd, validated: true}
   })
 
-  // Handler 2: Calculate user score based on age
-  cyre.on('user-processing-pipeline', (userData: UserData) => {
-    console.log('\n🧮 Handler 2: Calculating score...')
-    console.log('   Input:', JSON.stringify(userData, null, 2))
-
-    const score = Math.max(0, 100 - (userData.age || 0) * 2)
-    const withScore = {
-      ...userData,
-      score
+  mc.on('execute-command', async (cmd: any) => {
+    log.debug(`🛰️  Stage 3/4 — scheduling ${cmd.action} for ${cmd.satId}`)
+    if (cmd.action === 'adjust-orbit') {
+      const thruster = await mc.call('thruster-fire', cmd)
+      return {...cmd, thruster: thruster.payload}
     }
-
-    console.log('   ✅ Score calculation complete')
-    console.log('   Output:', JSON.stringify(withScore, null, 2))
-    return withScore
+    return {...cmd, scheduled: true}
   })
 
-  // Handler 3: Determine user level based on score
-  cyre.on('user-processing-pipeline', (userData: UserData) => {
-    console.log('\n🏆 Handler 3: Determining level...')
-    console.log('   Input:', JSON.stringify(userData, null, 2))
-
-    let level: string
-    const score = userData.score || 0
-
-    if (score >= 80) level = 'expert'
-    else if (score >= 60) level = 'intermediate'
-    else if (score >= 40) level = 'beginner'
-    else level = 'novice'
-
-    const withLevel = {
-      ...userData,
-      level,
-      processed: true
-    }
-
-    console.log('   ✅ Level determination complete')
-    console.log('   Output:', JSON.stringify(withLevel, null, 2))
-    return withLevel
-  })
-
-  // Test the waterfall pipeline
-  const testUser: UserData = {
-    id: 1,
-    name: '  John Doe  ',
-    email: '  JOHN@EXAMPLE.COM  ',
-    age: 25
-  }
-
-  console.log('\n🚀 Executing waterfall pipeline...')
-  console.log('Initial input:', JSON.stringify(testUser, null, 2))
-  console.log('\n' + '─'.repeat(50))
-
-  const result = await cyre.call('user-processing-pipeline', testUser)
-
-  console.log('\n' + '─'.repeat(50))
-  console.log('🎯 Final Result:')
-  console.log('Success:', result.ok)
-  console.log('Final Data:', JSON.stringify(result.payload, null, 2))
-  console.log('Execution Time:', result.metadata?.executionTime + 'ms')
-  console.log('Handlers Executed:', result.metadata?.handlerCount)
-
-  // === DEMO 2: Mathematical Pipeline ===
-  console.log('\n\n🧮 Demo 2: Mathematical Operations Pipeline')
-  console.log('='.repeat(50))
-
-  cyre.action({
-    id: 'math-pipeline',
-    dispatch: 'waterfall',
-    errorStrategy: 'fail-fast'
-  })
-
-  // Handler 1: Add 10
-  cyre.on('math-pipeline', (num: number) => {
-    console.log(`➕ Add 10: ${num} + 10 = ${num + 10}`)
-    return num + 10
-  })
-
-  // Handler 2: Multiply by 2
-  cyre.on('math-pipeline', (num: number) => {
-    console.log(`✖️  Multiply by 2: ${num} × 2 = ${num * 2}`)
-    return num * 2
-  })
-
-  // Handler 3: Subtract 5
-  cyre.on('math-pipeline', (num: number) => {
-    console.log(`➖ Subtract 5: ${num} - 5 = ${num - 5}`)
-    return num - 5
-  })
-
-  // Handler 4: Square the result
-  cyre.on('math-pipeline', (num: number) => {
-    console.log(`🔢 Square: ${num}² = ${num * num}`)
-    return num * num
-  })
-
-  console.log('\n🚀 Starting with number: 5')
-  console.log('Expected flow: 5 → 15 → 30 → 25 → 625')
-  console.log('\n' + '─'.repeat(30))
-
-  const mathResult = await cyre.call('math-pipeline', 5)
-
-  console.log('─'.repeat(30))
-  console.log('🎯 Mathematical Pipeline Result:', mathResult.payload)
-  console.log('Expected: 625, Got:', mathResult.payload)
-  console.log('✅ Test', mathResult.payload === 625 ? 'PASSED' : 'FAILED')
-
-  // === DEMO 3: Error Handling in Waterfall ===
-  console.log('\n\n❌ Demo 3: Error Handling with Fail-Fast')
-  console.log('='.repeat(50))
-
-  cyre.action({
-    id: 'error-pipeline',
-    dispatch: 'waterfall',
-    errorStrategy: 'fail-fast'
-  })
-
-  // Handler 1: Success
-  cyre.on('error-pipeline', (data: any) => {
-    console.log('✅ Handler 1: Processing successfully...')
-    return {...data, step1: true}
-  })
-
-  // Handler 2: Will throw error
-  cyre.on('error-pipeline', (data: any) => {
-    console.log('❌ Handler 2: About to throw error...')
-    throw new Error('Simulated processing error')
-  })
-
-  // Handler 3: Should never execute due to fail-fast
-  cyre.on('error-pipeline', (data: any) => {
-    console.log('🚫 Handler 3: This should not execute')
-    return {...data, step3: true}
-  })
-
-  console.log('\n🚀 Testing error handling...')
-
-  const errorResult = await cyre.call('error-pipeline', {test: true})
-
-  console.log('🎯 Error Result:')
-  console.log('Success:', errorResult.ok)
-  console.log('Error Message:', errorResult.message)
-  console.log('Payload:', errorResult.payload)
-
-  // === DEMO 4: Performance Comparison ===
-  console.log('\n\n⚡ Demo 4: Performance Comparison')
-  console.log('='.repeat(50))
-
-  // Parallel version for comparison
-  cyre.action({
-    id: 'parallel-test',
-    dispatch: 'parallel'
-  })
-
-  cyre.on('parallel-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 1
-  })
-
-  cyre.on('parallel-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 2
-  })
-
-  cyre.on('parallel-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 3
-  })
-
-  // Waterfall version
-  cyre.action({
-    id: 'waterfall-test',
-    dispatch: 'waterfall'
-  })
-
-  cyre.on('waterfall-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 1
-  })
-
-  cyre.on('waterfall-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 2
-  })
-
-  cyre.on('waterfall-test', async (num: number) => {
-    await new Promise(resolve => setTimeout(resolve, 100))
-    return num + 3
-  })
-
-  console.log('Testing parallel vs waterfall execution times...')
-
-  const parallelStart = Date.now()
-  const parallelResult = await cyre.call('parallel-test', 10)
-  const parallelTime = Date.now() - parallelStart
-
-  const waterfallStart = Date.now()
-  const waterfallResult = await cyre.call('waterfall-test', 10)
-  const waterfallTime = Date.now() - waterfallStart
-
-  console.log('\n📊 Performance Results:')
-  console.log(
-    `Parallel: ${parallelTime}ms, Result: ${JSON.stringify(
-      parallelResult.payload
-    )}`
-  )
-  console.log(
-    `Waterfall: ${waterfallTime}ms, Result: ${waterfallResult.payload}`
-  )
-  console.log(
-    `Waterfall should be ~3x slower: ${
-      waterfallTime >= parallelTime * 2.5 ? '✅' : '❌'
-    }`
-  )
-
-  // === DEMO 5: Complex Data Transformation ===
-  console.log('\n\n🔄 Demo 5: Complex Data Transformation Chain')
-  console.log('='.repeat(50))
-
-  cyre.action({
-    id: 'data-transform',
-    dispatch: 'waterfall'
-  })
-
-  // Parse CSV-like string
-  cyre.on('data-transform', (csvString: string) => {
-    console.log('📝 Step 1: Parsing CSV data...')
-    const lines = csvString.trim().split('\n')
-    const headers = lines[0].split(',')
-    const data = lines.slice(1).map(line => {
-      const values = line.split(',')
-      return headers.reduce((obj, header, index) => {
-        obj[header.trim()] = values[index]?.trim()
-        return obj
-      }, {} as any)
-    })
-    console.log(`   Parsed ${data.length} records`)
-    return data
-  })
-
-  // Filter valid records
-  cyre.on('data-transform', (records: any[]) => {
-    console.log('🔍 Step 2: Filtering valid records...')
-    const valid = records.filter(
-      record => record.name && record.age && !isNaN(parseInt(record.age))
+  mc.on('execute-command', (cmd: any) => {
+    log.success(
+      `📓 Stage 4/4 — journal entry recorded for ${cmd.satId}: ${cmd.action}`
     )
-    console.log(`   ${valid.length}/${records.length} records are valid`)
-    return valid
+    return {...cmd, confirmed: true, journalledAt: Date.now()}
   })
 
-  // Convert age to number and add categories
-  cyre.on('data-transform', (records: any[]) => {
-    console.log('🏷️  Step 3: Adding categories...')
-    const categorized = records.map(record => ({
-      ...record,
-      age: parseInt(record.age),
-      category: parseInt(record.age) < 18 ? 'minor' : 'adult'
-    }))
-    console.log(`   Added categories to ${categorized.length} records`)
-    return categorized
-  })
-
-  // Generate summary
-  cyre.on('data-transform', (records: any[]) => {
-    console.log('📊 Step 4: Generating summary...')
-    const summary = {
-      total: records.length,
-      adults: records.filter(r => r.category === 'adult').length,
-      minors: records.filter(r => r.category === 'minor').length,
-      averageAge: records.reduce((sum, r) => sum + r.age, 0) / records.length,
-      records
-    }
-    console.log(`   Summary generated for ${summary.total} records`)
-    return summary
-  })
-
-  const csvData = `name,age,city
-John Doe,25,New York
-Jane Smith,17,Los Angeles  
-Bob Wilson,30,Chicago
-Alice Brown,16,Houston
-Charlie Davis,35,Phoenix`
-
-  console.log('\n🚀 Processing CSV data through transformation chain...')
-  console.log('Input CSV:')
-  console.log(csvData)
-  console.log('\n' + '─'.repeat(40))
-
-  const transformResult = await cyre.call('data-transform', csvData)
-
-  console.log('─'.repeat(40))
-  console.log('🎯 Transformation Result:')
-  console.log(JSON.stringify(transformResult.payload, null, 2))
-
-  console.log('\n✨ Waterfall Demo Complete!')
-  console.log('Key observations:')
-  console.log('• Each handler receives the output of the previous handler')
-  console.log('• Data flows sequentially through the pipeline')
-  console.log('• Errors stop the entire pipeline (fail-fast)')
-  console.log('• Perfect for data transformation chains')
-  console.log('• Execution time is cumulative (slower than parallel)')
+  return mc
 }
 
-// Run the demo
-runWaterfallDemo().catch(console.error)
+// ─────────────────────────────────────────────────────────────────────────
+// 3. ALERTS — explicit escalation chain + race-dispatch ground stations
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildAlertsAndGroundStations() {
+  const ops = useBranch(cyre, {id: 'alerts', name: 'Alert Escalation'})
+  if (!ops) throw new Error('Failed to create alerts branch')
+
+  ops.action({id: 'anomaly-detected'})
+  ops.on('anomaly-detected', async (report: AnomalyReport) => {
+    log.warn(
+      `⚠️  Anomaly on ${report.satId}: ${report.reason} (${report.severity})`
+    )
+    if (report.severity === 'critical') {
+      await ops.call('escalate', report)
+      return {handled: 'escalated', report}
+    }
+    return {handled: 'logged-as-warning', report}
+  })
+
+  ops.action({id: 'escalate'})
+  ops.on('escalate', async (report: AnomalyReport) => {
+    log.critical(
+      `🚨 ESCALATION — ${report.satId} requires immediate attention (${report.reason})`
+    )
+    await ops.call('notify-operator', report)
+    return {escalated: true, report}
+  })
+
+  ops.action({id: 'notify-operator'})
+  ops.on('notify-operator', (report: AnomalyReport) => {
+    log.critical(
+      `📟 PAGE SENT to duty operator: ${report.satId} — ${report.reason}. Ack required.`
+    )
+    return {paged: true, satId: report.satId, at: Date.now()}
+  })
+
+  // Three ground stations race to acquire signal lock — fastest wins
+  cyre.action({
+    id: 'ground/acquire-signal',
+    dispatch: 'race',
+    dispatchTimeout: 3000
+  })
+  const stations = [
+    {name: 'Svalbard', baseLatency: 40},
+    {name: 'Alice Springs', baseLatency: 65},
+    {name: 'Kiruna', baseLatency: 55}
+  ]
+  stations.forEach(station => {
+    cyre.on('ground/acquire-signal', async (satId: string) => {
+      const latencyMs = Math.round(station.baseLatency + Math.random() * 80)
+      await new Promise(resolve => setTimeout(resolve, latencyMs))
+      return {station: station.name, latencyMs, satId}
+    })
+  })
+
+  return ops
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 4. FLEET OPS — one call, whole constellation (useGroup)
+// ─────────────────────────────────────────────────────────────────────────
+
+function buildFleetOps(
+  satellites: ReturnType<typeof buildFleet>['satellites']
+) {
+  const safeModeGroup = useGroup(
+    satellites.map(sat => ({
+      id: sat.path(),
+      call: (payload: any) => sat.call('safe-mode', payload)
+    })),
+    {
+      name: 'constellation-safe-mode',
+      strategy: 'parallel',
+      errorStrategy: 'continue',
+      timeout: 4000
+    }
+  )
+
+  return async (reason: string) => {
+    log.sys(
+      `🛑 Broadcasting SAFE MODE to entire constellation — reason: ${reason}`
+    )
+    const result = await safeModeGroup.call({reason, triggeredAt: Date.now()})
+    log.sys(
+      `🛑 Broadcast complete: ${result.metadata?.successful}/${result.metadata?.channelCount} satellites acknowledged`
+    )
+    return result
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 5. DASHBOARD — cyre.getMetrics() / cyre.get()
+// ─────────────────────────────────────────────────────────────────────────
+
+function printDashboard() {
+  const metrics: any = cyre.getMetrics()
+
+  console.log('\n' + '═'.repeat(64))
+  console.log('🛰️   O R B I T A L   C O M M A N D   —   D A S H B O A R D')
+  console.log('═'.repeat(64))
+  console.log(`Channels registered   : ${metrics.stores?.channels ?? 'n/a'}`)
+  console.log(`Active subscribers    : ${metrics.stores?.subscribers ?? 'n/a'}`)
+  console.log(
+    `Active timers         : ${metrics.stores?.activeFormations ?? 'n/a'}`
+  )
+  console.log(
+    `System healthy        : ${metrics.system?.health?.isHealthy ?? 'n/a'}`
+  )
+  console.log(`System uptime         : ${metrics.system?.uptime ?? 'n/a'}ms`)
+
+  console.log('\nSatellite telemetry snapshot (from cyre.get):')
+  SATELLITE_IDS.forEach(satId => {
+    const state: any = cyre.get(`fleet/${satId}/telemetry`)
+    const packet = state?.res?.payload
+    if (packet) {
+      console.log(
+        `  ${satId.padEnd(6)} fuel:${String(packet.fuelPct).padStart(5)}%  temp:${String(
+          packet.tempC
+        ).padStart(5)}°C  alt:${packet.altitudeKm}km`
+      )
+    } else {
+      console.log(`  ${satId.padEnd(6)} no telemetry captured yet`)
+    }
+  })
+  console.log('═'.repeat(64) + '\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 6. MISSION TIMELINE
+// ─────────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log('\n' + '='.repeat(64))
+  console.log('   C.Y.R.E   O R B I T A L   C O M M A N D')
+  console.log('   Ground Control — 5 satellites, 3 ground stations')
+  console.log('='.repeat(64))
+
+  const init = await cyre.init()
+  log.sys(`Cyre initialized: ${init.message}`)
+
+  // Registration must complete before cyre.lock()
+  buildAlertsAndGroundStations()
+  const {satellites} = buildFleet()
+  const missionControl = buildMissionControl()
+  const triggerSafeMode = buildFleetOps(satellites)
+
+  cyre.lock()
+
+  // Kick off every satellite's repeating telemetry heartbeat (same call-once
+  // pattern as heartbeat.ts's `cyre.call('heartbeat://', 1)`)
+  for (const sat of satellites) await sat.call('telemetry')
+  console.log(`\n🛰️  Telemetry live for: ${SATELLITE_IDS.join(', ')}\n`)
+
+  console.log('── 1. Mission command pipeline (dispatch: waterfall) ──')
+  const good = await missionControl.call('execute-command', {
+    satId: 'SAT-2',
+    operatorToken: OPERATOR_TOKEN,
+    action: 'adjust-orbit',
+    burnSeconds: 4
+  })
+  console.log(`   ✅ Success case → ok:${good.ok} — ${good.message}`)
+
+  const badToken = await missionControl.call('execute-command', {
+    satId: 'SAT-3',
+    operatorToken: 'WRONG-TOKEN',
+    action: 'safe-mode'
+  })
+  console.log(`   ❌ Bad token case → ok:${badToken.ok} — ${badToken.message}`)
+
+  const badBurn = await missionControl.call('execute-command', {
+    satId: 'SAT-1',
+    operatorToken: OPERATOR_TOKEN,
+    action: 'adjust-orbit',
+    burnSeconds: 20
+  })
+  console.log(`   ❌ Unsafe burn case → ok:${badBurn.ok} — ${badBurn.message}`)
+
+  console.log('\n── 2. Thruster throttle (max 1 fire / 2s) ──')
+  // The SAT-2 orbit adjustment above already fired 'thruster-fire' once
+  // (same shared channel, throttled per-channel not per-satellite), so we
+  // wait out that window first — otherwise both calls below would be
+  // throttled and the demo wouldn't show the "first one succeeds" half.
+  await sleep(2100)
+  const fire1 = await missionControl.call('thruster-fire', {
+    satId: 'SAT-4',
+    operatorToken: OPERATOR_TOKEN,
+    action: 'adjust-orbit',
+    burnSeconds: 2
+  })
+  console.log(`   Fire #1 → ok:${fire1.ok} — ${fire1.message}`)
+  const fire2 = await missionControl.call('thruster-fire', {
+    satId: 'SAT-4',
+    operatorToken: OPERATOR_TOKEN,
+    action: 'adjust-orbit',
+    burnSeconds: 2
+  })
+  console.log(
+    `   Fire #2 (immediately after) → ok:${fire2.ok} — ${fire2.message}`
+  )
+
+  console.log('\n── 3. Operator console debounce (250ms) ──')
+  for (const partial of [
+    'S',
+    'SA',
+    'SAF',
+    'SAFE',
+    'SAFE ',
+    'SAFE M',
+    'SAFE MODE SAT-5'
+  ]) {
+    missionControl.call('operator-console', partial)
+    await sleep(30)
+  }
+  await sleep(400)
+
+  console.log('\n── 4. detectChanges sensor gate ──')
+  const r1 = await missionControl.call('sensor-check', {panelAngleDeg: 42})
+  console.log(`   Reading #1 (42°) → ok:${r1.ok}`)
+  const r2 = await missionControl.call('sensor-check', {panelAngleDeg: 42})
+  console.log(
+    `   Reading #2 (42° again, unchanged) → ok:${r2.ok} — ${r2.message}`
+  )
+  const r3 = await missionControl.call('sensor-check', {panelAngleDeg: 47})
+  console.log(`   Reading #3 (47°, changed) → ok:${r3.ok}`)
+
+  console.log('\n── 5. Ground station race (dispatch: race) ──')
+  const race = await cyre.call('ground/acquire-signal', 'SAT-5')
+  console.log(
+    `   🏁 Winner: ${race.payload?.station} locked ${race.payload?.satId} in ${race.payload?.latencyMs}ms`
+  )
+
+  console.log('\n── 6. Constellation-wide broadcast (useGroup) ──')
+  await triggerSafeMode('scheduled maintenance drill')
+
+  console.log(
+    '\n── 7. Live telemetry running (watch for downlink bursts & anomaly escalation) ──'
+  )
+  await sleep(5000)
+
+  printDashboard()
+
+  console.log('🛑 Mission complete — shutting down Cyre...')
+  cyre.shutdown() // note: this calls process.exit(0) internally
+}
+
+main().catch(error => {
+  console.error('❌ Orbital Command demo failed:', error)
+  process.exit(1)
+})

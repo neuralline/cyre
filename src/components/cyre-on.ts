@@ -13,10 +13,10 @@ import type {
 } from '../types/core'
 import {sensor} from './sensor'
 
-/* 
+/*
 
       C.Y.R.E - O.N
-      
+
       Pure handler management system:
       1. Subscribe to ACTION IDs, not types
       2. Store handlers independently of action existence
@@ -97,9 +97,6 @@ const preAnalyzeExecution = (
   return executionConfig
 }
 
-// Enhanced handler storage - now supports arrays
-const handlerStorage = new Map<string, EventHandler[]>()
-
 /**
  * Validate subscriber configuration
  */
@@ -132,7 +129,7 @@ const validateSubscriber = (
   return {
     ok: true,
     message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
-    subscriber: {id: id.trim(), handler: handler}
+    subscriber: {id: id.trim(), handlers: [handler]}
   }
 }
 
@@ -156,22 +153,22 @@ const addSingleSubscriber = (
     const {subscriber} = validation
 
     // Get or create handler array for this channel
-    const existingHandlers = handlerStorage.get(subscriber.id) || []
+    const existingHandlers = subscribers.get(subscriber.id)?.handlers || []
     const newHandlerCount = existingHandlers.length + 1
 
     // Check for duplicate handlers
+
     if (existingHandlers.includes(handler)) {
-      const duplicateMessage = `DUPLICATE HANDLER DETECTED: Identical handler already registered for channel "${subscriber.id}"`
-      sensor.warn(duplicateMessage)
-      return {
-        ok: false,
-        message: 'Duplicate handler registration prevented'
-      }
+      sensor.warn(
+        `DUPLICATE HANDLER DETECTED: identical handler already registered for channel "${subscriber.id}"`
+      )
+      return {ok: false, message: 'Duplicate handler registration prevented'}
     }
 
-    // Add new handler to array
-    const updatedHandlers = [...existingHandlers, handler]
-    handlerStorage.set(subscriber.id, updatedHandlers)
+    subscribers.set({
+      id: subscriber.id,
+      handlers: [...existingHandlers, handler]
+    })
 
     // OPTIMIZATION: Update action configuration if it exists
     const currentAction = io.get(subscriber.id)
@@ -194,12 +191,21 @@ const addSingleSubscriber = (
 
     // Update legacy subscribers map for backward compatibility
     if (newHandlerCount === 1) {
-      subscribers.add(subscriber)
+      subscribers.set(subscriber)
     }
 
     return {
       ok: true,
       message: MSG.SUBSCRIPTION_SUCCESS_SINGLE,
+      // Previously always undefined - SubscriptionResponse has always had
+      // this field in its type, but nothing ever populated it, so callers
+      // had no supported way to remove a specific handler once cyre.on()
+      // registered it (see removeHandler() below, which this now exposes
+      // directly rather than requiring callers to reach into
+      // ../components/cyre-on internals themselves). Bound to this exact
+      // (id, handler) pair, so calling it only ever removes this one
+      // subscription, not every handler on the channel.
+      unsubscribe: () => removeHandler(subscriber.id, handler),
       metadata: {
         handlerCount: newHandlerCount,
         executionOperator: currentAction
@@ -266,22 +272,18 @@ const addMultipleSubscribers = (
  * Optimize existing action when handlers change
  */
 export const optimizeActionIfExists = (actionId: string): void => {
-  const handlers = handlerStorage.get(actionId)
+  const handlers = subscribers.get(actionId)?.handlers
   const action = io.get(actionId)
-
   if (action && handlers) {
-    const executionConfig = preAnalyzeExecution(action, handlers.length)
-    const optimizedAction = {...action, ...executionConfig}
-    io.set(optimizedAction)
+    io.set({...action, ...preAnalyzeExecution(action, handlers.length)})
   }
 }
 
 /**
  * Get handlers for execution (used by dispatch)
  */
-export const getHandlers = (actionId: string): EventHandler[] => {
-  return handlerStorage.get(actionId) || []
-}
+export const getHandlers = (actionId: string): EventHandler[] =>
+  subscribers.get(actionId)?.handlers || []
 
 /**
  * Remove handler and re-optimize execution strategy
@@ -290,24 +292,15 @@ export const removeHandler = (
   actionId: string,
   handler: EventHandler
 ): boolean => {
-  const handlers = handlerStorage.get(actionId)
-  if (!handlers) return false
-
-  const index = handlers.indexOf(handler)
+  const existing = subscribers.get(actionId)
+  if (!existing) return false
+  const index = existing.handlers.indexOf(handler)
   if (index === -1) return false
-
-  // Remove handler
-  const updatedHandlers = handlers.filter((_, i) => i !== index)
-
-  if (updatedHandlers.length === 0) {
-    handlerStorage.delete(actionId)
-  } else {
-    handlerStorage.set(actionId, updatedHandlers)
-  }
-
-  // Re-optimize execution configuration if action exists
+  const updated = existing.handlers.filter((_, i) => i !== index)
+  updated.length === 0
+    ? subscribers.forget(actionId)
+    : subscribers.set({id: actionId, handlers: updated})
   optimizeActionIfExists(actionId)
-
   return true
 }
 
@@ -316,7 +309,7 @@ export const removeHandler = (
  */
 export const getHandlerStats = (actionId?: string) => {
   if (actionId) {
-    const handlers = handlerStorage.get(actionId) || []
+    const handlers = subscribers.get(actionId)?.handlers ?? []
     const action = io.get(actionId)
     return {
       actionId,
@@ -329,11 +322,11 @@ export const getHandlerStats = (actionId?: string) => {
   }
 
   // Return stats for all actions
-  const stats = Array.from(handlerStorage.entries()).map(([id, handlers]) => {
-    const action = io.get(id)
+  const stats = subscribers.getAll().map(subscriber => {
+    const action = io.get(subscriber.id)
     return {
-      actionId: id,
-      handlerCount: handlers.length,
+      actionId: subscriber.id,
+      handlerCount: subscriber.handlers.length,
       executionOperator: action?._executionOperator,
       errorStrategy: action?._errorStrategy,
       collectStrategy: action?._collectStrategy,

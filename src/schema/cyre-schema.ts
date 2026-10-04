@@ -7,7 +7,7 @@ import {sensor} from '../components/sensor'
 /*
 
       C.Y.R.E - S.C.H.E.M.A
-      
+
       Smart schema validation system:
       - Concise functional API with pipe support
       - Direct action integration
@@ -558,29 +558,77 @@ export const timestamp = (): NumberSchema => number().positive()
 export const enumSchema = enums
 
 // Performance optimization - fast validator bypass
-const fastValidatorCache = new Map<string, Schema>()
+// Cache is keyed by the schema function itself, not its source text. The
+// old `Map<string, Schema>` keyed by `schema.toString()` collided whenever
+// two schemas were built from the same call shape but different arguments
+// (e.g. string().minLength(3) vs string().minLength(10)) - closures with
+// different captured values but identical literal source text produce the
+// same toString() output, so the second schema silently got back the first
+// one's cached (wrong) validator. A WeakMap keyed by the schema object
+// itself can't collide this way - every schema function is a distinct
+// object - and lets unused schemas be garbage-collected once nothing else
+// references them, which a plain Map with string keys never would.
+const fastValidatorCache = new WeakMap<Schema<any>, Schema<any>>()
 
-export const fast = <T>(schema: Schema<T>): Schema<T> => {
-  const cacheKey = schema.toString()
-
-  if (fastValidatorCache.has(cacheKey)) {
-    return fastValidatorCache.get(cacheKey) as Schema<T>
+export const fast = <T>(
+  schema: Schema<T>,
+  options: {skipValidationInProduction?: boolean} = {}
+): Schema<T> => {
+  const cached = fastValidatorCache.get(schema)
+  if (cached) {
+    return cached as Schema<T>
   }
 
+  // Skipping validation entirely in production used to be the unconditional
+  // default here (`if (process.env.NODE_ENV === 'production') return {ok:
+  // true, data: value}`), which silently turned "same checks, less
+  // overhead" into "no checks at all" for anyone reaching for fast() as
+  // advertised - and did so with no way to opt out. It's now opt-in only:
+  // pass `{skipValidationInProduction: true}` if that's genuinely what's
+  // wanted. The default just validates normally through the cached wrapper,
+  // which still saves the cost of re-wrapping the same schema repeatedly.
   const fastValidator = createSchema<T>((value): ValidationResult<T> => {
-    // For fast path, skip complex validations in production
-    if (process.env.NODE_ENV === 'production') {
+    if (
+      options.skipValidationInProduction &&
+      process.env.NODE_ENV === 'production'
+    ) {
       return {ok: true, data: value as T}
     }
     return schema(value)
   })
 
-  fastValidatorCache.set(cacheKey, fastValidator)
+  fastValidatorCache.set(schema, fastValidator)
   return fastValidator
 }
 
 // Memoization for expensive validations
-const memoCache = new WeakMap<Schema, Map<any, ValidationResult<any>>>()
+// Cached by a structural key, not object identity. The old implementation
+// used `cache.has(value)`/`cache.get(value)` with the raw payload itself as
+// the Map key - for object/array payloads that's reference identity, so
+// mutating the same object reference between two calls (a common pattern
+// with buffered/reused payload objects - see the buffer feature elsewhere
+// in this codebase) returned the first call's now-stale cached result
+// instead of re-validating the object's current contents. Primitives are
+// still used directly as part of the key (safe - they're immutable, so
+// identity and structural equality coincide); objects/arrays are
+// JSON.stringify'd instead, so a content change produces a different key
+// even for the exact same object reference. Values that can't be
+// stringified (circular references, BigInt, functions as top-level
+// payloads, etc.) skip the cache entirely and just validate directly,
+// rather than throwing.
+const memoCache = new WeakMap<Schema<any>, Map<string, ValidationResult<any>>>()
+const MEMO_CACHE_MAX_SIZE = 500
+
+const memoKeyFor = (value: unknown): string | undefined => {
+  if (value === null || typeof value !== 'object') {
+    return `${typeof value}:${String(value)}`
+  }
+  try {
+    return `json:${JSON.stringify(value)}`
+  } catch {
+    return undefined
+  }
+}
 
 export const memoize = <T>(schema: Schema<T>): Schema<T> => {
   let cache = memoCache.get(schema)
@@ -588,14 +636,27 @@ export const memoize = <T>(schema: Schema<T>): Schema<T> => {
     cache = new Map()
     memoCache.set(schema, cache)
   }
+  const boundCache = cache
 
   return createSchema<T>((value): ValidationResult<T> => {
-    if (cache!.has(value)) {
-      return cache!.get(value)! as ValidationResult<T>
+    const key = memoKeyFor(value)
+    if (key === undefined) {
+      return schema(value)
+    }
+
+    const existing = boundCache.get(key)
+    if (existing) {
+      return existing
     }
 
     const result = schema(value)
-    cache!.set(value, result)
+
+    if (boundCache.size >= MEMO_CACHE_MAX_SIZE) {
+      const firstKey = boundCache.keys().next().value
+      if (firstKey !== undefined) boundCache.delete(firstKey)
+    }
+    boundCache.set(key, result)
+
     return result
   })
 }

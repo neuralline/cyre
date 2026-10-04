@@ -2,30 +2,41 @@
 // Metrics state with breathing system integration and centralized state management
 
 import {sensor} from '../components/sensor'
-import {BREATHING, defaultMetrics, MSG} from '../config/cyre-config'
+import {defaultMetrics, MSG} from '../config/cyre-config'
 import type {
   BreathingState,
   QuantumState as MetricsState,
   PerformanceMetrics,
   SystemMetrics,
   SystemStress,
-  SystemFlags
+  SystemFlags,
+  CyreConfig,
+  CyreUserConfig
 } from '../types/system'
 import type {Priority, StateKey} from '../types/core'
 import {memoize} from '../libs/utils'
-import {io, subscribers, timeline} from './state'
+import {io, subscribers, timeline, callTracker} from './state'
+import {scheduleState} from './schedule-state'
+import {orchestrationState} from './orchestration-state'
 import {createStore} from './create-store'
+import {systemMonitor} from './system-monitor'
 
 /*
 
       C.Y.R.E - M.E.T.R.I.C.S - S.T.A.T.E
-      
+
       Centralized metrics state management with breathing authority:
       - Single source of truth via stores.quantum
       - Breathing system has authority over system flags
       - Clean separation: hibernating (TimeKeeper) vs recuperating (system)
       - Provides .getMetrics() API for cyre.getMetrics()
       - Pre-computed flags for hot path optimization
+      - Aware of scheduleState/orchestrationState (schedule tasks and
+        orchestrations), not just io/subscribers/timeline - the scheduler
+        and orchestration engine each keep their own domain-level registry
+        (see context/schedule-state.ts, context/orchestration-state.ts)
+        alongside the shared TimeKeeper timeline, so system-wide metrics
+        report their counts too instead of only knowing about raw timers
 
 */
 
@@ -34,24 +45,32 @@ const metricsStore = createStore<MetricsState>()
 metricsStore.set('quantum', defaultMetrics)
 
 // Memoized selectors for performance
+//
+// `limits` is now a real parameter (was a direct BREATHING.LIMITS read)
+// so this stays correct once limits are user-configurable via
+// cyre.init(userConfig) - the memoize cache is keyed off every argument,
+// so a config change naturally produces a fresh cache entry instead of
+// silently returning a stress calculation based on stale limits for the
+// same (metrics, performance) pair.
 const getStressLevel = memoize(
-  (metrics: SystemMetrics, performance: PerformanceMetrics): SystemStress => {
+  (
+    metrics: SystemMetrics,
+    performance: PerformanceMetrics,
+    limits: CyreConfig['breathing']['limits']
+  ): SystemStress => {
     // Calculate stress from system metrics with improved sensitivity
-    const cpuStress = Math.min(
-      1,
-      (metrics.cpu || 0) / (BREATHING.LIMITS.MAX_CPU * 0.7)
-    )
+    const cpuStress = Math.min(1, (metrics.cpu || 0) / (limits.maxCpu * 0.7))
     const memoryStress = Math.min(
       1,
-      (metrics.memory || 0) / (BREATHING.LIMITS.MAX_MEMORY * 0.7)
+      (metrics.memory || 0) / (limits.maxMemory * 0.7)
     )
     const eventLoopStress = Math.min(
       1,
-      (metrics.eventLoop || 0) / (BREATHING.LIMITS.MAX_EVENT_LOOP * 0.7)
+      (metrics.eventLoop || 0) / (limits.maxEventLoop * 0.7)
     )
     const callRateStress = Math.min(
       1,
-      (performance.callsPerSecond || 0) / (BREATHING.LIMITS.MAX_CALL_RATE * 0.7)
+      (performance.callsPerSecond || 0) / (limits.maxCallRate * 0.7)
     )
 
     // Weight the maximum stress component more heavily
@@ -81,19 +100,162 @@ const getStressLevel = memoize(
   }
 )
 
-// Calculate breathing rate based on stress level
-const calculateBreathingRate = (stress: number): number => {
-  if (stress >= BREATHING.STRESS.CRITICAL) {
-    return BREATHING.RATES.RECOVERY
+// Calculate breathing rate based on stress level - `cfg` was a direct
+// BREATHING.RATES/BREATHING.STRESS.CRITICAL read, now the live (possibly
+// user-overridden) breathing config off QuantumState.
+const calculateBreathingRate = (
+  stress: number,
+  cfg: CyreConfig['breathing']
+): number => {
+  if (stress >= cfg.stress.critical) {
+    return cfg.rates.recovery
   }
 
   // Exponential rate adjustment based on stress
   const stressFactor = Math.exp(stress) - 1
   return Math.max(
-    BREATHING.RATES.MIN,
-    Math.min(BREATHING.RATES.MAX, BREATHING.RATES.BASE * (1 + stressFactor))
+    cfg.rates.min,
+    Math.min(cfg.rates.max, cfg.rates.base * (1 + stressFactor))
   )
 }
+
+// Clamp a numeric override into a sane range instead of accepting anything
+// - a stress threshold above 1 or a negative rate would silently break the
+// breathing system's math elsewhere. Falls back to `fallback` (the current/
+// default value) and warns rather than throwing, matching how the rest of
+// this module reports problems.
+const clampNumber = (
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+  label: string
+): number => {
+  if (value === undefined) return fallback
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    sensor.warn(
+      `Ignoring invalid cyre.init() config value for ${label}: ${value}`
+    )
+    return fallback
+  }
+  if (value < min || value > max) {
+    sensor.warn(
+      `cyre.init() config value for ${label} (${value}) outside allowed range [${min}, ${max}] - clamped`
+    )
+    return Math.min(max, Math.max(min, value))
+  }
+  return value
+}
+
+// Merge a user-supplied config over the current (already-defaulted) config,
+// field by field, with light validation - never lets a malformed override
+// corrupt the breathing/timing math the rest of this file depends on.
+const mergeConfig = (
+  current: CyreConfig,
+  userConfig?: CyreUserConfig
+): CyreConfig => ({
+  breathing: {
+    rates: {
+      min: clampNumber(
+        userConfig?.breathing?.rates?.min,
+        current.breathing.rates.min,
+        1,
+        60_000,
+        'breathing.rates.min'
+      ),
+      base: clampNumber(
+        userConfig?.breathing?.rates?.base,
+        current.breathing.rates.base,
+        1,
+        60_000,
+        'breathing.rates.base'
+      ),
+      max: clampNumber(
+        userConfig?.breathing?.rates?.max,
+        current.breathing.rates.max,
+        1,
+        60_000,
+        'breathing.rates.max'
+      ),
+      recovery: clampNumber(
+        userConfig?.breathing?.rates?.recovery,
+        current.breathing.rates.recovery,
+        1,
+        60_000,
+        'breathing.rates.recovery'
+      )
+    },
+    stress: {
+      low: clampNumber(
+        userConfig?.breathing?.stress?.low,
+        current.breathing.stress.low,
+        0,
+        1,
+        'breathing.stress.low'
+      ),
+      medium: clampNumber(
+        userConfig?.breathing?.stress?.medium,
+        current.breathing.stress.medium,
+        0,
+        1,
+        'breathing.stress.medium'
+      ),
+      high: clampNumber(
+        userConfig?.breathing?.stress?.high,
+        current.breathing.stress.high,
+        0,
+        1,
+        'breathing.stress.high'
+      ),
+      critical: clampNumber(
+        userConfig?.breathing?.stress?.critical,
+        current.breathing.stress.critical,
+        0,
+        1,
+        'breathing.stress.critical'
+      )
+    },
+    limits: {
+      maxCpu: clampNumber(
+        userConfig?.breathing?.limits?.maxCpu,
+        current.breathing.limits.maxCpu,
+        1,
+        100,
+        'breathing.limits.maxCpu'
+      ),
+      maxMemory: clampNumber(
+        userConfig?.breathing?.limits?.maxMemory,
+        current.breathing.limits.maxMemory,
+        1,
+        100,
+        'breathing.limits.maxMemory'
+      ),
+      maxEventLoop: clampNumber(
+        userConfig?.breathing?.limits?.maxEventLoop,
+        current.breathing.limits.maxEventLoop,
+        1,
+        60_000,
+        'breathing.limits.maxEventLoop'
+      ),
+      maxCallRate: clampNumber(
+        userConfig?.breathing?.limits?.maxCallRate,
+        current.breathing.limits.maxCallRate,
+        1,
+        1_000_000,
+        'breathing.limits.maxCallRate'
+      )
+    }
+  },
+  timing: {
+    recuperation: clampNumber(
+      userConfig?.timing?.recuperation,
+      current.timing.recuperation,
+      100,
+      24 * 60 * 60 * 1000,
+      'timing.recuperation'
+    )
+  }
+})
 
 /**
  * Compute system flags based on current state
@@ -206,7 +368,11 @@ export const metricsState = {
 
     // Recalculate stress when system or performance metrics change
     if (update.system || update.performance) {
-      next.stress = getStressLevel(next.system, next.performance)
+      next.stress = getStressLevel(
+        next.system,
+        next.performance,
+        next.config.breathing.limits
+      )
     }
 
     // Recompute flags whenever state changes
@@ -250,11 +416,18 @@ export const metricsState = {
     try {
       initializeQuantumStore()
       const current = metricsStore.get('quantum')!
-      const stress = getStressLevel(metrics, current.performance)
+      const stress = getStressLevel(
+        metrics,
+        current.performance,
+        current.config.breathing.limits
+      )
       const now = Date.now()
 
       // Calculate new breathing rate based on stress
-      const newRate = calculateBreathingRate(stress.combined)
+      const newRate = calculateBreathingRate(
+        stress.combined,
+        current.config.breathing
+      )
 
       const breathing: BreathingState = {
         ...current.breathing,
@@ -263,9 +436,12 @@ export const metricsState = {
         stress: stress.combined,
         currentRate: newRate,
         nextBreathDue: now + newRate,
-        isRecuperating: stress.combined > BREATHING.STRESS.HIGH,
+        isRecuperating: stress.combined > current.config.breathing.stress.high,
         recuperationDepth: Math.min(1, stress.combined),
-        pattern: stress.combined > BREATHING.STRESS.HIGH ? 'RECOVERY' : 'NORMAL'
+        pattern:
+          stress.combined > current.config.breathing.stress.high
+            ? 'RECOVERY'
+            : 'NORMAL'
       }
 
       // BREATHING AUTHORITY: Set system flags based on evaluation
@@ -342,12 +518,17 @@ export const metricsState = {
   },
 
   /**
-   * Initialize the system
+   * Initialize the system - optionally accepts a user config
+   * (cyre.init(userConfig)) merged over the current/default config
+   * before the rest of the system (breathing, TimeKeeper) comes online,
+   * so everything reads live-configured values from the first tick.
    */
-  init: (): void => {
+  init: (userConfig?: CyreUserConfig): void => {
     try {
       initializeQuantumStore()
-      metricsState.update({_init: true})
+      const current = metricsStore.get('quantum')!
+      const config = mergeConfig(current.config, userConfig)
+      metricsState.update({_init: true, config})
       sensor.debug(
         'Cyre Metrics State online',
         'metrics-state',
@@ -385,7 +566,7 @@ export const metricsState = {
     const state = metricsStore.get('quantum') || defaultMetrics
     return (
       !state.breathing.isRecuperating &&
-      state.stress.combined < BREATHING.STRESS.HIGH
+      state.stress.combined < state.config.breathing.stress.high
     )
   },
 
@@ -400,7 +581,7 @@ export const metricsState = {
     }
 
     return (
-      state.stress.combined < BREATHING.STRESS.HIGH ||
+      state.stress.combined < state.config.breathing.stress.high ||
       priority === 'critical' ||
       priority === 'high'
     )
@@ -456,16 +637,16 @@ export const metricsState = {
       nextBreathDue: breathing.nextBreathDue,
       recuperationDepth: breathing.recuperationDepth,
       stressThresholds: {
-        low: BREATHING.STRESS.LOW,
-        medium: BREATHING.STRESS.MEDIUM,
-        high: BREATHING.STRESS.HIGH,
-        critical: BREATHING.STRESS.CRITICAL
+        low: state.config.breathing.stress.low,
+        medium: state.config.breathing.stress.medium,
+        high: state.config.breathing.stress.high,
+        critical: state.config.breathing.stress.critical
       },
       rateRange: {
-        min: BREATHING.RATES.MIN,
-        base: BREATHING.RATES.BASE,
-        max: BREATHING.RATES.MAX,
-        recovery: BREATHING.RATES.RECOVERY
+        min: state.config.breathing.rates.min,
+        base: state.config.breathing.rates.base,
+        max: state.config.breathing.rates.max,
+        recovery: state.config.breathing.rates.recovery
       }
     }
   },
@@ -530,7 +711,15 @@ export const metricsState = {
           channels: io.getAll().length,
           subscribers: subscribers.getAll().length,
           timeline: timeline.getAll().length,
-          activeFormations: state.activeFormations
+          activeFormations: state.activeFormations,
+          // scheduleState/orchestrationState are domain-level registries
+          // that sit alongside the shared TimeKeeper timeline (see
+          // context/schedule-state.ts, context/orchestration-state.ts) -
+          // without these, system-wide metrics only ever showed raw timer
+          // counts and had no idea scheduled tasks or orchestrations
+          // existed at all
+          scheduledTasks: scheduleState.tasks.size(),
+          orchestrations: orchestrationState.runtimes.size()
         },
         flags: {
           canCall: state.flags.canCall,
@@ -617,6 +806,13 @@ export const metricsState = {
             detectChanges: channel.detectChanges
           }
         }))
+
+        // Same domain-level registries surfaced in getMetrics()'s
+        // stores.scheduledTasks/orchestrations above, kept alongside the
+        // channels list here since exportMetrics() is the "give me
+        // everything registered" view
+        result.scheduledTasks = scheduleState.tasks.size()
+        result.orchestrations = orchestrationState.runtimes.size()
       }
 
       result.timestamp = Date.now()
@@ -640,7 +836,13 @@ export const metricsState = {
   },
 
   /**
-   * Soft clear: Reset runtime metrics, keep init/identity
+   * Soft clear: Reset runtime metrics, keep init/identity/config
+   *
+   * `config` (the user's cyre.init(userConfig) overrides) is preserved
+   * alongside _init/_isLocked/_shutdown - a soft clear() is meant to wipe
+   * accumulated runtime metrics/breathing/stress state, not a deployment's
+   * tuned breathing/timing settings. Only the hard reset() below drops
+   * back to defaultConfig.
    */
   clear: (): void => {
     try {
@@ -650,6 +852,7 @@ export const metricsState = {
         _init: current._init,
         _isLocked: current._isLocked,
         _shutdown: current._shutdown,
+        config: current.config,
         lastUpdate: Date.now()
       })
     } catch (error) {
@@ -662,43 +865,56 @@ export const metricsState = {
 // Export type for external use
 export type {MetricsState, StateKey}
 
-/**
- * Calculate system stress from current metrics
- */
-export const calculateSystemStress = async (): Promise<number> => {
-  try {
-    // Simple stress calculation based on available metrics
-    const callRateStress = 0.1 // Default baseline stress
-    const errorRateStress = 0.1 // Default baseline stress
-    const uptimeStress = 0.1 // Default baseline stress
-
-    // Combined stress calculation
-    const combinedStress = Math.min(
-      callRateStress * 0.5 + errorRateStress * 0.4 + uptimeStress * 0.1,
-      1
-    )
-
-    return combinedStress
-  } catch (error) {
-    console.error(`Stress calculation failed: ${error}`)
-    return 0.1 // Default low stress on error
-  }
-}
+// Last time performance.callsPerSecond was computed - kept as module-local
+// bookkeeping (same reasoning as system-monitor.ts's own previous-sample
+// fields) rather than overloading performance.lastCallTimestamp, whose
+// existing meaning is "timestamp of the last individual call", not "last
+// time the call-rate window was sampled".
+let lastPerformanceSampleTime = Date.now()
 
 /**
- * Update breathing system with current system metrics - called by breathing interval
+ * Update breathing system with REAL system metrics - called by the
+ * breathing interval (app.ts's initializeBreathing(), once per second).
+ *
+ * This used to feed updateBreathingState() hardcoded cpu:0/memory:0/
+ * eventLoop:0 and a fixed ~0.1 baseline stress no matter what the process
+ * was actually doing, so recuperation could never trigger from real load.
+ * Real readings now come from two places designed to stay cheap on the
+ * call-per-call hot path:
+ *  - context/system-monitor.ts samples cpu%/heap%/event-loop lag - all
+ *    cheap enough to run here, once a second.
+ *  - context/state.ts's callTracker is a bare counter incremented once per
+ *    cyre.call() (see app.ts) and only ever read+reset here, so call-rate
+ *    stress is now real without adding per-call overhead.
  */
 export const updateBreathingFromMetrics = async (): Promise<void> => {
   try {
-    const stress = await calculateSystemStress()
+    const metrics = await systemMonitor.sample()
 
-    // Update breathing state with system metrics - breathing has authority
-    metricsState.updateBreathingState({
-      cpu: 0, // Would get from actual system metrics
-      memory: 0, // Would get from actual system metrics
-      eventLoop: 0, // Would get from actual system metrics
-      isOverloaded: stress > BREATHING.STRESS.HIGH
+    const now = Date.now()
+    const elapsedSeconds = Math.max(
+      0.001,
+      (now - lastPerformanceSampleTime) / 1000
+    )
+    const calls = callTracker.sampleAndReset()
+    const callsPerSecond = calls / elapsedSeconds
+    lastPerformanceSampleTime = now
+
+    const current = metricsState.get()
+    metricsState.update({
+      performance: {
+        ...current.performance,
+        callsTotal: current.performance.callsTotal + calls,
+        callsPerSecond,
+        lastCallTimestamp:
+          calls > 0 ? now : current.performance.lastCallTimestamp
+      }
     })
+
+    // Breathing has authority over system/stress/recuperation flags.
+    // updateBreathingState() reads performance.callsPerSecond fresh off
+    // the store, so the performance write above has to land first.
+    metricsState.updateBreathingState(metrics)
   } catch (error) {
     // Don't log error every second - just use console.error
     sensor.error(`Breathing update failed: ${error}`)
