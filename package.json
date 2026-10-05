@@ -1,6 +1,6 @@
 {
   "name": "cyre",
-  "version": "4.6.8",
+  "version": "4.7.0",
   "author": "Cyre Team",
   "repository": {
     "type": "git",
@@ -70,7 +70,7 @@
     "benchmark:speed": "tsx demo/speed-test-demo.ts",
     "dev": "tsx scripts/cyre-server.ts",
     "prepublishOnly": "pnpm test && pnpm run build:all",
-    "publish": "npm publish --access public --registry https://registry.npmjs.org/"
+    "release": "npm publish --access public --registry https://registry.npmjs.org/"
   },
   "sideEffects": false,
   "type": "module",
