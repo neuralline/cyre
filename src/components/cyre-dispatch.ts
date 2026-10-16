@@ -73,6 +73,32 @@ const followIntraLink = async (
   }
 }
 
+// Race a handler-execution promise against a timeout, and ALWAYS clear the
+// timeout once either side settles. FIX (v4.7.2): every multi-handler
+// strategy below used a bare Promise.race([work, new Promise(setTimeout)])
+// that never cleared its timer - so each parallel/sequential/waterfall/race
+// dispatch left a live 10-15s timer behind it, even when the handlers
+// finished in microseconds. Under load that was one pending timer per call
+// (100k calls = 100k live timers), and it kept Node processes alive for up
+// to dispatchTimeout after their last call. A timeout <= 0 means no limit.
+const withTimeout = <T>(
+  work: Promise<T>,
+  timeout: number,
+  label: string
+): Promise<T> => {
+  if (!(timeout > 0)) return work
+
+  let handle: ReturnType<typeof setTimeout> | undefined
+  const timer = new Promise<never>((_, reject) => {
+    handle = setTimeout(
+      () => reject(new Error(`${label} timeout after ${timeout}ms`)),
+      timeout
+    )
+  })
+
+  return Promise.race([work, timer]).finally(() => clearTimeout(handle))
+}
+
 // A per-process monotonic counter for correlationId's uniqueness suffix -
 // cheaper than Math.random().toString(36).slice(2, 9) on every single
 // dispatch (correlationId is currently write-only: stored in payload
@@ -94,6 +120,21 @@ export const useDispatch = async (
   try {
     // Get handlers using array-based storage
     const handlers = getHandlers(action.id)
+
+    // State channel with nobody listening: holding the value IS the job -
+    // store it (req, and res so existing cyre.get(id).res.payload readers
+    // see it too) and answer with it, no "no subscriber" error
+    if (handlers.length === 0 && action._isState) {
+      const value = payload !== undefined ? payload : action.payload
+      payloadState.setReq(action.id, value, correlationId, action._history)
+      const stateResponse: CyreResponse = {
+        ok: true,
+        payload: value,
+        message: MSG.OPERATION_SUCCESSFUL
+      }
+      payloadState.setRes(action.id, stateResponse, correlationId)
+      return stateResponse
+    }
 
     if (handlers.length === 0) {
       const error = `${MSG.DISPATCH_NO_SUBSCRIBER} ${action.id}`
@@ -124,7 +165,19 @@ export const useDispatch = async (
     }
 
     // STEP 2: Execute handlers based on strategy - FIXED ROUTING
-    const executionOperator = action._executionOperator || 'single'
+    // handlers.length is the source of truth for whether a channel is
+    // multi-handler. The cached _executionOperator (cyre-on.ts) can be
+    // stale - e.g. a channel re-registered via cyre.action() after its
+    // handlers were added - and a stale 'single' used to silently run only
+    // handlers[0] and drop the rest. One comparison, so it stays on the hot
+    // path as a safety net behind cyre-actions.ts's re-optimization.
+    let executionOperator = action._executionOperator || 'single'
+    if (executionOperator === 'single' && handlers.length > 1) {
+      executionOperator =
+        action.dispatch && action.dispatch !== 'single'
+          ? action.dispatch
+          : 'parallel'
+    }
     let response: CyreResponse
 
     switch (executionOperator) {
@@ -361,19 +414,11 @@ const executeWaterfallHandlers = async (
       return {currentPayload, successfulHandlers, handlerErrors}
     }
 
-    const waterfallOutcome =
-      timeout > 0
-        ? await Promise.race([
-            executeWaterfall(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => {
-                reject(
-                  new Error(`Waterfall execution timeout after ${timeout}ms`)
-                )
-              }, timeout)
-            )
-          ])
-        : await executeWaterfall()
+    const waterfallOutcome = await withTimeout(
+      executeWaterfall(),
+      timeout,
+      'Waterfall execution'
+    )
 
     const {currentPayload, successfulHandlers, handlerErrors} = waterfallOutcome
     const executionTime = performance.now() - startTime
@@ -444,23 +489,11 @@ const executeParallelHandlers = async (
   const collectStrategy = action._collectStrategy || 'last'
 
   try {
-    const executeWithTimeout =
-      timeout > 0
-        ? Promise.race([
-            Promise.allSettled(handlers.map(h => h(payload))),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Parallel execution timeout after ${timeout}ms`)
-                  ),
-                timeout
-              )
-            )
-          ])
-        : Promise.allSettled(handlers.map(h => h(payload)))
-
-    const results = await executeWithTimeout
+    const results = await withTimeout(
+      Promise.allSettled(handlers.map(h => h(payload))),
+      timeout,
+      'Parallel execution'
+    )
     const executionTime = performance.now() - startTime
 
     const successful = results.filter(r => r.status === 'fulfilled')
@@ -590,21 +623,11 @@ const executeSequentialHandlers = async (
       return results
     }
 
-    const finalResults =
-      timeout > 0
-        ? await Promise.race([
-            executeSequentialWithTimeout(),
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Sequential execution timeout after ${timeout}ms`)
-                  ),
-                timeout
-              )
-            )
-          ])
-        : await executeSequentialWithTimeout()
+    await withTimeout(
+      executeSequentialWithTimeout(),
+      timeout,
+      'Sequential execution'
+    )
 
     const executionTime = performance.now() - startTime
 
@@ -691,21 +714,7 @@ const executeRaceHandlers = async (
   try {
     const racePromise = Promise.race(handlers.map(h => h(payload)))
 
-    const result =
-      timeout > 0
-        ? await Promise.race([
-            racePromise,
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(
-                    new Error(`Race execution timeout after ${timeout}ms`)
-                  ),
-                timeout
-              )
-            )
-          ])
-        : await racePromise
+    const result = await withTimeout(racePromise, timeout, 'Race execution')
 
     const executionTime = performance.now() - startTime
 

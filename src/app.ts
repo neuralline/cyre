@@ -28,6 +28,7 @@ import {orchestration} from './orchestration/orchestration-engine'
 
 import {schedule} from './components/cyre-schedule'
 import {useDispatch} from './components/cyre-dispatch'
+import {cloudState} from './context/cloud-state'
 
 /*
     Neural Line
@@ -151,6 +152,12 @@ export interface CyreInstance {
    *  only populated for a channel registered with `history` above the
    *  default 1 (or empty when keepPayload is false). */
   getHistory: (id: string) => ActionPayload[]
+  /** The channel's current value - the latest request payload it was
+   *  called with (after its talents: schema/transform/selector), or its
+   *  registered default `payload` before the first call. The typed read
+   *  for a `state: true` channel; works on any channel that keeps its
+   *  payload (undefined for keepPayload: false). */
+  value: <T = ActionPayload>(id: string) => T | undefined
 
   // NEW: Dual payload system access
   //payloadState
@@ -160,7 +167,7 @@ export interface CyreInstance {
   resume: (id?: string) => void
   lock: () => {ok: boolean; message: string; payload: null}
   unlock: () => {ok: boolean; message: string; payload: null}
-  shutdown: () => void
+  shutdown: (options?: {readonly exit?: boolean}) => void
   status: () => boolean
 
   // Metrics API
@@ -217,7 +224,9 @@ const init = async (
     const errorMessage = error instanceof Error ? error.message : String(error)
     sensor.critical(`Cyre failed to initialize : ${errorMessage}`)
     sensor.critical('system', errorMessage, 'system-initialization')
-    shutdown()
+    // Back to a clean, uninitialised state - never shutdown() here: that exits the host process (with code 0), so a
+    // failed init on a server used to take the whole server down silently. The caller sees ok: false and decides.
+    reset()
     return {ok: false, payload: null, message: errorMessage}
   }
 }
@@ -351,8 +360,16 @@ export const call = async (
       }
     }
 
-    // Get request payload - use payload from call or action default
-    const req = payload !== undefined ? payload : action.payload
+    // Get request payload - use payload from call or action default. A
+    // state channel called with no payload re-broadcasts its CURRENT value
+    // (falling back to the default only before its first call) instead of
+    // resetting itself to the registered default.
+    const req =
+      payload !== undefined
+        ? payload
+        : action._isState
+          ? (payloadState.getReq(action.id) ?? action.payload)
+          : action.payload
 
     // Fast path detection
     if (action._hasFastPath) {
@@ -622,6 +639,11 @@ const forget = (id: string): boolean => {
   }
 
   try {
+    // A useCloud source owning this channel (see hooks/use-cloud.ts) is
+    // disconnected first, so nothing keeps emitting into a channel that's
+    // about to disappear. teardown() drops its cloudState entry itself.
+    cloudState.get(id)?.control.teardown()
+
     const actionRemoved = io.forget(id)
     const subscriberRemoved = subscribers.forget(id)
     // Route through TimeKeeper rather than clearing the timeline map
@@ -694,7 +716,11 @@ const resetPayload = (id: string): boolean => {
   return true
 }
 
-const shutdown = (): void => {
+/**
+ * cyre.shutdown() - reset() and then exit the host process (Node), as documented. Pass {exit: false} to stop Cyre
+ * without ending the process (a server that keeps running, tests, an embedding app).
+ */
+const shutdown = (options?: {readonly exit?: boolean}): void => {
   try {
     sensor.sys('system', 'Initiating system shutdown')
     sensor.debug('system', 'critical', 'system-shutdown')
@@ -704,7 +730,7 @@ const shutdown = (): void => {
     // step on top of a plain reset().
     reset()
     sensor.debug('System offline!')
-    if (typeof process !== 'undefined' && process.exit) {
+    if (options?.exit !== false && typeof process !== 'undefined' && typeof process.exit === 'function') {
       process.exit(0)
     }
   } catch (error) {
@@ -730,6 +756,9 @@ const clearDomainState = (): void => {
   // TimeKeeper.reset() had already destroyed.
   schedule.reset()
   orchestration.reset()
+  // Disconnect every useCloud source (live sockets, poll timers, in-flight
+  // fetches) while io/TimeKeeper are still intact - same reasoning as above
+  cloudState.reset()
 
   io.clear()
   subscribers.clear()
@@ -830,6 +859,8 @@ export const cyre: CyreInstance = Object.freeze({
     payloadState.hasChanged(id, payload),
   getPrevious: (id: string) => payloadState.getPrevious(id),
   getHistory: (id: string) => payloadState.getHistory(id),
+  value: <T = ActionPayload>(id: string): T | undefined =>
+    payloadState.getReq(id) as T | undefined,
 
   // Control methods with metrics
   pause: (id?: string) => {
@@ -843,6 +874,10 @@ export const cyre: CyreInstance = Object.freeze({
         schedule.pause(id)
       } else if (orchestration.get(id)) {
         orchestration.pause(id)
+      } else if (cloudState.get(id)) {
+        // useCloud source - disconnects (and cancels in-flight requests),
+        // not just a timer pause: live sockets don't live in the timeline
+        cloudState.get(id)!.control.pause()
       } else {
         TimeKeeper.pause(id)
       }
@@ -850,8 +885,10 @@ export const cyre: CyreInstance = Object.freeze({
       // No id: pause everything. Every schedule/orchestration timer
       // already lives in the same shared TimeKeeper timeline as regular
       // channel timers (see context/state.ts), so this alone covers all
-      // three - nothing extra to delegate to here.
+      // three. useCloud sources are the exception - a live socket isn't a
+      // timer - so they're paused explicitly.
       TimeKeeper.pause()
+      cloudState.getAll().forEach(source => source.control.pause())
     }
     sensor.debug(id || 'system', 'info', 'system-pause')
   },
@@ -862,11 +899,17 @@ export const cyre: CyreInstance = Object.freeze({
         schedule.resume(id)
       } else if (orchestration.get(id)) {
         orchestration.resume(id)
+      } else if (cloudState.get(id)) {
+        cloudState.get(id)!.control.resume()
       } else {
         TimeKeeper.resume(id)
       }
     } else {
       TimeKeeper.resume()
+      cloudState
+        .getAll()
+        .filter(source => source.status === 'paused')
+        .forEach(source => source.control.resume())
     }
     sensor.debug(id || 'system', 'info', 'system-resume')
   },

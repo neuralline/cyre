@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased (4.8.0)
+
+### Added
+
+- **State channels** - `cyre.action({id, state: true})` marks a channel that holds a value. Called with no subscribers it
+  stores the payload and resolves `{ok: true, payload}`, with no "no subscriber" error. Called with no payload it
+  re-broadcasts its current value. Subscribers still run as usual. Read it with the typed **`cyre.value<T>(id)`**, also
+  available as `useCyre(...).value()`. This replaces the `cyre.on(id, p => p)` identity-handler workaround. It cannot be
+  combined with `keepPayload: false`.
+- **`useCloud`** - live and polled cloud data feeding channels: `poll()` and `supabaseLive()` sources, plus custom
+  sources. The client can be a getter, channel names and filters can be getters, and `resync` can be a function. See
+  `claude/use-cloud-guide.md`.
+
+### Fixed
+
+- The quartz engine no longer busy-loops while idle (it used ~34% CPU with zero channels).
+- Multi-handler dispatch clears its timeout timer (it left one live timer per call).
+- Memory stress reads real memory pressure instead of `heapUsed / heapTotal` (which pinned it at 1.0).
+- Registering or re-registering a channel after its handlers no longer drops all but the first handler.
+- A failed `cyre.init()` no longer exits the host process: it used to call `shutdown()`, which runs
+  `process.exit(0)`, so a server whose Cyre failed to start stopped silently with a success code. It now resets and
+  returns `{ok: false}`.
+- `cyre.shutdown({exit: false})` stops Cyre without ending the process. Plain `cyre.shutdown()` still exits, as
+  documented.
+
 ## 4.0.0 (2025-05-19)
 
 ### Breaking Changes

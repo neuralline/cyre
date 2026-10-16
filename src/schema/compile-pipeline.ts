@@ -130,6 +130,7 @@ export const compileAction = (
     _hasScheduling: hasScheduling,
     _keepPayload: keepPayload,
     _history: historyLimit,
+    _isState: compiledAction.state === true,
     _pipeline: compiledPipeline // Now contains function references, not strings
   })
 
@@ -263,6 +264,12 @@ const validateCrossRules = (
   if (action.keepPayload === false && action.detectChanges) {
     errors.push(
       'keepPayload: false cannot be combined with detectChanges - detectChanges compares the incoming payload against the previous one stored in payload-state, and keepPayload: false turns that storage off. Drop detectChanges, or leave keepPayload on for this channel.'
+    )
+  }
+
+  if (action.state === true && action.keepPayload === false) {
+    errors.push(
+      'state: true cannot be combined with keepPayload: false - a state channel exists to hold its value, and keepPayload: false turns that storage off'
     )
   }
 
