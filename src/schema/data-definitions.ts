@@ -402,6 +402,28 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
     return {ok: true, data: value}
   },
 
+  // Boolean validation - no operator, resolved into _isState at compile
+  // time and consulted only by cyre-dispatch.ts's zero-subscriber branch,
+  // so a state channel stays on the fast path
+  state: (value: any): DataDefResult => {
+    if (value === undefined) return {ok: true, data: undefined}
+
+    if (!isBoolean(value)) {
+      return {
+        ok: false,
+        error: `state must be true or false, but received ${describeValue(
+          value
+        )}`,
+        suggestions: [
+          'Use state: true for a channel that holds a value - read it with cyre.value(id)',
+          'A state channel can be called with no subscribers'
+        ]
+      }
+    }
+
+    return {ok: true, data: value}
+  },
+
   // Required validation
   required: (value: any): DataDefResult => {
     if (value === undefined) return {ok: true, data: undefined}
@@ -639,6 +661,7 @@ export const dataDefinitions: Record<string, (value: any) => DataDefResult> = {
   _hasFastPath: (value: any): DataDefResult => ({ok: true, data: value}),
   _keepPayload: (value: any): DataDefResult => ({ok: true, data: value}),
   _history: (value: any): DataDefResult => ({ok: true, data: value}),
+  _isState: (value: any): DataDefResult => ({ok: true, data: value}),
   _throttleCount: (value: any): DataDefResult => ({ok: true, data: value}),
   _debounceCount: (value: any): DataDefResult => ({ok: true, data: value}),
   _bufferCount: (value: any): DataDefResult => ({ok: true, data: value}),

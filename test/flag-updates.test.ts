@@ -91,8 +91,9 @@ describe('Flag Updates - System State Changes', () => {
       expect(metricsState.canRegister().allowed).toBe(true)
       expect(metricsState.isOperational().operational).toBe(true)
 
-      // Shutdown system - this will reset the system, so we check the reset state
-      cyre.shutdown()
+      // Shutdown system - this will reset the system, so we check the reset state ({exit: false}: keep the test
+      // runner's process alive)
+      cyre.shutdown({exit: false})
 
       // After shutdown (which calls reset), should be back to default state
       expect(metricsState.canCall().allowed).toBe(false)

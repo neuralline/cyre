@@ -18,6 +18,7 @@ import {memoize} from '../libs/utils'
 import {io, subscribers, timeline, callTracker} from './state'
 import {scheduleState} from './schedule-state'
 import {orchestrationState} from './orchestration-state'
+import {cloudState} from './cloud-state'
 import {createStore} from './create-store'
 import {systemMonitor} from './system-monitor'
 import {metricsStream} from './metrics-stream'
@@ -749,7 +750,10 @@ export const metricsState = {
           // counts and had no idea scheduled tasks or orchestrations
           // existed at all
           scheduledTasks: scheduleState.tasks.size(),
-          orchestrations: orchestrationState.runtimes.size()
+          orchestrations: orchestrationState.runtimes.size(),
+          // useCloud sources (live/polled cloud connections) - see
+          // context/cloud-state.ts
+          cloudSources: cloudState.size()
         },
         flags: {
           canCall: state.flags.canCall,

@@ -12,8 +12,8 @@ import {metricsState} from '../context/metrics-state'
 
       Rock-solid timer system, built for Node servers:
       - Centralized timeline as single source of truth
-      - Quartz engine: tight-loop polling while fast-recurring timers are
-        active, adaptive sleep otherwise - efficient by default
+      - Quartz engine: sleeps until the nearest due timer, tight-loop
+        polling only in the final ~1ms before one is due - efficient by default
       - Drift compensation for accuracy
       - Interval + precision grouping for fast lookups
       - Bounded sleep windows so very large intervals just take a few
@@ -136,6 +136,11 @@ const HIGH_PRECISION_THRESHOLD = 1016 // ms
 // busy-polls) while guaranteeing very large intervals never overflow
 // setTimeout and are still checked on a bounded cadence
 const QUARTZ_MIN_POLL = 10 // ms
+
+// A timer due within this many ms gets an immediate (setImmediate) re-check
+// instead of a setTimeout sleep - the only case where tight-loop polling is
+// still worth its cost (see scheduleNextTick below)
+const QUARTZ_IMMEDIATE_WINDOW = 1 // ms
 
 // Was a module-load-time constant (TIMING.RECUPERATION), captured once
 // before cyre.init(userConfig) could ever run. Now a live read off
@@ -308,21 +313,22 @@ const QuartzEngine = {
     this.scheduleNextTick(systemState, earliestNextExecution)
   },
 
-  // Decides how soon to check again: tight loop while a fast-recurring
-  // timer is active, otherwise sleep until the nearest due timer (bounded
-  // so it stays efficient and responsive to newly added work).
+  // Decides how soon to check again: sleep until the nearest due timer
+  // (bounded by quartzMaxPoll() so it stays responsive to newly added
+  // work), and only re-check immediately when that timer is due within
+  // QUARTZ_IMMEDIATE_WINDOW ms - setTimeout can't resolve below ~1ms, and
+  // scheduleNext()'s drift compensation absorbs the remaining jitter.
+  //
+  // FIX (v4.7.2): this used to drop into a permanent setImmediate tight
+  // loop whenever ANY timer under HIGH_PRECISION_THRESHOLD (1016ms) was
+  // active - and init()'s own 1000ms 'system-breathing' timer always is,
+  // so an idle Cyre with zero channels burned ~1/3 of a CPU core forever
+  // (and every sub-second debounce window did the same). That spin also
+  // fed straight back into the breathing system's own CPU stress reading.
   scheduleNextTick(
     systemState: ReturnType<MetricsInterface['get']>,
     earliestNextExecution: number
   ): void {
-    const hasHighPrecisionActive =
-      (this.precisionGroups.get('high')?.size || 0) > 0
-
-    if (hasHighPrecisionActive) {
-      this.scheduleTick(0)
-      return
-    }
-
     if (earliestNextExecution === Infinity) {
       // Nothing scheduled - poll less often the more stressed the system is
       const idleStressFactor = 1 + (systemState.stress?.combined || 0)
@@ -331,11 +337,13 @@ const QuartzEngine = {
     }
 
     const rawDelay = earliestNextExecution - Date.now()
-    const boundedDelay = Math.min(
-      Math.max(rawDelay, QUARTZ_MIN_POLL),
-      quartzMaxPoll()
-    )
-    this.scheduleTick(boundedDelay)
+
+    if (rawDelay <= QUARTZ_IMMEDIATE_WINDOW) {
+      this.scheduleTick(0)
+      return
+    }
+
+    this.scheduleTick(Math.min(rawDelay, quartzMaxPoll()))
   },
 
   async executeTimer(timer: Timer, currentTime: number): Promise<void> {

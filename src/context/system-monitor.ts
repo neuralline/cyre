@@ -21,11 +21,12 @@ import type {SystemMetrics} from '../types/system'
         core count - Cyre's own dispatch path is single-threaded, so "is
         the main thread busy" is what actually matters for backpressure
         here, not aggregate multi-core system load.
-      - memory: heapUsed/heapTotal - a process-relative reading rather than
-        a system-wide one (which would need the 'os' module). Skipping
-        'os' keeps this file free of any Node-builtin import, so it stays
-        safe to include in the browser bundle - same reasoning behind
-        cyre-timekeeper.ts's TimerEnvironment feature checks below.
+      - memory: resident set size as a % of the memory this process can
+        still get (process.availableMemory()/constrainedMemory(), which
+        respect container limits) - see sampleMemoryPercent() below. No
+        'os' import needed, so this file stays free of any Node-builtin
+        import and safe to include in the browser bundle - same reasoning
+        behind cyre-timekeeper.ts's TimerEnvironment feature checks.
       - eventLoop: measured lag (ms) of a single setTimeout(fn, 0) round
         trip - the standard cheap proxy for "how backed up is the event
         loop/task queue right now". setTimeout over Node's setImmediate so
@@ -65,13 +66,44 @@ const sampleCpuPercent = (): number => {
   return Math.min(100, (cpuMs / elapsedMs) * 100)
 }
 
+// FIX (v4.7.2): this used to report heapUsed / heapTotal. V8 grows
+// heapTotal lazily, so that ratio sits at 70-95% on a perfectly healthy
+// process - against the default maxMemory limit it pinned memory stress at
+// 1.0 permanently (combined stress ~0.5 at idle, one CPU spike away from
+// recuperation). It now reports resident memory against what the process
+// can actually still get: availableMemory() (Node >= 20.13/22, already
+// respects container/cgroup limits), else constrainedMemory() (a cgroup
+// limit, when one is set), else 0 - "unknown" rather than a false alarm.
+// Both are plain `process` methods, so this file still needs no Node
+// builtin import and stays browser-safe.
 const sampleMemoryPercent = (): number => {
   if (!isNode || typeof process.memoryUsage !== 'function') return 0
 
-  const {heapUsed, heapTotal} = process.memoryUsage()
-  if (!heapTotal) return 0
+  const proc = process as NodeJS.Process & {
+    availableMemory?: () => number
+    constrainedMemory?: () => number | undefined
+  }
+  const rss =
+    typeof process.memoryUsage.rss === 'function'
+      ? process.memoryUsage.rss()
+      : process.memoryUsage().rss
 
-  return Math.min(100, (heapUsed / heapTotal) * 100)
+  const available =
+    typeof proc.availableMemory === 'function' ? proc.availableMemory() : 0
+  if (available > 0) {
+    return Math.min(100, (rss / (rss + available)) * 100)
+  }
+
+  const constrained =
+    typeof proc.constrainedMemory === 'function'
+      ? proc.constrainedMemory() || 0
+      : 0
+  // An unconstrained cgroup reports a huge sentinel (~2^63) - ignore it
+  if (constrained > 0 && constrained < Number.MAX_SAFE_INTEGER) {
+    return Math.min(100, (rss / constrained) * 100)
+  }
+
+  return 0
 }
 
 const sampleEventLoopLagMs = (): Promise<number> => {

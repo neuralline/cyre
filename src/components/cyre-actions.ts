@@ -8,6 +8,7 @@ import {io, stores} from '../context/state'
 import {isValidPath} from '../libs/utils'
 import {compileAction} from '../schema/compile-pipeline'
 import {pathEngine} from '../schema/path-engine'
+import {optimizeActionIfExists} from './cyre-on'
 
 /*
 
@@ -91,6 +92,15 @@ export const CyreActions = (action: IO): RegistrationResult => {
     try {
       // Store compiled action
       io.set(finalAction)
+
+      // compileAction() rebuilds the channel from the user's fields only, so
+      // the multi-handler execution config cyre-on.ts caches on the IO record
+      // (_executionOperator/_handlerCount/_errorStrategy/...) is lost here.
+      // FIX (v4.7.2): without re-deriving it, `cyre.on(a); cyre.on(b);
+      // cyre.action({id})` - or re-registering a channel that already has
+      // several handlers - left the channel on 'single' and silently ran
+      // only the first handler. No-op when the channel has no handlers yet.
+      optimizeActionIfExists(finalAction.id)
 
       // Keep the path engine's foreign-key index in sync with this
       // channel's current path. Always deindex first (a cheap no-op for a

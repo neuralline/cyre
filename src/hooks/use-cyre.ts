@@ -44,6 +44,8 @@ export interface CyreHook<TPayload = ActionPayload, TResponse = TPayload> {
 
   /** Get current channel configuration */
   get: () => IO | undefined
+  /** The channel's current value (latest request payload) - see cyre.value() */
+  value: () => TPayload | undefined
   /** Remove the channel */
   forget: () => boolean
 
@@ -305,6 +307,8 @@ export const useCyre = <TPayload = ActionPayload, TResponse = TPayload>(
         return undefined
       }
     },
+
+    value: () => cyre.value<TPayload>(channelId),
 
     forget: () => {
       try {

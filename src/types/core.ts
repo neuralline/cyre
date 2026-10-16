@@ -210,6 +210,14 @@ export interface IO {
    *  slot Cyre has always kept). 0 disables it. Ignored when keepPayload
    *  is false - there is nothing being stored to keep a history of. */
   history?: number
+  /** State channel: the channel's job is to HOLD a value. A call with no
+   *  subscribers stores the payload and resolves {ok: true, payload}
+   *  instead of logging "no subscriber"; subscribers, when there are any,
+   *  still run as usual. Read the current value with cyre.value<T>(id).
+   *  Replaces the "identity handler" workaround (cyre.on(id, p => p)) apps
+   *  used to keep a channel callable just so it could be read back.
+   *  Cannot be combined with keepPayload: false. */
+  state?: boolean
   /** Enable logging for this action */
   log?: boolean
   /** Priority level for execution during system stress */
@@ -280,6 +288,8 @@ export interface IO {
   /** Resolved history length (compile-pipeline.ts: 0 when _keepPayload is
    *  false, otherwise action.history ?? 1) */
   _history?: number
+  /** Resolved state flag (compile-pipeline.ts: state === true) */
+  _isState?: boolean
 
   // system fields
   _timestamp?: number //latest call to channel timestamp

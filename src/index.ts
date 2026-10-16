@@ -129,6 +129,8 @@ import {
   mostGated
 } from './hooks/use-metrics'
 import {sensor, LogLevel} from './components/sensor'
+import {useCloud} from './hooks/use-cloud'
+import {poll, supabaseLive} from './components/cyre-cloud'
 
 // Main exports with branch system
 export {
@@ -145,6 +147,9 @@ export {
   slowest,
   errorProne,
   mostGated, //channels most absorbed by throttle/debounce/buffer - see libs/metrics-analysis.ts
+  useCloud, //live/polled cloud data (Supabase Realtime, HTTP polling, custom SDKs) feeding channels
+  poll, //useCloud source: interval pull - URL or function (e.g. a Supabase query)
+  supabaseLive, //useCloud source: Supabase Realtime over your own client - no dependency
   //orchestration, //advanced task setup// not sure to expose this
   sensor, //utility logger function
   sensor as log, //utility logger function
@@ -157,6 +162,26 @@ export {
 // config or return type in their own code.
 export type {UseCyreConfig, CyreHook} from './hooks/use-cyre'
 export type {UseBranchConfig} from './hooks/use-branch'
+export type {
+  UseCloudConfig,
+  CloudHook,
+  CloudSource,
+  CloudContext,
+  CloudStatus,
+  CloudSnapshot,
+  CloudMeta,
+  CloudRoute,
+  CloudResync
+} from './types/cloud'
+export type {
+  PollOptions,
+  SupabaseLiveOptions,
+  SupabaseTableWatch,
+  SupabaseLikeClient,
+  SupabaseLikeChannel,
+  SupabaseClientInput,
+  LiveValue
+} from './components/cyre-cloud'
 export type {Branch, BranchConfig} from './types/hooks'
 
 // Types for the two hooks above
